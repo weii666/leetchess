@@ -1,0 +1,5 @@
+# 引擎 binary 与 NNUE 网路:由 fetch.sh 按需下载并校验,不进 git(DESIGN.md §4.1)。
+/pikafish
+/pikafish.nnue
+/*.7z
+/.extract/

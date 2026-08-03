@@ -1,0 +1,19 @@
+# Pikafish 引擎版本锁定 —— 唯一真相来源。
+# 这里任何一个值改变,所有判定表(books/)都必须重新产生。见 DESIGN.md §4.1。
+# 本档由 fetch.sh source,故为纯 shell 变量,勿加多余语法。
+
+# GitHub release
+PIKAFISH_RELEASE="Pikafish-2026-01-02"
+ARCHIVE_NAME="Pikafish.2026-01-02.7z"
+ARCHIVE_URL="https://github.com/official-pikafish/Pikafish/releases/download/Pikafish-2026-01-02/Pikafish.2026-01-02.7z"
+
+# 整包 sha256(涵盖 binary 与 nnue,两者一起验)
+ARCHIVE_SHA256="84257063905615919fb4ee6a70273a94843bb6ec04c45e3ac706098838bc1a49"
+
+# 抽取后单档 sha256
+NNUE_SHA256="c4026370d7516d9b0f668447f9ca1931241538bdc689cde6fec6a991ac4d5f77"
+
+# 各平台 binary sha256(压缩包内路径见 fetch.sh 的 platform mapping)
+BIN_MACOS_APPLE_SILICON_SHA256="58e859f6adb67c45b86a4a25388c521e3d69492911042a9aa500b2e6935baf63"
+BIN_LINUX_AVX2_SHA256="98b569626c1f49932d5f8b5571740fe75e1a28beaa75cfd2feda87db2773f8bc"
+BIN_LINUX_SSE41_POPCNT_SHA256="be780323c9d1bb03771d6a59f6ce8020970aaf97db245b9e1cebe3b9dcd792c9"
