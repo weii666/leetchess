@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>leetchess POC · 适情雅趣排局</title>
+<style>
+  :root {
+    --cell: 62px; --margin: 40px;
+    --board-w: calc(var(--cell) * 8 + var(--margin) * 2);
+    --board-h: calc(var(--cell) * 9 + var(--margin) * 2);
+    --line: #6b5433; --board-bg: #f0d9a8; --red: #c0392b; --black: #1c1c1c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #2b2b2b; color: #eee; display: flex; gap: 28px; flex-wrap: wrap; justify-content: center;
+  }
+  #board {
+    position: relative; width: var(--board-w); height: var(--board-h);
+    background: var(--board-bg); border: 2px solid var(--line); border-radius: 4px; flex: none;
+  }
+  #board svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .piece {
+    position: absolute; width: calc(var(--cell) * 0.86); height: calc(var(--cell) * 0.86);
+    transform: translate(-50%, -50%); border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: calc(var(--cell) * 0.5); font-weight: 700; cursor: default;
+    background: #f7ecd0; border: 2px solid #333; box-shadow: 0 1px 3px rgba(0,0,0,.4);
+    user-select: none;
+  }
+  .piece.red { color: var(--red); border-color: var(--red); }
+  .piece.black { color: var(--black); border-color: var(--black); }
+  .piece.selectable { cursor: pointer; }
+  .piece.selectable:hover { box-shadow: 0 0 0 3px rgba(46,134,222,.7); }
+  .piece.selected { box-shadow: 0 0 0 4px #2e86de; }
+  .dot {
+    position: absolute; width: 22px; height: 22px; transform: translate(-50%, -50%);
+    border-radius: 50%; background: rgba(46,134,222,.55); cursor: pointer; pointer-events: auto;
+  }
+  .dot.capture { background: none; border: 3px solid rgba(46,134,222,.85); width: calc(var(--cell) * 0.8); height: calc(var(--cell) * 0.8); }
+  #side { width: 300px; flex: none; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #aaa; font-size: 13px; margin-bottom: 16px; }
+  .status { padding: 12px 14px; border-radius: 8px; background: #3a3a3a; margin-bottom: 12px; font-size: 14px; line-height: 1.6; }
+  .status b { color: #ffd479; }
+  .banner { padding: 14px; border-radius: 8px; font-size: 16px; font-weight: 700; text-align: center; margin-bottom: 12px; }
+  .banner.red { background: #7d271f; color: #ffdcd8; }
+  .banner.black { background: #111; color: #ddd; }
+  .banner.think { background: #2c4a63; color: #cfe6ff; }
+  .signal { padding: 10px 14px; border-radius: 8px; font-size: 14px; font-weight: 600; margin-bottom: 12px; text-align: center; }
+  .signal.redwin { background: #2f5a34; color: #d6f5d8; }
+  .signal.blackwin { background: #6a2a24; color: #ffd6d0; }
+  .signal.neutral { background: #40454a; color: #c7ccd1; }
+  .signal .dtm { font-variant-numeric: tabular-nums; }
+  button { font-size: 14px; padding: 8px 14px; border-radius: 6px; border: none; background: #4a4a4a; color: #eee; cursor: pointer; }
+  button:hover { background: #5a5a5a; }
+  #moves { margin-top: 14px; font-size: 13px; color: #bbb; max-height: 260px; overflow-y: auto; }
+  #moves div { padding: 2px 0; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+  <div id="board"><svg id="grid" viewBox="0 0 561 622" preserveAspectRatio="none"></svg></div>
+
+  <div id="side">
+    <h1>leetchess POC</h1>
+    <div class="sub" id="meta">载入中…</div>
+    <div id="banner"></div>
+    <div class="signal neutral" id="signal">信号:未知中立</div>
+    <div class="status" id="status"></div>
+    <button id="reset">重来</button>
+    <div id="moves"></div>
+  </div>
+
+<script>
+const FILES = 9, RANKS = 10;
+const CELL = 62, MARGIN = 40;
+const NAMES = {
+  R:'俥', N:'傌', B:'相', A:'仕', C:'炮', P:'兵', K:'帥',
+  r:'車', n:'馬', b:'象', a:'士', c:'砲', p:'卒', k:'將',
+};
+const boardEl = document.getElementById('board');
+const bannerEl = document.getElementById('banner');
+const signalEl = document.getElementById('signal');
+const statusEl = document.getElementById('status');
+const movesEl = document.getElementById('moves');
+
+let START = null;          // /api/start 回传
+let board = [];            // board[rank][file] = 棋子字元 或 null
+let moves = [];            // 已走 UCI 序列
+let legal = [];            // 当前红方合法着
+let selected = null;       // 选中的 [rank,file]
+let busy = false;          // 引擎思考中 / 终局,锁住输入
+
+// ---- 座标:file a-i = 0..8(左→右);rank 0..9,红方底线 rank0 在下 ----
+const px = f => MARGIN + f * CELL;
+const py = r => MARGIN + (9 - r) * CELL;
+const sq2fr = s => [s.charCodeAt(0) - 97, +s[1]];        // 'f8' -> [file,rank]
+const fr2sq = (f, r) => String.fromCharCode(97 + f) + r;
+
+function parseFen(fen) {
+  const rows = fen.split(' ')[0].split('/');   // rows[0] = rank9
+  const b = Array.from({length: RANKS}, () => Array(FILES).fill(null));
+  rows.forEach((row, i) => {
+    const rank = 9 - i; let file = 0;
+    for (const ch of row) {
+      if (/\d/.test(ch)) file += +ch;
+      else { b[rank][file] = ch; file++; }
+    }
+  });
+  return b;
+}
+
+function applyMove(b, uci) {
+  const [ff, fr] = sq2fr(uci.slice(0, 2));
+  const [tf, tr] = sq2fr(uci.slice(2, 4));
+  b[tr][tf] = b[fr][ff];
+  b[fr][ff] = null;
+}
+
+function drawGrid() {
+  const svg = document.getElementById('grid');
+  const W = px(8), lines = [];
+  const X = f => px(f), Y = r => py(r);
+  // 横线 10 条
+  for (let r = 0; r < RANKS; r++) lines.push(`M${X(0)} ${Y(r)} H${X(8)}`);
+  // 竖线:两端整条,中间 8 条在河界断开
+  lines.push(`M${X(0)} ${Y(9)} V${Y(0)}`);
+  lines.push(`M${X(8)} ${Y(9)} V${Y(0)}`);
+  for (let f = 1; f < 8; f++) {
+    lines.push(`M${X(f)} ${Y(9)} V${Y(5)}`);
+    lines.push(`M${X(f)} ${Y(4)} V${Y(0)}`);
+  }
+  // 九宫斜线(上下各一个 X)
+  lines.push(`M${X(3)} ${Y(9)} L${X(5)} ${Y(7)}`);
+  lines.push(`M${X(5)} ${Y(9)} L${X(3)} ${Y(7)}`);
+  lines.push(`M${X(3)} ${Y(2)} L${X(5)} ${Y(0)}`);
+  lines.push(`M${X(5)} ${Y(2)} L${X(3)} ${Y(0)}`);
+  svg.setAttribute('viewBox', `0 0 ${W + MARGIN} ${py(0) + MARGIN}`);
+  svg.innerHTML = `<path d="${lines.join(' ')}" stroke="var(--line)" stroke-width="1.5" fill="none"/>`
+    + `<text x="${(X(1)+X(2))/2}" y="${(Y(5)+Y(4))/2+6}" fill="#8a6d3b" font-size="20" text-anchor="middle">楚河</text>`
+    + `<text x="${(X(6)+X(7))/2}" y="${(Y(5)+Y(4))/2+6}" fill="#8a6d3b" font-size="20" text-anchor="middle">汉界</text>`;
+}
+
+function render() {
+  boardEl.querySelectorAll('.piece, .dot').forEach(e => e.remove());
+  // 棋子
+  for (let r = 0; r < RANKS; r++) for (let f = 0; f < FILES; f++) {
+    const ch = board[r][f];
+    if (!ch) continue;
+    const isRed = ch === ch.toUpperCase();
+    const el = document.createElement('div');
+    el.className = 'piece ' + (isRed ? 'red' : 'black');
+    el.style.left = px(f) + 'px'; el.style.top = py(r) + 'px';
+    el.textContent = NAMES[ch];
+    // 仅在「红方回合、非终局、该子为红、且有合法着从此格出发」时可点
+    if (!busy && isRed && legal.some(m => m.startsWith(fr2sq(f, r)))) {
+      el.classList.add('selectable');
+      if (selected && selected[0] === r && selected[1] === f) el.classList.add('selected');
+      el.onclick = () => selectPiece(r, f);
+    }
+    boardEl.appendChild(el);
+  }
+  // 选中子的落点提示
+  if (selected && !busy) {
+    const from = fr2sq(selected[1], selected[0]);
+    legal.filter(m => m.startsWith(from)).forEach(m => {
+      const [tf, tr] = sq2fr(m.slice(2, 4));
+      const dot = document.createElement('div');
+      dot.className = 'dot' + (board[tr][tf] ? ' capture' : '');
+      dot.style.left = px(tf) + 'px'; dot.style.top = py(tr) + 'px';
+      dot.onclick = () => humanMove(m);
+      boardEl.appendChild(dot);
+    });
+  }
+}
+
+function selectPiece(r, f) {
+  selected = (selected && selected[0] === r && selected[1] === f) ? null : [r, f];
+  render();
+}
+
+function setBanner(text, cls) {
+  bannerEl.className = 'banner ' + (cls || '');
+  bannerEl.textContent = text || '';
+  bannerEl.style.display = text ? 'block' : 'none';
+}
+
+function renderMoves() {
+  movesEl.innerHTML = '';
+  for (let i = 0; i < moves.length; i += 2) {
+    const n = i / 2 + 1;
+    const red = moves[i], blk = moves[i + 1] || '';
+    const div = document.createElement('div');
+    div.textContent = `${n}. 红 ${red}    黑 ${blk}`;
+    movesEl.appendChild(div);
+  }
+  movesEl.scrollTop = movesEl.scrollHeight;
+}
+
+async function api(path) {
+  const r = await fetch(path);
+  const d = await r.json();
+  if (d.error) throw new Error(d.error);
+  return d;
+}
+
+async function humanMove(uci) {
+  if (busy) return;
+  selected = null; busy = true;
+  applyMove(board, uci); moves.push(uci); render(); renderMoves();
+
+  // 红方走后:黑方是否被将死?
+  let st = await api('/api/state?moves=' + moves.join(','));
+  if (st.over) return finish(st.winner);   // winner === 'red'
+
+  // 请引擎走黑方
+  setBanner('黑方思考中…', 'think');
+  statusEl.innerHTML = '引擎计算中(go nodes)…';
+  const res = await api('/api/black?moves=' + moves.join(','));
+  if (res.move) { applyMove(board, res.move); moves.push(res.move); }
+  renderMoves();
+
+  if (res.state.over) { render(); return finish(res.state.winner); } // winner === 'black'
+
+  // 回到红方
+  legal = res.state.legal; busy = false;
+  setBanner('', '');
+  updateStatus();
+  renderSignal(res.score);
+  render();
+}
+
+// 三态诊询信号(DESIGN §6):读引擎回传的 mate 分数(黑方视角),允许「未知」。
+// 仅供参考,不决定停局——停局只认真终局。
+function renderSignal(score) {
+  if (score && score.type === 'mate') {
+    if (score.value < 0) {           // 黑方被杀 → 红方保持杀势
+      signalEl.className = 'signal redwin';
+      signalEl.innerHTML = `信号:即将红胜　杀着倒数 <span class="dtm">${Math.abs(score.value)}</span>`;
+    } else {                          // 黑方能杀 → 红方已走成必负
+      signalEl.className = 'signal blackwin';
+      signalEl.innerHTML = `信号:即将黑胜　黑方 <span class="dtm">${score.value}</span> 步内杀`;
+    }
+  } else {                           // cp 或无分数 → 诚实地说未知(cp 不可据以判走脱)
+    signalEl.className = 'signal neutral';
+    signalEl.textContent = '信号:未知中立(引擎未搜到杀)';
+  }
+}
+
+function updateStatus() {
+  statusEl.innerHTML = `轮到:<b>红方(你)</b>　已走 ${Math.ceil(moves.length/2)} 回合`;
+}
+
+function finish(winner) {
+  busy = true; selected = null; legal = []; render();
+  if (winner === 'red') {
+    setBanner('红胜 —— 将死黑方 ✓', 'red');
+    signalEl.className = 'signal redwin'; signalEl.textContent = '信号:红胜 —— 已将死黑方';
+    statusEl.innerHTML = '本题完成。点「重来」再练一次。';
+  } else {
+    setBanner('黑胜 —— 红方被将死', 'black');
+    signalEl.className = 'signal blackwin'; signalEl.textContent = '信号:黑胜 —— 红方被将死';
+    statusEl.innerHTML = '走到真终局黑胜(此前某步走脱)。点「重来」再练一次。';
+  }
+}
+
+async function start() {
+  START = await api('/api/start');
+  document.getElementById('meta').textContent = `${START.source}　FEN 起始 · 红先 · 最长杀着 ${START.maxDtm}`;
+  board = parseFen(START.fen); moves = []; selected = null; busy = false;
+  const st = await api('/api/state?moves=');
+  legal = st.legal;
+  setBanner('', ''); updateStatus(); renderSignal(null); renderMoves(); render();
+}
+
+document.getElementById('reset').onclick = start;
+drawGrid();
+start().catch(e => { statusEl.textContent = '出错:' + e.message; });
+</script>
+</body>
+</html>
