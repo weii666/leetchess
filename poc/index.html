@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-Hans">
+<html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>leetchess POC · 适情雅趣排局</title>
+<title>leetchess POC · 適情雅趣排局</title>
 <style>
   :root {
     --cell: 62px; --margin: 40px;
@@ -13,7 +13,7 @@
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; padding: 24px; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    margin: 0; padding: 24px; font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
     background: #2b2b2b; color: #eee; display: flex; gap: 28px; flex-wrap: wrap; justify-content: center;
   }
   #board {
@@ -55,8 +55,11 @@
   .signal .dtm { font-variant-numeric: tabular-nums; }
   button { font-size: 14px; padding: 8px 14px; border-radius: 6px; border: none; background: #4a4a4a; color: #eee; cursor: pointer; }
   button:hover { background: #5a5a5a; }
-  #moves { margin-top: 14px; font-size: 13px; color: #bbb; max-height: 260px; overflow-y: auto; }
-  #moves div { padding: 2px 0; font-variant-numeric: tabular-nums; }
+  #moves-hd { margin-top: 14px; text-align: center; font-weight: bold; color: #ccc; letter-spacing: 1px; }
+  #moves { margin-top: 6px; font-size: 15px; color: #ddd; max-height: 260px; overflow-y: auto; }
+  #moves div { padding: 3px 0; font-variant-numeric: tabular-nums; }
+  #moves .mv-n { display: inline-block; width: 2.4em; text-align: right; padding-right: .6em; color: #999; }
+  #moves .mv-r, #moves .mv-b { display: inline-block; width: 5.5em; }
 </style>
 </head>
 <body>
@@ -64,11 +67,12 @@
 
   <div id="side">
     <h1>leetchess POC</h1>
-    <div class="sub" id="meta">载入中…</div>
+    <div class="sub" id="meta">載入中…</div>
     <div id="banner"></div>
-    <div class="signal neutral" id="signal">信号:未知中立</div>
+    <div class="signal neutral" id="signal">勝負難料</div>
     <div class="status" id="status"></div>
-    <button id="reset">重来</button>
+    <button id="reset">重來</button>
+    <div id="moves-hd">===== 歷史著法 =====</div>
     <div id="moves"></div>
   </div>
 
@@ -77,7 +81,7 @@ const FILES = 9, RANKS = 10;
 const CELL = 62, MARGIN = 40;
 const NAMES = {
   R:'俥', N:'傌', B:'相', A:'仕', C:'炮', P:'兵', K:'帥',
-  r:'車', n:'馬', b:'象', a:'士', c:'砲', p:'卒', k:'將',
+  r:'車', n:'馬', b:'象', a:'士', c:'包', p:'卒', k:'將',
 };
 const boardEl = document.getElementById('board');
 const bannerEl = document.getElementById('banner');
@@ -85,14 +89,14 @@ const signalEl = document.getElementById('signal');
 const statusEl = document.getElementById('status');
 const movesEl = document.getElementById('moves');
 
-let START = null;          // /api/start 回传
+let START = null;          // /api/start 回傳
 let board = [];            // board[rank][file] = 棋子字元 或 null
 let moves = [];            // 已走 UCI 序列
-let legal = [];            // 当前红方合法着
-let selected = null;       // 选中的 [rank,file]
-let busy = false;          // 引擎思考中 / 终局,锁住输入
+let legal = [];            // 當前紅方合法著
+let selected = null;       // 選中的 [rank,file]
+let busy = false;          // 引擎思考中 / 終局,鎖住輸入
 
-// ---- 座标:file a-i = 0..8(左→右);rank 0..9,红方底线 rank0 在下 ----
+// ---- 座標:file a-i = 0..8(左→右);rank 0..9,紅方底線 rank0 在下 ----
 const px = f => MARGIN + f * CELL;
 const py = r => MARGIN + (9 - r) * CELL;
 const sq2fr = s => [s.charCodeAt(0) - 97, +s[1]];        // 'f8' -> [file,rank]
@@ -122,16 +126,16 @@ function drawGrid() {
   const svg = document.getElementById('grid');
   const W = px(8), lines = [];
   const X = f => px(f), Y = r => py(r);
-  // 横线 10 条
+  // 橫線 10 條
   for (let r = 0; r < RANKS; r++) lines.push(`M${X(0)} ${Y(r)} H${X(8)}`);
-  // 竖线:两端整条,中间 8 条在河界断开
+  // 豎線:兩端整條,中間 8 條在河界斷開：
   lines.push(`M${X(0)} ${Y(9)} V${Y(0)}`);
   lines.push(`M${X(8)} ${Y(9)} V${Y(0)}`);
   for (let f = 1; f < 8; f++) {
     lines.push(`M${X(f)} ${Y(9)} V${Y(5)}`);
     lines.push(`M${X(f)} ${Y(4)} V${Y(0)}`);
   }
-  // 九宫斜线(上下各一个 X)
+  // 九宮斜線(上下各一個 X)
   lines.push(`M${X(3)} ${Y(9)} L${X(5)} ${Y(7)}`);
   lines.push(`M${X(5)} ${Y(9)} L${X(3)} ${Y(7)}`);
   lines.push(`M${X(3)} ${Y(2)} L${X(5)} ${Y(0)}`);
@@ -139,7 +143,7 @@ function drawGrid() {
   svg.setAttribute('viewBox', `0 0 ${W + MARGIN} ${py(0) + MARGIN}`);
   svg.innerHTML = `<path d="${lines.join(' ')}" stroke="var(--line)" stroke-width="1.5" fill="none"/>`
     + `<text x="${(X(1)+X(2))/2}" y="${(Y(5)+Y(4))/2+6}" fill="#8a6d3b" font-size="20" text-anchor="middle">楚河</text>`
-    + `<text x="${(X(6)+X(7))/2}" y="${(Y(5)+Y(4))/2+6}" fill="#8a6d3b" font-size="20" text-anchor="middle">汉界</text>`;
+    + `<text x="${(X(6)+X(7))/2}" y="${(Y(5)+Y(4))/2+6}" fill="#8a6d3b" font-size="20" text-anchor="middle">漢界</text>`;
 }
 
 function render() {
@@ -153,7 +157,7 @@ function render() {
     el.className = 'piece ' + (isRed ? 'red' : 'black');
     el.style.left = px(f) + 'px'; el.style.top = py(r) + 'px';
     el.textContent = NAMES[ch];
-    // 仅在「红方回合、非终局、该子为红、且有合法着从此格出发」时可点
+    // 僅在「紅方回合、非終局、該子為紅、且有合法著從此格出發」時可點
     if (!busy && isRed && legal.some(m => m.startsWith(fr2sq(f, r)))) {
       el.classList.add('selectable');
       if (selected && selected[0] === r && selected[1] === f) el.classList.add('selected');
@@ -161,7 +165,7 @@ function render() {
     }
     boardEl.appendChild(el);
   }
-  // 选中子的落点提示
+  // 選中子的落點提示
   if (selected && !busy) {
     const from = fr2sq(selected[1], selected[0]);
     legal.filter(m => m.startsWith(from)).forEach(m => {
@@ -186,13 +190,61 @@ function setBanner(text, cls) {
   bannerEl.style.display = text ? 'block' : 'none';
 }
 
+// ---- UCI -> 中文記譜 ----
+// 紅方縱線用漢字、從紅方右至左為一..九;黑方用阿拉伯數字、從黑方右至左為1..9。
+// 兵種字形與棋盤 NAMES 一致(紅黑不同字)。
+const CN_NUM = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九'];
+
+// b: 走子前盤面;返回該 uci 的中文記譜
+function uci2cn(b, uci) {
+  const [ff, fr] = sq2fr(uci.slice(0, 2));
+  const [tf, tr] = sq2fr(uci.slice(2, 4));
+  const piece = b[fr][ff];
+  const isRed = piece === piece.toUpperCase();
+  const type = piece.toUpperCase();
+  const name = NAMES[piece];
+  const col = f => isRed ? 9 - f : f + 1;                 // 縱線序號
+  const num = n => isRed ? CN_NUM[n] : String(n);        // 數字表示
+
+  // 同色同兵種、同縱線上的其他子 -> 用 前/後(多兵用序號)區分
+  const sameFile = [];
+  for (let r = 0; r < RANKS; r++) if (b[r][ff] === piece) sameFile.push(r);
+  let head;
+  if (sameFile.length >= 2) {
+    sameFile.sort((a, c) => isRed ? c - a : a - c);       // [0] = 最前
+    const idx = sameFile.indexOf(fr);
+    let pos;
+    if (sameFile.length === 2) pos = idx === 0 ? '前' : '後';
+    else if (sameFile.length === 3) pos = ['前', '中', '後'][idx];
+    else pos = num(idx + 1);
+    head = pos + name;
+  } else {
+    head = name + num(col(ff));
+  }
+
+  // 進/退/平 + 目標
+  const diagonal = type === 'N' || type === 'B' || type === 'A';
+  let tail;
+  if (fr === tr) {                                         // 平移
+    tail = '平' + num(col(tf));
+  } else {
+    const forward = isRed ? tr > fr : tr < fr;
+    const dir = forward ? '進' : '退';
+    tail = dir + num(diagonal ? col(tf) : Math.abs(tr - fr));
+  }
+  return head + tail;
+}
+
 function renderMoves() {
   movesEl.innerHTML = '';
-  for (let i = 0; i < moves.length; i += 2) {
+  const b = parseFen(START.fen);
+  const cn = moves.map(uci => { const s = uci2cn(b, uci); applyMove(b, uci); return s; });
+  for (let i = 0; i < cn.length; i += 2) {
     const n = i / 2 + 1;
-    const red = moves[i], blk = moves[i + 1] || '';
     const div = document.createElement('div');
-    div.textContent = `${n}. 红 ${red}    黑 ${blk}`;
+    div.innerHTML = `<span class="mv-n">${n}.</span>`
+      + `<span class="mv-r">${cn[i]}</span>`
+      + `<span class="mv-b">${cn[i + 1] || ''}</span>`;
     movesEl.appendChild(div);
   }
   movesEl.scrollTop = movesEl.scrollHeight;
@@ -210,20 +262,20 @@ async function humanMove(uci) {
   selected = null; busy = true;
   applyMove(board, uci); moves.push(uci); render(); renderMoves();
 
-  // 红方走后:黑方是否被将死?
+  // 紅方走後:黑方是否被將死?
   let st = await api('/api/state?moves=' + moves.join(','));
   if (st.over) return finish(st.winner);   // winner === 'red'
 
-  // 请引擎走黑方
+  // 請引擎走黑方
   setBanner('黑方思考中…', 'think');
-  statusEl.innerHTML = '引擎计算中(go nodes)…';
+  statusEl.innerHTML = '引擎計算中(go nodes)…';
   const res = await api('/api/black?moves=' + moves.join(','));
   if (res.move) { applyMove(board, res.move); moves.push(res.move); }
   renderMoves();
 
   if (res.state.over) { render(); return finish(res.state.winner); } // winner === 'black'
 
-  // 回到红方
+  // 回到紅方
   legal = res.state.legal; busy = false;
   setBanner('', '');
   updateStatus();
@@ -231,43 +283,43 @@ async function humanMove(uci) {
   render();
 }
 
-// 三态诊询信号(DESIGN §6):读引擎回传的 mate 分数(黑方视角),允许「未知」。
-// 仅供参考,不决定停局——停局只认真终局。
+// 三態診詢信號(DESIGN §6):讀引擎回傳的 mate 分數(黑方視角),允許「未知」。
+// 僅供參考,不決定停局——停局只認真終局。
 function renderSignal(score) {
   if (score && score.type === 'mate') {
-    if (score.value < 0) {           // 黑方被杀 → 红方保持杀势
+    if (score.value < 0) {           // 黑方被殺 → 紅方保持殺勢
       signalEl.className = 'signal redwin';
-      signalEl.innerHTML = `信号:即将红胜　杀着倒数 <span class="dtm">${Math.abs(score.value)}</span>`;
-    } else {                          // 黑方能杀 → 红方已走成必负
+      signalEl.innerHTML = `紅勝　<span class="dtm">${Math.abs(score.value)} 回殺</span>`;
+    } else {                          // 黑方能殺 → 紅方已走成必負
       signalEl.className = 'signal blackwin';
-      signalEl.innerHTML = `信号:即将黑胜　黑方 <span class="dtm">${score.value}</span> 步内杀`;
+      signalEl.innerHTML = `黑勝　<span class="dtm">${score.value}</span> 回殺`;
     }
-  } else {                           // cp 或无分数 → 诚实地说未知(cp 不可据以判走脱)
+  } else {                           // cp 或無分數 → 誠實地說未知(cp 不可據以判走脫)
     signalEl.className = 'signal neutral';
-    signalEl.textContent = '信号:未知中立(引擎未搜到杀)';
+    signalEl.textContent = '勝負難料';
   }
 }
 
 function updateStatus() {
-  statusEl.innerHTML = `轮到:<b>红方(你)</b>　已走 ${Math.ceil(moves.length/2)} 回合`;
+  statusEl.innerHTML = `輪到:<b>紅方(你)</b>　已走 ${Math.ceil(moves.length/2)} 回合`;
 }
 
 function finish(winner) {
   busy = true; selected = null; legal = []; render();
   if (winner === 'red') {
-    setBanner('红胜 —— 将死黑方 ✓', 'red');
-    signalEl.className = 'signal redwin'; signalEl.textContent = '信号:红胜 —— 已将死黑方';
-    statusEl.innerHTML = '本题完成。点「重来」再练一次。';
+    setBanner('紅勝 —— 將死黑方 ✓', 'red');
+    signalEl.className = 'signal redwin'; signalEl.textContent = '已將死黑方';
+    statusEl.innerHTML = '本題完成。點「重來」再練一次。';
   } else {
-    setBanner('黑胜 —— 红方被将死', 'black');
-    signalEl.className = 'signal blackwin'; signalEl.textContent = '信号:黑胜 —— 红方被将死';
-    statusEl.innerHTML = '走到真终局黑胜(此前某步走脱)。点「重来」再练一次。';
+    setBanner('黑勝 —— 紅方被將死', 'black');
+    signalEl.className = 'signal blackwin'; signalEl.textContent = '紅方被將死';
+    statusEl.innerHTML = '走到終局黑勝(此前某步走脫)。點「重來」再練一次。';
   }
 }
 
 async function start() {
   START = await api('/api/start');
-  document.getElementById('meta').textContent = `${START.source}　FEN 起始 · 红先 · 最长杀着 ${START.maxDtm}`;
+  document.getElementById('meta').textContent = `${START.source}　FEN 起始 · 紅先 · 最長殺著 ${START.maxDtm}`;
   board = parseFen(START.fen); moves = []; selected = null; busy = false;
   const st = await api('/api/state?moves=');
   legal = st.legal;
@@ -276,7 +328,7 @@ async function start() {
 
 document.getElementById('reset').onclick = start;
 drawGrid();
-start().catch(e => { statusEl.textContent = '出错:' + e.message; });
+start().catch(e => { statusEl.textContent = '出錯:' + e.message; });
 </script>
 </body>
 </html>
