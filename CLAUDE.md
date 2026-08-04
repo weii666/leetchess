@@ -41,6 +41,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `engine/` 的 binary 与 nnue 皆 gitignore,版本锁在纯文字 `ENGINE_VERSION`,两者一起验 checksum。
 
+## Python 執行環境:uv + venv
+
+正式開發時,專案的 Python(`tools/` 下的腳本等)一律以 **uv** 管理、在專案本地 **venv** 內執行,不使用系統全域 Python:
+
+- root 置 `pyproject.toml`(鎖 `requires-python`)+ `.python-version`,依賴鎖進 `uv.lock`,一併進版本庫。
+- `uv sync` 建立/同步 `.venv`(uv 自動管理的 venv,不另手動維護);`.venv/` 進 `.gitignore`。
+- 一律走 `uv run <script.py>` 呼叫,不直接 `python3 <script.py>`,確保 Python 版本與依賴可重現、且與系統環境隔離。
+
+> POC 的 `poc/server.py` 為零依賴、純標準庫的一次性工具,不受此約束,沿用直接執行即可。
+
 ## 走法格式约定
 
 UCI 座标,非中文记谱。档 `a`–`i`(红方左至右),列 `0`–`9`(红方底线为 0)。例:炮二平五 = `h2e2`。前端负责双向转换。

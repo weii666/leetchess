@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>leetchess POC · 適情雅趣排局</title>
+<title>LeetChess POC · 適情雅趣排局</title>
 <style>
   :root {
     --cell: 62px; --margin: 40px;
@@ -66,7 +66,7 @@
   <div id="board"><svg id="grid" viewBox="0 0 561 622" preserveAspectRatio="none"></svg></div>
 
   <div id="side">
-    <h1>leetchess POC</h1>
+    <h1>LeetChess POC</h1>
     <div class="sub" id="meta">載入中…</div>
     <div id="banner"></div>
     <div class="signal neutral" id="signal">勝負難料</div>
@@ -307,11 +307,11 @@ function updateStatus() {
 function finish(winner) {
   busy = true; selected = null; legal = []; render();
   if (winner === 'red') {
-    setBanner('紅勝 —— 將死黑方 ✓', 'red');
+    setBanner('紅勝 ✓', 'red');
     signalEl.className = 'signal redwin'; signalEl.textContent = '已將死黑方';
     statusEl.innerHTML = '本題完成。點「重來」再練一次。';
   } else {
-    setBanner('黑勝 —— 紅方被將死', 'black');
+    setBanner('黑勝 ✗', 'black');
     signalEl.className = 'signal blackwin'; signalEl.textContent = '紅方被將死';
     statusEl.innerHTML = '走到終局黑勝(此前某步走脫)。點「重來」再練一次。';
   }
