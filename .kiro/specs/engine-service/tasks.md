@@ -2,7 +2,7 @@
 
 ## 1. 基礎:專案環境與共用契約
 
-- [ ] 1.1 建立 uv 管理的 Python 專案環境
+- [x] 1.1 建立 uv 管理的 Python 專案環境
   - 於專案根建立 `pyproject.toml`(鎖 `requires-python`)與 `.python-version`,依賴鎖進 `uv.lock` 並納入版本庫
   - 宣告 FastAPI、Pydantic、uvicorn 與測試框架依賴
   - `.gitignore` 新增 `.venv/`

@@ -1,2 +1,5 @@
 # Claude Code 本机设定(个人/会话层级,不进版本库)
 .claude/settings.local.json
+
+# uv 管理的專案本地虛擬環境(由 uv sync 重建,不進版本庫)
+.venv/

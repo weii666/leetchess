@@ -1,0 +1,28 @@
+[project]
+name = "leetchess"
+version = "0.1.0"
+description = "象棋排局挑戰平台的後端引擎服務"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "pydantic>=2.9",
+    "uvicorn>=0.32",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    # fastapi.testclient.TestClient 的 HTTP 傳輸層;starlette 已棄用搭配 httpx(1.x),
+    # 改用 httpx2 才不會在每次 TestClient 匯入時發出 StarletteDeprecationWarning。
+    "httpx2>=2.9",
+]
+
+[tool.pytest.ini_options]
+# 專案以非套件模式管理,service/ 不會被安裝進 .venv。
+# 將專案根加入 sys.path,測試才能 `import service`。
+pythonpath = ["."]
+
+[tool.uv]
+# 明確宣告非套件模式:uv sync 只安裝依賴,不建置本專案本身。
+# 無 [build-system] 時 uv 本來就預設如此,此處只是把意圖寫明。
+package = false
