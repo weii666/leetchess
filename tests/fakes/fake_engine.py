@@ -9,6 +9,7 @@
 
     normal                 完整回應;`go nodes` 給 cp 分數
     mate                   完整回應;`go nodes` 給 mate 分數(兩行,後者較淺)
+    mate_for_black         完整回應;`go nodes` 給**正的** mate 分數(輪方可殺)
     no_legal_moves         perft 回報 0 個著法;`go nodes` 回 `bestmove (none)`
     ignores_moves          複製真實引擎對非法著法的靜默忽略:`d` 恆回起始局面
     mute                   完全不輸出,連握手都不回應
@@ -38,6 +39,7 @@ LOG_ENV = "FAKE_ENGINE_LOG"
 
 MODE_NORMAL = "normal"
 MODE_MATE = "mate"
+MODE_MATE_FOR_BLACK = "mate_for_black"
 MODE_NO_LEGAL_MOVES = "no_legal_moves"
 MODE_IGNORES_MOVES = "ignores_moves"
 MODE_MUTE = "mute"
@@ -49,6 +51,7 @@ MODE_TRUNCATED_GO = "truncated_go"
 MODES = (
     MODE_NORMAL,
     MODE_MATE,
+    MODE_MATE_FOR_BLACK,
     MODE_NO_LEGAL_MOVES,
     MODE_IGNORES_MOVES,
     MODE_MUTE,
@@ -80,6 +83,12 @@ SEARCH_CP_LINES = (
 SEARCH_MATE_LINES = (
     "info depth 20 seldepth 28 multipv 1 score mate -20 nodes 5000 time 4 pv e9f9",
     "info depth 38 seldepth 31 multipv 1 score mate -15 nodes 173519 time 89 pv e9f9",
+    "bestmove e9f9 ponder g6h8",
+)
+#: 分數為**正**的 mate:輪方(黑)可將死對手。先給一行 cp,確保解析器取的是最後一行。
+SEARCH_MATE_FOR_BLACK_LINES = (
+    "info depth 14 seldepth 20 multipv 1 score cp -180 nodes 4000 time 3 pv e9f9",
+    "info depth 31 seldepth 34 multipv 1 score mate 12 nodes 168420 time 85 pv e9f9",
     "bestmove e9f9 ponder g6h8",
 )
 SEARCH_NO_MOVE_LINES = ("bestmove (none)",)
@@ -156,6 +165,8 @@ def _handle_go(mode: str, command: str) -> None:
         _emit(SEARCH_TRUNCATED_LINES)
     elif mode == MODE_MATE:
         _emit(SEARCH_MATE_LINES)
+    elif mode == MODE_MATE_FOR_BLACK:
+        _emit(SEARCH_MATE_FOR_BLACK_LINES)
     else:
         _emit(SEARCH_CP_LINES)
 

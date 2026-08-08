@@ -1,4 +1,6 @@
-"""GameService 的對局狀態判定測試(對應 tasks 3.2、requirements 1.1、1.2、1.3、1.5)。
+"""GameService 的對局狀態判定與黑方應手測試。
+
+對應 tasks 3.2 與 3.3、requirements 1.1、1.2、1.3、1.4、1.5、2.1、2.2、2.3、2.4。
 
 本任務的核心價值是**終局判定的唯一判準**:
 
@@ -16,6 +18,14 @@ requirements 1.3 與 2.4)。因此本檔有兩個測試專門釘死這件事:
 
 替身用於所有語意測試(快、可構造真終局與非法序列),真實引擎只用於「一整局走到
 真終局且勝方認定正確」這一項 —— 那是唯一無法用替身取信的斷言。
+
+3.3 的黑方應手在此之上再釘死兩件事:
+
+- **`cp` 分數一律回報「未知」**,連正負號都不看(2.3)。實測 200k 節點下某個實為
+  `mate -15` 的局面回報 `cp 526` —— 方向還是相反的,據以推斷等於在使用者必勝時
+  告訴他正在落敗。
+- **紅方走出致勝一手後,同一次應手請求就回傳「黑方無著、對局結束、紅方獲勝」**。
+  那是每一題排局的最後一手,不是邊緣案例;前端不必為了知道贏了沒有再查一次。
 """
 
 from __future__ import annotations
@@ -34,10 +44,11 @@ from service.errors import (
     IllegalMoveSequenceError,
     PositionNotFoundError,
     ServiceBusyError,
+    WrongSideToMoveError,
 )
-from service.game import GameService, side_after
+from service.game import GameService, classify_score, side_after
 from service.positions import PositionRepository
-from service.types import GameState, Position, ScoreKind, Side
+from service.types import GameState, Position, Score, ScoreKind, Side, Signal
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 SERVICE_DIR = PROJECT_ROOT / "service"
@@ -54,6 +65,12 @@ BLACK_FEN = "3ak4/3RaR3/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 b - - 0 1"
 
 #: 替身的合法著法(`tests/fakes/fake_engine.py` 的 `PERFT_LINES`)。
 FAKE_LEGAL_MOVES = ["e8f9", "e9f9"]
+
+#: 替身在 `mate` 與 `mate_for_black` 模式下回報的應手著法。
+FAKE_REPLY_MOVE = "e9f9"
+
+#: `mate` 模式最後一行為 `score mate -15`(黑方視角:黑方將被殺)。
+FAKE_MATE_IN = 15
 
 #: 替身回應是即時的,逾時與節點數取小值使測試快。
 FAKE_SEARCH_TIMEOUT = 1.0
@@ -358,6 +375,234 @@ def test_every_query_returns_its_engine_to_the_pool(make_service) -> None:
     assert (harness.pool.available_count, harness.pool.borrowed_count) == (2, 0)
 
 
+# --- 三態信號的分類(2.1、2.2、2.3) -----------------------------------
+
+
+@pytest.mark.parametrize(
+    ("score", "expected"),
+    [
+        # mate 為負:黑方將被殺,紅方即將取勝,並附殺著倒數(2.2)
+        (Score(ScoreKind.MATE, -15), (Signal.RED_WINNING, 15)),
+        (Score(ScoreKind.MATE, -1), (Signal.RED_WINNING, 1)),
+        # UCI 慣例:`mate 0` 代表輪方已被將死,同樣是紅方取勝,倒數為 0
+        (Score(ScoreKind.MATE, 0), (Signal.RED_WINNING, 0)),
+        # mate 為正:黑方可殺。倒數只在紅方取勝時提供,故為 None
+        (Score(ScoreKind.MATE, 12), (Signal.BLACK_WINNING, None)),
+        (Score(ScoreKind.MATE, 1), (Signal.BLACK_WINNING, None)),
+        # cp 一律未知,**連正負號都不看**(2.3)
+        (Score(ScoreKind.CP, 526), (Signal.UNKNOWN, None)),
+        (Score(ScoreKind.CP, -526), (Signal.UNKNOWN, None)),
+        (Score(ScoreKind.CP, 0), (Signal.UNKNOWN, None)),
+        # 引擎完全沒給分數(真終局時的 `bestmove (none)`)同樣是未知
+        (None, (Signal.UNKNOWN, None)),
+    ],
+)
+def test_classify_score_maps_only_mate_scores_to_a_winning_side(
+    score: Score | None, expected: tuple[Signal, int | None]
+) -> None:
+    """只有 `mate` 型別會產生勝負傾向;`cp` 與無分數一律「未搜得殺著」(2.3)。
+
+    `cp 526` 這個值不是隨手取的:實測 200k 節點下,一個實為 `mate -15`(黑方將被
+    殺)的局面就回報 `cp 526`,**方向還是相反的**。若據 cp 正負推斷,使用者會在
+    自己必勝時被告知正在落敗 —— 那比誠實地說「未知」糟得多。
+    """
+    assert classify_score(score) == expected
+
+
+# --- 黑方應手(1.4、2.1、2.4) -----------------------------------------
+
+
+def test_black_reply_returns_the_move_the_signal_and_the_state_after_it(
+    make_service,
+) -> None:
+    """1.4:回傳一著黑方著法、該局面的評分狀態,以及**走後**的完整對局狀態。
+
+    走後狀態同批回傳,前端因此不必為了畫出新盤面再發一次局面查詢。
+    """
+    harness = make_service("mate")
+    reply = harness.service.black_reply(PUZZLE_ID, ["e8f9"])
+
+    assert reply.move == FAKE_REPLY_MOVE
+    assert reply.signal is Signal.RED_WINNING
+    assert reply.mate_in == FAKE_MATE_IN
+    # 起手方為紅、序列走了 1 步(紅)加 1 步應手(黑),因此輪回紅方
+    assert reply.state.side_to_move is Side.RED
+    assert reply.state.legal_moves == FAKE_LEGAL_MOVES
+    assert reply.state.over is False
+    assert reply.state.winner is None
+
+
+def test_black_reply_reports_a_positive_mate_as_black_winning_without_a_countdown(
+    make_service,
+) -> None:
+    """2.1:mate 為正代表黑方可殺。殺著倒數只在紅方即將取勝時提供(2.2)。"""
+    harness = make_service("mate_for_black")
+    reply = harness.service.black_reply(PUZZLE_ID, ["e8f9"])
+
+    assert reply.move == FAKE_REPLY_MOVE
+    assert reply.signal is Signal.BLACK_WINNING
+    assert reply.mate_in is None
+
+
+def test_black_reply_reports_a_cp_score_as_unknown_and_never_infers_a_winner(
+    make_service,
+) -> None:
+    """2.3:未搜得殺著時一律回報未知,**不得以其他評估數值推斷勝負傾向**。
+
+    替身的 `normal` 模式回報 `score cp 25`(黑方視角為正)。若實作偷偷以 cp 正負
+    推斷,這裡就會得到「黑方即將取勝」。此測試存在的意義即在於釘死那條路不存在。
+    """
+    harness = make_service("normal")
+
+    with harness.pool.acquire() as engine:
+        best = engine.best_move(RED_FEN, ["e8f9"], FAKE_NODES, FAKE_SEARCH_TIMEOUT)
+    assert best.score is not None
+    assert best.score.kind is ScoreKind.CP, "替身沒給出 cp 分數,測試前提不成立"
+    assert best.score.value > 0, "前提:cp 為正,足以誘使實作推斷黑方占優"
+
+    reply = harness.service.black_reply(PUZZLE_ID, ["e8f9"])
+
+    assert reply.signal is Signal.UNKNOWN
+    assert reply.mate_in is None
+
+
+def test_black_reply_signal_never_ends_the_game(make_service) -> None:
+    """2.4:評分狀態為任何值都不改變對局是否結束的判定。
+
+    `mate` 模式同時滿足「評分為殺棋」與「合法著法非空」,對局必須回報進行中。
+    """
+    harness = make_service("mate")
+    reply = harness.service.black_reply(PUZZLE_ID, ["e8f9"])
+
+    assert reply.signal is Signal.RED_WINNING, "前提:信號確實指向勝負"
+    assert reply.state.legal_moves == FAKE_LEGAL_MOVES, "前提:此局面仍有合法著法"
+    assert reply.state.over is False
+    assert reply.state.winner is None
+
+
+# --- 完成狀態:紅方致勝一手後的同一次應手請求(1.2、1.4) --------------
+
+
+def test_black_reply_reports_the_finished_game_in_the_same_request(
+    make_service,
+) -> None:
+    """**任務 3.3 的完成狀態**:紅方走出致勝一手後,同一次應手請求即回傳
+    「黑方無著、對局結束、紅方獲勝」,前端無須另外查詢局面狀態。
+
+    這是每一題排局的**最後一手**,不是邊緣案例。引擎此時回 `bestmove (none)`,
+    應手為 None,而走後狀態要問的正是當前這個局面 —— 序列不再追加任何一步。
+    """
+    harness = make_service("no_legal_moves")
+    reply = harness.service.black_reply(PUZZLE_ID, ["e8f9"])
+
+    assert reply.move is None
+    assert reply.state.side_to_move is Side.BLACK, "無著可走的是黑方"
+    assert reply.state.legal_moves == []
+    assert reply.state.over is True
+    assert reply.state.winner is Side.RED
+    # 替身在真終局完全不給分數,信號因此誠實地說未知 —— 勝負由 `state` 表達,不由
+    # 信號表達。真實引擎此時另會給 `score mate 0`(信號為紅方取勝、倒數 0),兩種
+    # 輸入都必須得到同一個 `state`;真實引擎那一側由本檔的真實引擎測試覆蓋。
+    assert reply.signal is Signal.UNKNOWN
+    assert reply.mate_in is None
+
+
+# --- 輪方不符(1.5) -----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("start_side", "moves"),
+    [
+        (Side.RED, []),  # 紅先題目的起始局面
+        (Side.RED, ["e8f9", "e9f9"]),  # 走完一個回合後又輪回紅方
+        (Side.BLACK, ["e8f9"]),  # 黑先題目走一步後輪到紅方
+    ],
+)
+def test_black_reply_is_rejected_when_red_is_to_move(
+    make_service, start_side: Side, moves: list[str]
+) -> None:
+    """1.5:輪方為紅時拒絕應手請求並指出輪方不符。
+
+    黑先題目也要測:把輪方推導硬編為紅會讓黑先排局的合法應手被誤拒。
+    """
+    harness = make_service(start_side=start_side)
+    with pytest.raises(WrongSideToMoveError):
+        harness.service.black_reply(PUZZLE_ID, moves)
+
+
+def test_black_reply_rejects_a_wrong_side_before_borrowing_an_engine(
+    make_service,
+) -> None:
+    """輪方不符必須在**借引擎之前**判定。
+
+    否則池滿時使用者收到的是「服務忙碌」而非「輪方不符」—— 一個會讓人一直重試的
+    誤導性訊息,而真正的問題是 client 的對局狀態已經對不上。
+
+    以關閉池的方式證明:此時任何借用都會拋出 `ServiceBusyError`,若輪方判定發生在
+    借用之後,這裡就會拿到忙碌錯誤而不是輪方不符。
+    """
+    harness = make_service()
+    harness.pool.shutdown()
+
+    with pytest.raises(WrongSideToMoveError):
+        harness.service.black_reply(PUZZLE_ID, [])
+
+
+def test_black_reply_reports_an_unknown_position_as_not_found(make_service) -> None:
+    harness = make_service()
+    with pytest.raises(PositionNotFoundError):
+        harness.service.black_reply(9999, [])
+
+
+# --- 走不出的序列(5.3 在應手路徑上的同一保證) ------------------------
+
+
+def test_black_reply_never_answers_from_another_position(make_service) -> None:
+    """引擎靜默忽略非法著法,失敗表現是**拿別的局面回答**而非拋錯。
+
+    應手路徑與局面查詢路徑必須同樣讓協定層的序列驗證錯誤穿透出去。
+    """
+    harness = make_service("ignores_moves")
+    with pytest.raises(IllegalMoveSequenceError):
+        harness.service.black_reply(PUZZLE_ID, ["a1a2"])
+
+
+# --- 一次請求只通過一次併發閘門(3.1 的承載前提、4.4) ------------------
+
+
+def test_black_reply_borrows_exactly_one_engine(make_service, monkeypatch) -> None:
+    """應手與其後的局面查詢共用同一次借用。
+
+    每手棋若借兩次,同樣的池容量只能承載一半的人,且第二次借用可能在池滿時失敗 ——
+    使用者會在應手已經算好之後才收到忙碌錯誤。
+    """
+    harness = make_service("mate")
+    original = harness.pool.acquire
+    borrows = 0
+
+    def counting_acquire():
+        nonlocal borrows
+        borrows += 1
+        return original()
+
+    monkeypatch.setattr(harness.pool, "acquire", counting_acquire)
+    harness.service.black_reply(PUZZLE_ID, ["e8f9"])
+
+    assert borrows == 1
+
+
+def test_black_reply_returns_its_engine_to_the_pool(make_service) -> None:
+    """成功與失敗兩條路徑都必須歸還,否則連續應手會慢慢耗盡池容量(4.4)。"""
+    working = make_service("mate", size=2)
+    working.service.black_reply(PUZZLE_ID, ["e8f9"])
+    assert (working.pool.available_count, working.pool.borrowed_count) == (2, 0)
+
+    failing = make_service("ignores_moves", size=2)
+    with pytest.raises(IllegalMoveSequenceError):
+        failing.service.black_reply(PUZZLE_ID, ["a1a2"])
+    assert (failing.pool.available_count, failing.pool.borrowed_count) == (2, 0)
+
+
 # --- 依賴方向(design 的 File Structure Plan) --------------------------
 
 #: `game.py` 位於左端第四層,只能向左依賴 types / errors / config / positions / engine。
@@ -477,5 +722,95 @@ def test_real_engine_plays_the_puzzle_to_a_true_end_with_red_winning() -> None:
         assert mate_seen_while_in_progress, (
             "整局都沒出現 mate 評分,「評分不影響終局判定」這一點等於沒被驗到"
         )
+    finally:
+        pool.shutdown()
+
+
+@requires_real_engine
+def test_real_engine_black_reply_signals_red_winning_until_the_game_ends() -> None:
+    """真實引擎下的三態信號分類與完成狀態(1.4、2.1、2.2、2.3、2.4)。
+
+    紅方走引擎的最佳著法(即殺法),黑方一律經由 `black_reply` 應手,直到終局。
+    三件事必須同時成立:
+
+    - 應手途中至少出現一次「紅方即將取勝」並附殺著倒數 —— 這是 250k 節點這個
+      設定值存在的理由(低於此門檻信號會落在「未知」,Requirement 2 形同虛設)
+    - 信號指向紅方取勝的同時,對局仍回報進行中(2.4)
+    - **最後一次應手直接回傳「黑方無著、對局結束、紅方獲勝」**,不必再查一次局面
+
+    倒數只斷言「有值、在對局中為正、且曾經超過 1」而不斷言確數:250k 節點下的 DTM
+    可能高估 1 步(實測 250k 回報 16,1M 才收斂到 15),斷言確數等於把一個刻意接受
+    的誤差寫成契約。
+
+    **實測補記:** 黑方已被將死的局面,真實引擎在 `bestmove (none)` 之外還會給出
+    `score mate 0`,因此最後一次應手的信號是「紅方即將取勝、倒數 0」而非「未知」。
+    這與 `state` 的結論一致,不是矛盾;替身的 `no_legal_moves` 模式則完全不給分數,
+    覆蓋的是同一路徑的另一種輸入(見
+    `test_black_reply_reports_the_finished_game_in_the_same_request`)。
+    """
+    repository = PositionRepository(DEFAULT_POSITIONS_DIR)
+    repository.load()
+    settings = _settings(
+        REAL_ENGINE,
+        DEFAULT_POSITIONS_DIR,
+        acquire_timeout=REAL_ACQUIRE_TIMEOUT,
+        search_timeout=REAL_SEARCH_TIMEOUT,
+        stop_grace_period=1.0,
+        total_time_budget=60.0,
+        search_nodes=REAL_NODES,
+    )
+    pool = EnginePool(
+        size=1, acquire_timeout=REAL_ACQUIRE_TIMEOUT, engine_path=REAL_ENGINE
+    )
+    service = GameService(repository, pool, settings)
+
+    try:
+        fen, state = service.start(PUZZLE_ID)
+        moves: list[str] = []
+        countdowns: list[int] = []
+        reply = None
+
+        for _ in range(MAX_PLIES):
+            if state.side_to_move is Side.RED:
+                assert state.over is False, "此題應以黑方無著可走告終,不該是紅方"
+                with pool.acquire() as engine:
+                    best = engine.best_move(fen, moves, REAL_NODES, REAL_SEARCH_TIMEOUT)
+                assert best.move is not None, "合法著法非空時引擎不應回報無著可走"
+                moves.append(best.move)
+                state = service.state(PUZZLE_ID, moves)
+                continue
+
+            # 輪到黑方 —— 即使上一手已經把黑方將死也照樣送出應手請求,那正是
+            # 完成狀態要驗的路徑:前端不必先查局面才敢問應手。
+            black_legal_moves = state.legal_moves
+            reply = service.black_reply(PUZZLE_ID, moves)
+            if reply.signal is Signal.RED_WINNING:
+                assert reply.mate_in is not None, "紅方即將取勝時必須附殺著倒數(2.2)"
+                countdowns.append(reply.mate_in)
+            if reply.move is None:
+                break
+            assert reply.mate_in is None or reply.mate_in > 0, (
+                "黑方尚有應手可走,殺著倒數不應為 0"
+            )
+            assert reply.move in black_legal_moves, (
+                f"應手 {reply.move} 不在服務回報的黑方合法著法內"
+            )
+            assert reply.state.over is False, "尚有應手可走卻宣告對局結束(1.3、2.4)"
+            moves.append(reply.move)
+            state = reply.state
+
+        assert reply is not None, "整局沒發生過黑方應手,本測試等於什麼都沒測"
+        assert countdowns, (
+            "整局都沒出現「紅方即將取勝」,250k 節點的取捨與 Requirement 2 都未被驗到"
+        )
+        assert max(countdowns) > 1, (
+            "倒數整局都不超過 1,等於只驗到終局前一刻,搜尋深度的取捨沒被驗到"
+        )
+        # 完成狀態:紅方致勝一手後的同一次應手請求就交代完勝負
+        assert reply.move is None
+        assert reply.state.over is True
+        assert reply.state.side_to_move is Side.BLACK
+        assert reply.state.legal_moves == []
+        assert reply.state.winner is Side.RED
     finally:
         pool.shutdown()

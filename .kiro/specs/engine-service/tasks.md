@@ -92,7 +92,7 @@
   - _Requirements: 1.1, 1.2, 1.3, 1.5_
   - _Boundary: GameService_
 
-- [ ] 3.3 實作黑方應手與三態諮詢信號
+- [x] 3.3 實作黑方應手與三態諮詢信號
   - 行棋方為黑時取得引擎應手,並一併回傳走後的完整對局狀態
   - 將引擎評分分類為三態:紅方即將取勝時附殺著倒數步數、黑方即將取勝、未搜得殺著
   - **未搜得殺著時一律回報未知,不得以其他評估數值推斷勝負傾向**
@@ -229,3 +229,9 @@
 - 3.2:**終局判定與評分無關是結構性保證** —— `_game_state()` 的參數裡沒有分數,`_state_with()` 只呼叫 `legal_moves()` 從不呼叫 `best_move()`。review 必須「加入」一個 `best_move()` 呼叫才能破壞它。
 - 3.2:**⚠ 待 3.1 補強**:輪方基準取自題目 JSON 的 `side_to_move`,而 `positions.py` 的 `_read_side()` **未與 FEN 第 2 欄交叉檢核**。資料不一致時引擎依 FEN 判合法著法、服務依 JSON 判輪方,**勝方會靜默反向且無任何錯誤**。在 `game.py` 解析 FEN 會與 `engine/process.py` 的 `_ply_number()` 跨層重複,故應在題庫載入期補檢查。
 - 3.2:**⚠ 4.2 的前置決策**:design 的 API Contract 說 `GET /api/positions/{id}` 回「起始局面**與題目資訊**」,但 Boundary Map 只有 `Routes → GameService`,無 `Routes → PositionRepository`,4.2 無合法途徑取得題目資訊。須決定由 `start()` 加傳 `Position`,或開放 Routes 直取題庫。
+- 3.3:**⚠ 4.1 / 4.2 的契約約束(review 以原始 UCI 獨立確認)**。真實引擎在黑方被將死時輸出 `info depth 0 score mate 0` + `bestmove (none)`,故**每一題的最後一手**會回傳 `BlackReply(move=None, signal=RED_WINNING, mate_in=0, over=True, winner=RED)`。三點後果:
+  - **`mate_in` 可能為 `0`** —— HTTP 模型與前端**不得**用 `if mate_in:` 或 `mate_in or None` 這類 falsy 判斷,必須用 `is not None`,否則終局那手的倒數會被吞掉
+  - **`move` 為 `None` 時 `signal` 仍可能有值** —— 兩者是獨立欄位,不得把「無著」實作成整個 reply 為空或省略信號欄位
+  - `move=None` 也可能搭配 `signal=UNKNOWN`(引擎一分未報時),契約須同時容得下兩種組合
+- 3.3:`classify_score()` 對非 mate 分數**直接短路,不讀 value** —— cp 的正負號連看都不看。實測 200k 節點下某個實為 `mate -15` 的局面回報 `cp 526`,方向相反,據以推斷等於在使用者必勝時告訴他正在落敗。
+- 3.3:應手與走後狀態**共用同一次借用**(`test_black_reply_borrows_exactly_one_engine` 以計數釘住)。借兩次會讓每手棋通過併發閘門兩次,直接壓縮可承載人數。
