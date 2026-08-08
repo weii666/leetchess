@@ -21,7 +21,7 @@
 
 ## 2. 純函式:自 POC 移植
 
-- [ ] 2.1 (P) 移植 FEN 解析與著法套用
+- [x] 2.1 (P) 移植 FEN 解析與著法套用
   - 自 `poc/index.html` 的 `parseFen`(第 105 行)與 `applyMove`(第 118 行)移植到 `web/fen.js`
   - 純函式,不碰 DOM、不發請求
   - 完成狀態:以 `page.evaluate()` 驗證起始局面解析正確、含吃子的著法套用後盤面正確
@@ -139,3 +139,7 @@
 - 1.2:遮蔽只吃 `/api` 與 `/api/...`,**不會擋到 `web/api.js`**(任務 4.1 的檔案)—— review 已實測 `/api.js` 回 200。但 `web/api/` 這種子目錄會被遮蔽,design 的 `web/` 佈局是扁平的,不受影響。
 - 1.2:`index.html` 已預先接上 `./style.css` 與 `./app.js`,兩者尚不存在故 console 有兩筆 404。**這是必要的** —— 任務 4.3/4.4/5.1 的 boundary 都不含 `index.html`,進入點必須現在備妥。
 - 1.2:骨架容器 id:`#board`、`#puzzle-title`、`#puzzle-source`、`#puzzle-max-dtm`、`#turn`、`#signal`、`#waiting`、`#error`、`#moves`、`#reset`。後續任務直接用這些。
+- 2.1:**ES modules 無法自 `file://` 載入** —— Chromium 以 CORS 擋下(origin 為 `null`)。所有 `web/*.js` 的瀏覽器測試必須經 http(s) origin;`tests/test_web_pure.py` 以 `page.route()` 合成 origin 就地供**真實交付檔**,不啟動伺服器進程。後續任務沿用該手法。
+- 2.1:`web/fen.js` 匯出 `parseFen`、`applyMove`、`sq2fr`、`fr2sq`、`FILES`、`RANKS`。函式本體與 POC 第 105-123 行**逐字元相同**,只加了 `export`。
+- 2.1:**`NAMES`(棋子代碼到中文名)歸 `fen.js`**(parent 決定,經 review 提請)。原因:2.2 的 boundary 是 `notation.js`、3.1 是 `board.js`,兩者互不相交卻都需要它,不指定位置必然各做一份並隨時間漂移;而棋子代碼本來就是 FEN 的一部分,`fen.js` 又是最左端的共同依賴。**任務 2.2 獲授權將 `NAMES` 移入 `fen.js` 並匯出;任務 3.1 從該處匯入,不得自行定義。**
+- 2.1:`applyMove` 對越界或畸形 UCI 不做防護,會靜默寫壞盤面。這是 POC 既有契約且合法性判定明列為 Out of Boundary(著法一律來自後端),移植任務不自行加碼。
