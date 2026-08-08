@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>象棋排局挑戰</title>
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<!--
+  本檔只有容器,沒有互動邏輯也沒有樣式:內容由 app.js 填入(tasks 4.3、4.4),
+  版面由 style.css 決定(tasks 5.1)。那兩個任務的 boundary 都碰不到本檔,
+  因此每一個容器都必須在此一次備齊。
+-->
+<main id="board" aria-label="棋盤"></main>
+
+<aside id="sidebar">
+  <section id="puzzle-info">
+    <h1 id="puzzle-title">載入中…</h1>
+    <p>出處:<span id="puzzle-source">—</span></p>
+    <p>最長殺著距離:<span id="puzzle-max-dtm">—</span></p>
+  </section>
+
+  <!-- 當前輪方須對使用者可辨識(8.4)。 -->
+  <p id="turn">輪方:—</p>
+
+  <!--
+    三態諮詢信號。它是參考資訊而非勝負判決(4.4),故標為 note 而非 status:
+    對局是否結束只看後端回應,信號為任何值都不得使對局提早停下。
+  -->
+  <section id="signal" role="note">勝負難料</section>
+
+  <!-- 等待後端回應期間呈現,回應或失敗後皆解除(6.1、6.4)。 -->
+  <p id="waiting" hidden>引擎思考中…</p>
+
+  <!--
+    錯誤以單一通用區塊呈現,不為每種錯誤各做一套 UI(design 的 Error Handling);
+    區分只需到「可重試」與「須重來」兩類,兩者共用這一個位置。
+  -->
+  <p id="error" role="alert" hidden></p>
+
+  <button id="reset" type="button">重來</button>
+
+  <section id="moves-panel">
+    <h2>歷史著法</h2>
+    <ol id="moves"></ol>
+  </section>
+</aside>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

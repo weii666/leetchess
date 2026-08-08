@@ -1,4 +1,5 @@
-"""FastAPI 應用的組裝:三個端點、啟動與關閉掛鉤、`ServiceError` 的錯誤映射。
+"""FastAPI 應用的組裝:三個端點、前端靜態檔的掛載、啟動與關閉掛鉤、`ServiceError`
+的錯誤映射。
 
 依賴方向為 `types / errors -> config -> positions / engine -> game -> models -> main`,
 本模組位於最右端:可向左匯入全部,但**沒有任何模組匯入它**。這使 app 的組裝方式
@@ -45,6 +46,10 @@
 會告訴 client 題目不見了,而真正的問題是它的網址打錯;`INTERNAL` 則把 client 的筆誤
 升級成伺服器故障。要正確表達需要新增第八種類別碼,那是 design 層級的決定。
 
+**前端掛在根路徑上,但看不見 `/api`。** 根掛載本會把 `/api` 的路由層 404 與 405 一併
+接走,使上一段的區分消失;`_WebFiles` 因此把整個前綴對靜態檔遮蔽。`web/` 的內容不屬
+於本服務,這裡只提供掛載點(`structure.md` 的「`service/` 與 `web/` 的交界」)。
+
 **回應一律不帶例外自身的文字。** 未預期例外的訊息裡就是路徑、堆疊與引擎輸出
 (5.4);細節以 `exc_info` 留在服務端日誌,回應只給固定的通用敘述。這條規則對
 503 與 504 一樣管用:`ErrorResponse.from_error` 取的是 `ServiceError.message`,不是
@@ -59,6 +64,7 @@
 from __future__ import annotations
 
 import logging
+import pathlib
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
@@ -68,7 +74,10 @@ from anyio import CapacityLimiter
 from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
+from starlette.routing import Match, Mount
+from starlette.types import Scope
 
 from service.config import Settings, load_settings
 from service.engine.pool import EnginePool
@@ -92,6 +101,8 @@ __all__ = [
     "MIN_THREADPOOL_CAPACITY",
     "THREADPOOL_HEADROOM_FACTOR",
     "MALFORMED_REQUEST_MESSAGE",
+    "API_PREFIX",
+    "WEB_DIR",
     "threadpool_capacity",
     "create_app",
     "app",
@@ -137,7 +148,11 @@ def _repository(request: Request) -> PositionRepository:
 Service = Annotated[GameService, Depends(_service)]
 Repository = Annotated[PositionRepository, Depends(_repository)]
 
-router = APIRouter(prefix="/api")
+#: 三個端點共用的路徑前綴。前端靜態檔掛在根路徑上,因此這個前綴同時也是
+#: 「靜態檔看不見的範圍」,見 `_WebFiles`。
+API_PREFIX = "/api"
+
+router = APIRouter(prefix=API_PREFIX)
 
 
 # --- 端點 ---------------------------------------------------------------
@@ -278,6 +293,60 @@ def _handle_unexpected_error(request: Request, exc: Exception) -> Response:
     return _error_response(InternalError())
 
 
+# --- 前端靜態檔 ---------------------------------------------------------
+
+
+#: 前端所在目錄(`web/`)。頁面由本服務掛靜態檔提供,與 API **同源**,因此不需要
+#: 任何 CORS 設定,本地開發也只需啟動一個進程(`structure.md`)。
+#: 這條掛載是 `service/` 與 `web/` 的唯一實體交界:`web/` 的內容不屬於本服務,
+#: 本服務只提供掛載點。
+WEB_DIR = pathlib.Path(__file__).resolve().parent.parent / "web"
+
+
+class _WebFiles(Mount):
+    """掛在根路徑上、但**看不見 `/api`** 的靜態檔路由。
+
+    根掛載對任何路徑都是 FULL 比對,而 starlette 的 FULL 一律勝過 PARTIAL ——
+    `GET /api/state`(端點只收 POST)本該由路由層回 405,被靜態檔接走之後會退化成
+    「找不到這個檔案」。前端因此再也分不出「網址打錯」與「方法用錯」,而那兩種
+    形狀正是 `api.js` 要辨識的第二類錯誤。
+
+    讓 `/api` 開頭的路徑對本路由不可見,方法不符與網址打錯就仍由路由層自己回答。
+    這也使正確性不再取決於「掛載寫在 `include_router` 後面」這個順序 —— 順序哪天
+    被調換,端點也不會安靜地被靜態檔吃掉。
+    """
+
+    def matches(self, scope: Scope) -> tuple[Match, Scope]:
+        if scope.get("type") == "http" and _is_api_path(scope):
+            return Match.NONE, {}
+        return super().matches(scope)
+
+
+def _is_api_path(scope: Scope) -> bool:
+    """該請求是否落在 API 的路徑前綴底下。
+
+    比對的是**去掉 `root_path` 之後**的路徑:服務若被掛在某個子路徑後面,
+    `scope["path"]` 會帶著那段前綴,直接比對會使遮蔽失效。
+    """
+    path: str = scope.get("path", "")
+    root_path: str = scope.get("root_path", "")
+    if root_path and path.startswith(root_path):
+        path = path[len(root_path) :]
+    return path == API_PREFIX or path.startswith(f"{API_PREFIX}/")
+
+
+def _mount_web(app: FastAPI) -> None:
+    """把 `web/` 掛在根路徑上。
+
+    `html=True` 使目錄請求落到該目錄的 `index.html`,根路徑因此直接就是對局頁面。
+    目錄不存在時 `StaticFiles` 會在此當場拋出而不是靜默略過 —— `web/` 是進版本庫的
+    交付物,缺了它服務就沒有前端可提供,晚一點才以 404 現形只會更難查。
+    """
+    app.router.routes.append(
+        _WebFiles("/", app=StaticFiles(directory=WEB_DIR, html=True), name="web")
+    )
+
+
 # --- 生命週期 -----------------------------------------------------------
 
 
@@ -352,6 +421,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ServerErrorMiddleware 處理,而那一層在送出本回應之後仍會把原例外往外拋,好讓
     # 伺服器留下完整堆疊。外洩與否只看送出去的這份回應,堆疊留在服務端正是要的。
     app.add_exception_handler(Exception, _handle_unexpected_error)
+    # 前端掛在最後:比對順序上端點永遠先被試過,而 `_WebFiles` 另外把 `/api` 整段
+    # 遮掉,兩層各自成立 —— 前者是慣例,後者是保證。
+    _mount_web(app)
     return app
 
 

@@ -11,7 +11,7 @@
   - 完成狀態:`uv run pytest` 中有一個 Playwright 測試實際開啟瀏覽器、執行一段 JS 並取回結果;既有 335 個測試不退化
   - 若瀏覽器下載在此環境不可行,**立即回報而非繼續往下做** —— 整個測試策略需重議
 
-- [ ] 1.2 建立頁面骨架並由後端掛載靜態檔
+- [x] 1.2 建立頁面骨架並由後端掛載靜態檔
   - 建立 `web/index.html` 的版面骨架:盤面容器、側欄(題目資訊、信號、歷史著法、重來)、錯誤提示區
   - **在 `service/main.py` 加入 `web/` 的靜態檔掛載** —— 這是本 spec 唯一的跨目錄改動,與 API 同源因此不需要 CORS
   - 所有使用者可見文字為繁體中文
@@ -135,3 +135,7 @@
 - 1.1:**瀏覽器 binary 不由 `uv sync` 取得**,新環境須 `uv run playwright install chromium`(務必指明 chromium,裸跑會多抓 firefox 與 webkit 約 1GB)。已寫入 `tech.md`。
 - 1.1:夾具在 `tests/conftest_web.py`,經 `tests/conftest.py` 註冊。`browser` 為 session 級、`browser_page` 為 function 級並每測試獨立 context(cookie / storage / `page.route()` 規則彼此隔離)。**後續任務直接用 `browser_page`**。
 - 1.1:`playwright` 的 import 刻意置於夾具函式內而非模組頂層。review 實測該惰性省下約 25-30ms、對整體套件時間無可測影響 —— 真正的節省來自 pytest session 夾具本身的惰性,不需額外保護。
+- 1.2:**根掛載會破壞路由層的 404/405 區分**。starlette 的路由比對中根 `Mount` 對任何路徑都是 FULL match,勝過 API 路由的 PARTIAL —— 實測無遮蔽時 `GET /api/state` 由 405 退化成 404,正好抹掉 engine-service 4.3 刻意保留、且 `api.js` 需要辨識的那個區分。`service/main.py` 的 `_WebFiles` 讓 `/api` 前綴對靜態檔回 `Match.NONE`,**保護不依賴掛載順序**(review 已以掛載順序突變確認)。
+- 1.2:遮蔽只吃 `/api` 與 `/api/...`,**不會擋到 `web/api.js`**(任務 4.1 的檔案)—— review 已實測 `/api.js` 回 200。但 `web/api/` 這種子目錄會被遮蔽,design 的 `web/` 佈局是扁平的,不受影響。
+- 1.2:`index.html` 已預先接上 `./style.css` 與 `./app.js`,兩者尚不存在故 console 有兩筆 404。**這是必要的** —— 任務 4.3/4.4/5.1 的 boundary 都不含 `index.html`,進入點必須現在備妥。
+- 1.2:骨架容器 id:`#board`、`#puzzle-title`、`#puzzle-source`、`#puzzle-max-dtm`、`#turn`、`#signal`、`#waiting`、`#error`、`#moves`、`#reset`。後續任務直接用這些。
