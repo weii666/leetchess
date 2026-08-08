@@ -35,6 +35,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from service.config import Settings
+from service.errors import ErrorCode, InternalError
 from service.main import (
     MIN_THREADPOOL_CAPACITY,
     create_app,
@@ -117,6 +118,7 @@ def make_client(tmp_path: pathlib.Path, fake_engine):
         *,
         start_side: Side = Side.RED,
         pool_size: int = 1,
+        raise_server_exceptions: bool = True,
     ) -> TestClient:
         counter["n"] += 1
         root = tmp_path / f"corpus_{counter['n']}"
@@ -124,7 +126,10 @@ def make_client(tmp_path: pathlib.Path, fake_engine):
         _write_position(root, start_side, fen)
         engine = fake_engine(mode)
         app = create_app(_settings(engine.path, root, pool_size))
-        client = TestClient(app)
+        # 未捕捉的例外一律由全域處理器轉成回應,但 starlette 在送出回應之後仍會把
+        # 原例外往外拋(好讓伺服器留下日誌)。測試要斷言的是**送出去的那份回應**,
+        # 故此處關掉再拋 —— 打開時 TestClient 會先於斷言把例外丟回測試函式。
+        client = TestClient(app, raise_server_exceptions=raise_server_exceptions)
         client.__enter__()
         clients.append(client)
         return client
@@ -463,3 +468,292 @@ def test_requests_reach_the_pool_concurrently_instead_of_queueing_in_the_threadp
         f"{request_count} 個請求耗時 {elapsed:.2f} 秒,"
         f"接近序列化的 {serialized:.2f} 秒 —— 請求被 threadpool 卡住了"
     )
+
+
+# --- 全域錯誤處理(tasks 4.3、requirements 4.4、5.1、5.4)-----------------
+
+
+class _ExplodingService:
+    """借走一個引擎之後才炸掉的對局服務替身。
+
+    存在的理由是**未捕捉例外的路徑無法用真實協作者製造** —— 服務層與引擎層都已把
+    自己的失敗收斂成 `ServiceError`,那條路徑走的是既有的映射。此替身模擬「日後有人
+    在借用中途寫出一個沒人預期的例外」:池的資源必須照樣回來(4.4),而例外攜帶的
+    路徑與堆疊文字**不得**出現在回應裡(5.4)。
+
+    例外訊息刻意塞進真實檔案路徑、假堆疊與引擎輸出樣本,使外洩一旦發生就會被斷言
+    抓到 —— 訊息乾淨的例外證明不了處理器有在收斂。
+    """
+
+    def __init__(self, pool) -> None:
+        self._pool = pool
+
+    def state(self, position_id: int, moves: list[str]):
+        del position_id, moves
+        with self._pool.acquire():
+            raise RuntimeError(
+                f'Traceback (most recent call last):\n  File "{__file__}", line 1\n'
+                "bestmove e8f9 ponder e9f9"
+            )
+
+
+#: 內部細節的痕跡:專案路徑、任何 Python 檔名、堆疊追蹤(5.4)。
+INTERNAL_MARKERS = (
+    str(pathlib.Path(__file__).resolve().parent.parent),
+    "/Users/",
+    ".py",
+    "Traceback",
+    'File "',
+    "site-packages",
+)
+
+#: 引擎原始輸出的痕跡,取自 `tests/fakes/fake_engine.py` 實際會吐的字串(5.4)。
+ENGINE_OUTPUT_MARKERS = (
+    "bestmove",
+    "uciok",
+    "readyok",
+    "info depth",
+    "Nodes searched",
+    "Fen:",
+    "score mate",
+    "score cp",
+)
+
+#: 「連續」觸發錯誤的次數。單次成功歸還證明不了不變量 —— 每次漏還一格的洩漏,
+#: 正好要重複觸發才會把池吃乾淨。
+FAILURE_REPEATS = 7
+
+#: 七種對外錯誤類別碼(`service/errors.py` 為唯一來源)。回應只能落在這個集合裡。
+ERROR_CODES = frozenset(code.value for code in ErrorCode)
+
+
+def _assert_is_an_error_payload(response) -> None:
+    """回應必須是 `{code, message}` 這一個形狀,別無其他欄位(5.1)。"""
+    payload = response.json()
+    assert set(payload) == {"code", "message"}, (
+        f"錯誤回應形狀不是契約的 {{code, message}}:{payload}"
+    )
+    assert payload["code"] in ERROR_CODES, f"類別碼不在七種之內:{payload['code']}"
+    assert payload["message"], "訊息不得為空,client 要能直接顯示"
+
+
+def _assert_leaks_nothing(response) -> None:
+    """回應全文不得帶內部路徑、堆疊追蹤或引擎原始輸出(5.4)。
+
+    斷言的對象是**整份回應本文**而不只是 `message` —— 外洩可能發生在任何一個欄位,
+    只看訊息等於預先假設了外洩會出現在哪裡。
+    """
+    text = response.text
+    for marker in INTERNAL_MARKERS:
+        assert marker not in text, f"回應帶了內部細節「{marker}」:{text}"
+    for marker in ENGINE_OUTPUT_MARKERS:
+        assert marker not in text, f"回應帶了引擎原始輸出「{marker}」:{text}"
+
+
+# --- 結構性驗證失敗也要走契約形狀(5.1) -------------------------------
+
+
+@pytest.mark.parametrize(
+    ("case", "body"),
+    [
+        ("extra_field", {"position_id": PUZZLE_ID, "move": [], "moves": []}),
+        ("wrong_type", {"position_id": "abc", "moves": []}),
+        ("moves_not_a_list", {"position_id": PUZZLE_ID, "moves": "e8f9"}),
+        ("missing_field", {}),
+    ],
+)
+def test_structural_validation_failures_use_the_error_contract_shape(
+    make_client, case: str, body: dict[str, Any]
+) -> None:
+    """5.1:請求形狀不合法時,回應仍是 `{code, message}`,不是框架的 `{detail: [...]}`。
+
+    形狀不合法與著法不合法都是同一件事的兩種表現 —— **client 送出的請求無法被處理**。
+    兩者回不同形狀的話,client 得為錯誤回應寫兩套解析,5.1 的「可程式判別」就落空了。
+    """
+    del case
+    response = make_client().post("/api/state", json=body)
+
+    assert response.status_code == 400
+    _assert_is_an_error_payload(response)
+    assert response.json()["code"] == "INVALID_MOVE_FORMAT"
+    assert "detail" not in response.json()
+
+
+def test_a_non_integer_position_id_is_reported_as_a_missing_puzzle(
+    make_client,
+) -> None:
+    """題號不是整數時回 404 —— 與題號不存在同一個類別碼。
+
+    `position_id` 是整組 API **唯一**的路徑參數,因此「路徑參數不合法」與「沒有這個
+    題目」在此完全等價,client 的處置也相同(回題目列表)。回 `INVALID_MOVE_FORMAT`
+    則會叫 client 去檢查它根本沒送出的著法。
+    """
+    response = make_client().get("/api/positions/abc")
+
+    assert response.status_code == 404
+    _assert_is_an_error_payload(response)
+    assert response.json()["code"] == "POSITION_NOT_FOUND"
+
+
+def test_structural_validation_failures_do_not_echo_the_offending_input(
+    make_client,
+) -> None:
+    """驗證細節不得原樣回放:框架的錯誤項目帶著 `input` 與使用者自訂的欄位名。
+
+    直接把 `exc.errors()` 序列化出去,等於讓請求方決定回應內容 —— 送一個長得像檔案
+    路徑的欄位名進來,它就會從錯誤回應裡再冒出來(5.4)。
+    """
+    response = make_client().post(
+        "/api/state",
+        json={"position_id": PUZZLE_ID, "moves": [], "/Users/secret/leak.py": "x"},
+    )
+
+    assert response.status_code == 400
+    _assert_is_an_error_payload(response)
+    _assert_leaks_nothing(response)
+    assert "leak" not in response.text
+
+
+# --- 未捕捉的例外一律轉 INTERNAL(4.4、5.4) ---------------------------
+
+
+def test_unexpected_exceptions_are_reported_as_internal_errors(make_client) -> None:
+    """5.1、5.4:沒人預期的例外轉成 `INTERNAL`(500),且訊息是固定的通用敘述。"""
+    client = make_client(raise_server_exceptions=False)
+    client.app.state.service = _ExplodingService(client.app.state.pool)
+
+    response = client.post("/api/state", json={"position_id": PUZZLE_ID, "moves": []})
+
+    assert response.status_code == 500
+    _assert_is_an_error_payload(response)
+    assert response.json()["code"] == "INTERNAL"
+    assert response.json()["message"] == InternalError().message
+    _assert_leaks_nothing(response)
+
+
+def test_unexpected_exceptions_do_not_leak_the_exception_text(make_client) -> None:
+    """例外訊息本身**不得**成為回應訊息 —— 它裡面就是路徑、堆疊與引擎輸出(5.4)。"""
+    client = make_client(raise_server_exceptions=False)
+    client.app.state.service = _ExplodingService(client.app.state.pool)
+
+    response = client.post("/api/state", json={"position_id": PUZZLE_ID, "moves": []})
+
+    _assert_leaks_nothing(response)
+    assert "line 1" not in response.text
+
+
+@pytest.mark.parametrize(
+    ("mode", "status", "code"),
+    [
+        ("exit_on_go", 500, "INTERNAL"),
+        ("mute_on_display", 504, "ENGINE_TIMEOUT"),
+        ("ignores_moves", 409, "ILLEGAL_MOVE_SEQUENCE"),
+    ],
+)
+def test_engine_layer_failures_report_stable_codes_without_leaking(
+    make_client, mode: str, status: int, code: str
+) -> None:
+    """引擎崩潰、逾時、序列走不出:各有穩定的類別碼,且回應不帶引擎原始輸出(5.4)。
+
+    這三種模式都是**引擎已經吐過東西之後**才失敗的,因此正是「順手把引擎輸出塞進
+    訊息」最容易發生的地方。
+    """
+    client = make_client(mode)
+
+    response = client.post(
+        "/api/state", json={"position_id": PUZZLE_ID, "moves": ["e8f9"]}
+    )
+
+    assert response.status_code == status
+    _assert_is_an_error_payload(response)
+    assert response.json()["code"] == code
+    _assert_leaks_nothing(response)
+
+
+def test_service_busy_does_not_leak_internal_details(make_client) -> None:
+    """3.3 的忙碌回應同樣受 5.4 管轄。"""
+    client = make_client(pool_size=1)
+
+    with client.app.state.pool.acquire():
+        response = client.post(
+            "/api/state", json={"position_id": PUZZLE_ID, "moves": []}
+        )
+
+    assert response.status_code == 503
+    _assert_is_an_error_payload(response)
+    _assert_leaks_nothing(response)
+
+
+# --- 失敗路徑不洩漏池中資源(4.4) -------------------------------------
+
+
+@pytest.mark.parametrize("mode", ["ignores_moves", "mute_on_display", "exit_on_go"])
+def test_repeated_engine_failures_leave_the_pool_at_full_capacity(
+    make_client, mode: str
+) -> None:
+    """4.4:連續失敗之後,池中可用引擎數回復原值,每一次都給得出穩定的類別碼。
+
+    重複觸發是必要的 —— 每次漏還一格的洩漏,單次觀察時池裡還有別的引擎頂著,
+    要連續觸發才會把容量吃乾淨,而那正是服務躺平的方式。
+
+    **此處刻意不釘死每一次的類別碼**:逾時與串流結束會把該進程標記為不健康,後續
+    請求因此改回 `INTERNAL`(重建屬 tasks 2.5)。要釘的是「每一次都落在七種類別碼
+    之內、形狀一致、不外洩」,單次失敗的精確類別碼由上一組測試負責。
+    """
+    pool_size = 2
+    client = make_client(mode, pool_size=pool_size)
+
+    for _ in range(FAILURE_REPEATS):
+        response = client.post(
+            "/api/state", json={"position_id": PUZZLE_ID, "moves": ["e8f9"]}
+        )
+        assert response.status_code >= 400
+        _assert_is_an_error_payload(response)
+        _assert_leaks_nothing(response)
+
+    assert client.app.state.pool.available_count == pool_size
+    assert client.app.state.pool.borrowed_count == 0
+
+
+def test_repeated_unexpected_failures_leave_the_pool_at_full_capacity(
+    make_client,
+) -> None:
+    """4.4:未捕捉的例外同樣不得吃掉池中的名額。
+
+    替身在**借用中途**炸掉,因此這裡問的不是「服務層記得歸還嗎」,而是借用的離開
+    路徑是否為語言保證。漏還一格就少一格,連續三次之後池就空了。
+    """
+    pool_size = 2
+    client = make_client(pool_size=pool_size, raise_server_exceptions=False)
+    client.app.state.service = _ExplodingService(client.app.state.pool)
+
+    for _ in range(FAILURE_REPEATS):
+        response = client.post(
+            "/api/state", json={"position_id": PUZZLE_ID, "moves": []}
+        )
+        assert response.status_code == 500
+        assert response.json()["code"] == "INTERNAL"
+
+    assert client.app.state.pool.available_count == pool_size
+    assert client.app.state.pool.borrowed_count == 0
+
+
+def test_the_service_still_answers_after_a_run_of_failures(make_client) -> None:
+    """4.4 的整句話:單次(乃至連續)失敗之後,服務仍答得出正常請求。"""
+    client = make_client(pool_size=2, raise_server_exceptions=False)
+    healthy = client.app.state.service
+    client.app.state.service = _ExplodingService(client.app.state.pool)
+
+    for _ in range(FAILURE_REPEATS):
+        assert (
+            client.post(
+                "/api/state", json={"position_id": PUZZLE_ID, "moves": []}
+            ).status_code
+            == 500
+        )
+
+    client.app.state.service = healthy
+    response = client.post("/api/state", json={"position_id": PUZZLE_ID, "moves": []})
+
+    assert response.status_code == 200
+    assert response.json()["legal_moves"] == FAKE_LEGAL_MOVES

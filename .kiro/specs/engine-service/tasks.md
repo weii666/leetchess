@@ -119,7 +119,7 @@
   - _Requirements: 1.1, 1.4, 6.1_
   - _Boundary: HTTP Routes_
 
-- [ ] 4.3 實作全域錯誤處理與錯誤類別映射
+- [x] 4.3 實作全域錯誤處理與錯誤類別映射
   - 將服務層與引擎層拋出的例外映射為對應的錯誤類別與狀態碼
   - 未捕捉的例外一律轉為內部錯誤類別,**回應不得包含內部路徑、堆疊追蹤或引擎原始輸出**
   - 任何失敗路徑都必須確保引擎已歸還或標記待重建,不因例外而洩漏池中資源
@@ -243,3 +243,6 @@
 - 4.2:`main.py` 作為 composition root **直接持有 `PositionRepository`** 取題目資訊與出處(未改 `game.py`)。design 的 Boundary Map 與 Components 表已補上 `Routes → PositionRepository`。
 - 4.2:**`MIN_THREADPOOL_CAPACITY = 40` 恰好等於 anyio 的預設 `total_tokens`**。首輪 review 因此發現:小池的 threadpool 測試只是在驗證 anyio 免費給的值,刪掉整行容量賦值測試照樣全過。已補參數化至 `pool_size=11`(容量 44),**任務 2.3 調整池大小時這組測試才真正有保護作用**。
 - 4.2:`EnginePool` 的 `startup_timeout` 沿用進程層預設值,`Settings` 無此欄位,design 的「請求的時間預算」也不涵蓋啟動握手。日後可考慮納入設定。
+- 4.3:**結構性錯誤映射到既有類別碼是刻意妥協** —— 七種類別碼是凍結契約、`errors.py` 不得改,而 design 的 API Contract 對三個端點只列 400/404/409/503/504,框架原生的 422 本就不在允許範圍。body/query/header 的結構性錯誤 → `INVALID_MOVE_FORMAT` (400) 配固定訊息「請求格式不合法」;**路徑參數 → `POSITION_NOT_FOUND` (404)**,因為 `GET /api/positions/{id}` 的 Errors 只列 404/503,且該端點沒有 query 或 header,路徑參數是它唯一可能的驗證錯誤來源。**日後新增任何路徑參數都必須回來重新分流。**
+- 4.3:**路由層刻意不在 `{code, message}` 契約內** —— 打不到路由(404)與方法不符(405)仍回框架原生的 `{"detail": ...}`。七種類別碼裡沒有一種誠實描述「這個 URL 不存在」。要正確表達需新增第八種類別碼,屬 design 層級決定。
+- 4.3:未捕捉例外用 `InternalError()` **不傳訊息**(1.2 的設計會丟棄它),細節走 `logger.error(exc_info=...)` 留在伺服器端。review 以實際伺服器驗證:訊息含真實路徑、堆疊、`bestmove`、`score cp`、`Fen:` 的例外,回應 body 與 headers 共 17 個標記零命中,細節完整留在日誌。

@@ -30,28 +30,54 @@
 請求從未進入函式本體,連借引擎的那行程式碼都沒機會執行(5.2)。若改成在函式內
 手動 `model_validate`,借用可能已經先發生,3.3 的容量就被無效請求吃掉了。
 
-## 錯誤處理
+## 錯誤處理:三個處理器,一個出口
 
-此處只註冊 `ServiceError` 的映射:七種錯誤類別各自的 HTTP 狀態與 `{code, message}`
-形狀。**未捕捉例外一律轉 `INTERNAL`、`RequestValidationError` 的契約形狀,以及
-不外洩路徑與堆疊的驗證,屬任務 4.3**,不在此完成。
+**進到端點之後**的失敗有三種來源,對外只有一種形狀 —— `{code, message}`,類別碼恆為
+七種之一(5.1)。三個處理器把三種來源收斂到同一個 `_error_response()`:
+
+- `ServiceError`:服務層與引擎層自己宣告的失敗,狀態碼與訊息都由例外自己帶。
+- `RequestValidationError`:請求形狀不合法。框架原生的 `{"detail": [...]}` 不是本服務
+  的契約,client 若要為它另寫一套解析,5.1 的「可程式判別」就落空了。
+- `Exception`:沒人預期的失敗,一律轉 `INTERNAL`(500)。
+
+**路由層刻意不在此契約內。** 打不到任何路由(404)與方法不符(405)仍是框架原生的
+`{"detail": ...}`。七種類別碼裡沒有一種誠實描述「這個 URL 不存在」:`POSITION_NOT_FOUND`
+會告訴 client 題目不見了,而真正的問題是它的網址打錯;`INTERNAL` 則把 client 的筆誤
+升級成伺服器故障。要正確表達需要新增第八種類別碼,那是 design 層級的決定。
+
+**回應一律不帶例外自身的文字。** 未預期例外的訊息裡就是路徑、堆疊與引擎輸出
+(5.4);細節以 `exc_info` 留在服務端日誌,回應只給固定的通用敘述。這條規則對
+503 與 504 一樣管用:`ErrorResponse.from_error` 取的是 `ServiceError.message`,不是
+`str(exc)`,引擎吐了什麼都到不了使用者眼前。
+
+### 結構性驗證失敗用哪個類別碼
+
+設計的錯誤類別表沒有 422 這一列,API Contract 也只允許 400/404/409/503/504 —— 因此
+結構性錯誤必須落在既有的七種之內,見 `_structural_error()` 的分流理由。
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import logging
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
-from typing import Annotated
+from typing import Annotated, Any
 
 import anyio.to_thread
 from anyio import CapacityLimiter
 from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
 from service.config import Settings, load_settings
 from service.engine.pool import EnginePool
-from service.errors import ServiceError
+from service.errors import (
+    InternalError,
+    InvalidMoveFormatError,
+    PositionNotFoundError,
+    ServiceError,
+)
 from service.game import GameService
 from service.models import (
     BlackMoveResponse,
@@ -65,6 +91,7 @@ from service.positions import PositionRepository
 __all__ = [
     "MIN_THREADPOOL_CAPACITY",
     "THREADPOOL_HEADROOM_FACTOR",
+    "MALFORMED_REQUEST_MESSAGE",
     "threadpool_capacity",
     "create_app",
     "app",
@@ -156,21 +183,99 @@ def read_black_move(body: MoveSequenceRequest, service: Service) -> BlackMoveRes
     )
 
 
-# --- 錯誤映射(最小集合;完整處理見任務 4.3) ---------------------------
+# --- 錯誤映射 -----------------------------------------------------------
 
 
-def _handle_service_error(request: Request, exc: ServiceError) -> Response:
-    """把服務例外映射為它自己宣告的 HTTP 狀態與 `{code, message}`(5.1)。
+#: 請求形狀不合法時的對外訊息。**固定字串,不帶任何請求內容** —— 框架的驗證細節
+#: 裡有 `input`(原樣回放請求值)與使用者自訂的欄位名,把它們序列化出去等於讓請求
+#: 方決定回應內容(5.4)。
+MALFORMED_REQUEST_MESSAGE = "請求格式不合法"
+
+#: 驗證錯誤的位置前綴,代表出錯的是路徑參數而非請求主體。
+_PATH_LOCATION = "path"
+
+#: 未捕捉例外的服務端日誌。細節只走 `exc_info`,不進回應(5.4)。
+_logger = logging.getLogger(__name__)
+
+
+def _error_response(error: ServiceError) -> Response:
+    """所有失敗路徑的**唯一**出口:契約形狀加上例外自己宣告的狀態碼(5.1)。
 
     狀態碼取自 `ServiceError.http_status`,訊息取自 `ErrorResponse.from_error`——
     兩者都以 `errors.py` 為唯一來源,此處不再複述任何一條映射規則,否則兩處遲早
-    漂移。
+    漂移。三個處理器共用這一個出口,新增處理器時形狀不必再對一次。
     """
-    del request  # 錯誤回應不因請求內容而異,也不回放請求內容。
-    error = ErrorResponse.from_error(exc)
     return JSONResponse(
-        status_code=exc.http_status, content=error.model_dump(mode="json")
+        status_code=error.http_status,
+        content=ErrorResponse.from_error(error).model_dump(mode="json"),
     )
+
+
+def _handle_service_error(request: Request, exc: ServiceError) -> Response:
+    """服務層與引擎層宣告的失敗:狀態碼與訊息都由例外自己帶(5.1)。"""
+    del request  # 錯誤回應不因請求內容而異,也不回放請求內容。
+    return _error_response(exc)
+
+
+def _handle_validation_error(request: Request, exc: RequestValidationError) -> Response:
+    """請求形狀不合法時,改用本服務的契約形狀而非框架原生的 `{"detail": [...]}`。
+
+    形狀不合法與著法不合法是同一件事的兩種表現:**client 送出的請求無法被處理**。
+    兩者回不同形狀的話,client 得為錯誤回應寫兩套解析,5.1 的「可程式判別」就落空了。
+    """
+    del request
+    return _error_response(_structural_error(exc))
+
+
+def _structural_error(exc: RequestValidationError) -> ServiceError:
+    """把結構性驗證失敗歸到七種錯誤類別之一。
+
+    ## 為什麼不是新增一種類別碼
+
+    七種類別碼是對外契約(5.1),而 design 的錯誤類別表沒有 422 這一列 —— API
+    Contract 對這三個端點只列出 400/404/409/503/504。結構性錯誤因此必須落在既有的
+    類別裡,而不是自行擴充契約。
+
+    ## 分流:路徑參數回 404,其餘回 400
+
+    `position_id` 是整組 API **唯一**的路徑參數(`GET /api/positions/{position_id}`),
+    因此「路徑參數不是整數」與「沒有這個題目」在此完全等價,client 的處置也相同
+    (回題目列表)。回 `INVALID_MOVE_FORMAT` 則是叫 client 去檢查它根本沒送出的
+    著法。**日後若新增別的路徑參數,這個等價就不再成立,須回來重新分流。**
+
+    其餘位置(主體、query、header)一律回 `INVALID_MOVE_FORMAT`(400):七種類別碼
+    裡只有它落在 400,而 400 正是 API Contract 給輸入錯誤的那一格。訊息另給
+    `MALFORMED_REQUEST_MESSAGE` 以與「某一手著法不合法」區分開來 —— 類別碼相同,
+    但人看得出差別。
+    """
+    if any(_is_path_error(error) for error in exc.errors()):
+        return PositionNotFoundError()
+    return InvalidMoveFormatError(MALFORMED_REQUEST_MESSAGE)
+
+
+def _is_path_error(error: Mapping[str, Any]) -> bool:
+    """該筆驗證錯誤是否出在路徑參數上。"""
+    location = error.get("loc", ())
+    return bool(location) and location[0] == _PATH_LOCATION
+
+
+def _handle_unexpected_error(request: Request, exc: Exception) -> Response:
+    """沒人預期的例外一律轉 `INTERNAL`(500),回應不帶例外自身的任何文字(5.4)。
+
+    未預期失敗的訊息裡就是路徑、堆疊與引擎輸出,因此回應走 `InternalError()`——
+    它**不接受**呼叫端傳入的訊息,連「順手把細節帶上」這個選項都不存在。要保留
+    細節只有例外鏈與日誌兩條路,兩條都留在服務端。
+
+    服務不因此停止:例外已經被攔在這裡,失敗的是這一個請求(4.4)。池中的引擎由
+    借用的情境管理器歸還,與本處理器無關 —— 那是語言保證,不是這裡補救得了的事。
+
+    堆疊在日誌裡會出現兩次:此處記一次,外層的 ServerErrorMiddleware 把原例外往外
+    拋之後伺服器再記一次。刻意不省 —— 少掉這一筆,日誌就只剩伺服器那份堆疊,看不出
+    「這個例外送出去的是哪一種回應」,而未預期失敗本就罕見,重複的代價很小。
+    """
+    del request
+    _logger.error("未捕捉的例外,已轉為 INTERNAL", exc_info=exc)
+    return _error_response(InternalError())
 
 
 # --- 生命週期 -----------------------------------------------------------
@@ -239,9 +344,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.threadpool_limiter = None
 
     app.include_router(router)
-    # 型別檢查器只認 `(Request, Exception) -> Response`;此處刻意收窄為 ServiceError,
+    # 型別檢查器只認 `(Request, Exception) -> Response`;前兩個處理器刻意收窄型別,
     # 由 starlette 依例外類別分派保證實際傳進來的一定是它。
     app.add_exception_handler(ServiceError, _handle_service_error)  # type: ignore[arg-type]
+    app.add_exception_handler(RequestValidationError, _handle_validation_error)  # type: ignore[arg-type]
+    # `Exception` 這一條是最後一道網,連前兩個處理器自己炸掉都接得住 —— 它由外層的
+    # ServerErrorMiddleware 處理,而那一層在送出本回應之後仍會把原例外往外拋,好讓
+    # 伺服器留下完整堆疊。外洩與否只看送出去的這份回應,堆疊留在服務端正是要的。
+    app.add_exception_handler(Exception, _handle_unexpected_error)
     return app
 
 
