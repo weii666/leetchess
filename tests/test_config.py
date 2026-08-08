@@ -33,7 +33,7 @@ def _env(**overrides: str) -> dict[str, str]:
 
 
 def test_settings_exposes_every_required_field() -> None:
-    """tasks 1.3 列出的七個設定項必須齊備。"""
+    """tasks 1.3 列出的七個設定項,加上 2.1 納入的引擎執行檔路徑。"""
     field_names = {f.name for f in dataclasses.fields(c.Settings)}
     assert field_names == {
         "pool_size",
@@ -43,6 +43,7 @@ def test_settings_exposes_every_required_field() -> None:
         "total_time_budget",
         "search_nodes",
         "positions_dir",
+        "engine_path",
     }
 
 
@@ -64,6 +65,11 @@ def test_search_nodes_default_follows_the_poc_measurement() -> None:
 
 def test_positions_dir_defaults_to_the_project_corpus_directory() -> None:
     assert c.load_settings(_env()).positions_dir == PROJECT_ROOT / "positions"
+
+
+def test_engine_path_defaults_to_the_locked_engine_binary() -> None:
+    """預設指向 engine/fetch.sh 取回的執行檔;可覆寫是測試放入替身的前提(2.1、5.5)。"""
+    assert c.load_settings(_env()).engine_path == PROJECT_ROOT / "engine" / "pikafish"
 
 
 def test_pool_size_default_is_provisional_and_overridable() -> None:
@@ -132,6 +138,7 @@ def test_the_budget_gate_also_guards_direct_construction() -> None:
             total_time_budget=2.0,
             search_nodes=200_000,
             positions_dir=PROJECT_ROOT / "positions",
+            engine_path=PROJECT_ROOT / "engine" / "pikafish",
         )
 
 
@@ -182,6 +189,7 @@ def test_every_setting_is_overridable_from_the_environment(tmp_path: pathlib.Pat
             LEETCHESS_TOTAL_TIME_BUDGET="12",
             LEETCHESS_SEARCH_NODES="500000",
             LEETCHESS_POSITIONS_DIR=str(tmp_path),
+            LEETCHESS_ENGINE_PATH=str(tmp_path / "fake-engine"),
         )
     )
     assert settings.pool_size == 3
@@ -191,6 +199,7 @@ def test_every_setting_is_overridable_from_the_environment(tmp_path: pathlib.Pat
     assert settings.total_time_budget == pytest.approx(12.0)
     assert settings.search_nodes == 500_000
     assert settings.positions_dir == tmp_path
+    assert settings.engine_path == tmp_path / "fake-engine"
 
 
 def test_load_settings_reads_os_environ_by_default(monkeypatch: pytest.MonkeyPatch) -> None:

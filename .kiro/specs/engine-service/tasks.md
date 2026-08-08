@@ -25,7 +25,7 @@
 
 ## 2. 引擎層:協定封裝與資源池
 
-- [ ] 2.1 實作引擎進程的 UCI 封裝與逾時讀取
+- [x] 2.1 實作引擎進程的 UCI 封裝與逾時讀取
   - 啟動單一引擎子進程並完成握手,固定單執行緒與 128MB 雜湊表設定
   - 移植 POC 已驗證的指令序列與輸出解析:合法著法查詢、應手查詢、mate 與 cp 分數解析
   - **所有讀取都必須有逾時上界** —— POC 阻塞於管線讀取且無逾時,引擎不輸出即執行緒永久卡死,此為本任務要解掉的核心技術債
@@ -205,3 +205,10 @@
 - 1.3:**待 2.3 順手修**(review 發現,不阻擋 1.3):`_trim()` 對 `inf` / `1e400` / `nan` 會拋 `OverflowError` 而非宣告的 `ValueError`,且訊息不指名是哪個環境變數。加 `math.isfinite` 防護即可。
 - 1.3:**預設值零餘裕** —— 三項分項之和(2.0+5.0+1.0)恰好等於總預算 8.0。字面符合 design「請求的時間預算」的等式,但 HTTP 序列化、請求解析、threadpool 排隊等池外開銷完全不在預算內,client 感受到的延遲必然超過總預算。屬 design 層級缺口,**2.3/2.5 取得實測數字時應提回 design 修訂**。
 - 1.3:`tests/test_module_boundaries.py` 的 allowlist 比對對 import 形式敏感 —— 合法的 `from service import types` 會被誤判失敗(誤拒不誤放)。config 日後需要 import `types` 時會踩到。
+- 2.1:**搜尋節點數的實測門檻(review 以全新進程逐檔驗證,冷雜湊表)**。《適情雅趣》第 21 局 `f8f9` 後的黑方局面:200k → `cp 526`(未搜到殺);**220k–230k 之間為門檻**,230k → `mate -16`;1M → `mate -15`(精確 DTM),0.54 秒。`tech.md` 的「200k 與 2M 同一手」對**著法**成立(全部 e9f9),對 **mate 分數不成立**。**搜深不足時 DTM 會高估**,直接影響 2.2 的殺著倒數準確性。
+- 2.1:`Settings` 新增了 `engine_path` 欄位。任何直接建構 `Settings(...)` 的程式碼都必須帶它。
+- 2.1:替身引擎在 `tests/fakes/fake_engine.py`,七種模式(`normal`/`mate`/`no_legal_moves`/`mute`/`mute_after_handshake`/`exit_on_go`/`truncated_go`),夾具在 `tests/conftest.py`。**5.5 直接沿用**;2.2 需為它新增 `d` 指令與實際套用步數的追蹤。
+- 2.1:逾時目前**一律**把進程標記為不健康。2.5 的兩段式處置(送 `stop` → 寬限期內回應則繼續服役)要插在 `_read_until` 的逾時分支**之前**。
+- 2.1:**待 2.5 修**(review 建議,現階段不可達):`_query` 的 `with self._lock` 無逾時,鎖等待未計入 deadline —— 實測競用下 timeout=1.0 的呼叫實際耗時 1.3 秒,違反 design 的 Invariant。目前由「池保證同一進程不同時借出」擋住,但 2.5 的 `stop` + 寬限期會拉長持鎖時間。改為 `self._lock.acquire(timeout=remaining)` 即可。
+- 2.1:三個突變存活,缺迴歸保護(程式碼本身正確):deadline 的擺放位置(取鎖前 vs 取鎖內)、握手失敗時的 `terminate()` 清理。2.5 補競用測試時可一併釘住。
+- 2.1:`SCORE_PATTERN` 把 `upperbound`/`lowerbound` 當精確分數解析(如 `score cp 526 upperbound` → `Score(CP, 526)`)。因 cp 一律歸「未知」故目前無害;日後若要顯示評分數值須處理。

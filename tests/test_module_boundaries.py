@@ -21,6 +21,9 @@ LEFTMOST_MODULES = ["types", "errors"]
 #: `config` 位於左端第二層,只能向左依賴 `types` 與 `errors`。
 CONFIG_ALLOWED_SERVICE_MODULES = {"service.types", "service.errors"}
 
+#: `engine/` 位於左端第三層,只能向左依賴 `types`、`errors` 與 `config`。
+ENGINE_ALLOWED_SERVICE_MODULES = CONFIG_ALLOWED_SERVICE_MODULES | {"service.config"}
+
 
 def _imported_module_names(source_path: pathlib.Path) -> set[str]:
     tree = ast.parse(source_path.read_text(encoding="utf-8"), str(source_path))
@@ -58,6 +61,20 @@ def test_config_imports_only_leftmost_service_modules() -> None:
             continue
         root = ".".join(name.split(".")[:2])
         assert root in CONFIG_ALLOWED_SERVICE_MODULES, f"config.py 不得 import {name}"
+
+
+def test_engine_process_imports_only_modules_to_its_left() -> None:
+    """`engine/process.py` 只能 import types / errors / config,不得認識 game 或 models。"""
+    path = SERVICE_DIR / "engine" / "process.py"
+    assert path.is_file(), f"{path} 必須存在"
+    for name in _imported_module_names(path):
+        assert not name.startswith("."), f"engine/process.py 不得使用相對匯入 {name}"
+        if not name.startswith("service"):
+            continue
+        root = ".".join(name.split(".")[:2])
+        assert root in ENGINE_ALLOWED_SERVICE_MODULES, (
+            f"engine/process.py 不得 import {name}"
+        )
 
 
 def _import_in_fresh_interpreter(statement: str) -> subprocess.CompletedProcess[str]:

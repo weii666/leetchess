@@ -43,6 +43,7 @@ __all__ = [
     "DEFAULT_TOTAL_TIME_BUDGET",
     "DEFAULT_SEARCH_NODES",
     "DEFAULT_POSITIONS_DIR",
+    "DEFAULT_ENGINE_PATH",
     "Settings",
     "load_settings",
 ]
@@ -84,6 +85,11 @@ DEFAULT_SEARCH_NODES = 200_000
 #: 題庫根目錄(唯讀)。啟動時遞迴掃描以建立 id 索引。
 DEFAULT_POSITIONS_DIR = PROJECT_ROOT / "positions"
 
+#: 引擎執行檔。預設為 `engine/fetch.sh` 依 `ENGINE_VERSION` 取回的 binary。
+#: **可覆寫是刻意的**:逾時與崩潰路徑無法用真實引擎製造(它不會應要求永久沉默),
+#: 測試必須能放入替身進程。路徑寫死等於那些路徑測不到(2.1、5.5)。
+DEFAULT_ENGINE_PATH = PROJECT_ROOT / "engine" / "pikafish"
+
 
 # --- 設定 ---------------------------------------------------------------
 
@@ -103,6 +109,7 @@ class Settings:
     total_time_budget: float
     search_nodes: int
     positions_dir: Path
+    engine_path: Path
 
     def __post_init__(self) -> None:
         self._check_positive()
@@ -164,6 +171,7 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         ),
         search_nodes=_read_int(source, "search_nodes", DEFAULT_SEARCH_NODES),
         positions_dir=_read_path(source, "positions_dir", DEFAULT_POSITIONS_DIR),
+        engine_path=_read_path(source, "engine_path", DEFAULT_ENGINE_PATH),
     )
 
 
