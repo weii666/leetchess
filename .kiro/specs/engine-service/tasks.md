@@ -54,7 +54,7 @@
   - _Requirements: 3.1_
   - _Boundary: EngineProcess_
 
-- [ ] 2.4 實作引擎池的借還與併發閘門
+- [x] 2.4 實作引擎池的借還與併發閘門
   - 維持設定容量的可用引擎,借出與歸還為原子操作,同一進程不同時借給兩個請求
   - 借用附等待上限,逾時未借到即拋出服務忙碌錯誤,**絕不無限期等待**
   - 以情境管理器形式提供借用,確保任何離開路徑都必定歸還或標記待重建
@@ -217,3 +217,8 @@
 - 2.2:序列不一致時拋 `IllegalMoveSequenceError` 但**不標記進程不健康** —— 那是呼叫方的問題,管線已排空,進程可繼續服務,避免不必要的 NNUE 重載。
 - 2.2:**design 的實測對照表原有一列標錯**已修正 —— 原本當作「走 3 步」的序列 `f8f9 e9f9 d8f8`,第三步本身非法被靜默忽略,實際只套用 2 步。用來論證這個陷阱的例子自己踩了陷阱,合法三步序列應為 `f8f9 e8f9 d8d9`。
 - 2.2:替身新增 `mute_on_display` 模式(只在 `d` 上沉默,握手與 `go` 正常),用於保護 `d` 讀取的 deadline。**任務 2.5 重寫 deadline 邏輯時,這組測試是安全網** —— review 曾發現該讀取可被改成 3600 秒而無任何測試失敗。
+- 2.4:`EnginePool` 建構子為 `(size, acquire_timeout, engine_path, startup_timeout)`,較 design 的草稿多了後兩者 —— 替身注入所需,與 `EngineProcess` 同一考量。內部用單一 `threading.Condition` 而非 design 所寫的「佇列或號誌」,理由是不變量橫跨可用/借出(2.5 後為三個)桶,bare Queue 無法原子觀察。
+- 2.4:**2.5 的兩個接點已備妥** —— `_release()` 是唯一的歸還漏斗,`_create_process()` 是唯一的建立點。
+- 2.4:**⚠ 2.5 缺席的實際後果:`_release()` 不檢查 `is_healthy()`**,被搜尋逾時弄壞的引擎會再次借出,下一個借用者收到 `InternalError`。Requirements 4.2 / 4.3 尚未滿足。正常對局不會觸發(250k nodes 約 0.12 秒,逾時為 5 秒),但生產部署前必須補上 2.5。
+- 2.4:池初始化為**循序**,真實 4 引擎池啟動時付 4 次 NNUE 載入。平行啟動未實作(超出範圍)。
+- 2.4:`tests/test_module_boundaries.py` 未涵蓋 `pool.py`(任務只授權建立 pool.py 與其測試)。`pool.py` 只 import `service.engine.process` 與 `service.errors`,皆在允許層級,補一行參數化即可。

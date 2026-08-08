@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from service.engine.pool import EnginePool
 from service.engine.process import EngineProcess
 
-__all__ = ["EngineProcess"]
+__all__ = ["EnginePool", "EngineProcess"]
