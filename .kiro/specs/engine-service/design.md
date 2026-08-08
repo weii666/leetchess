@@ -531,6 +531,8 @@ class GameService:
 
 ##### Service Interface
 
+`Position` 與其餘領域型別同樣定義於 `types.py`,本區塊僅示意其結構。`positions.py` 由此匯入,不重複定義:
+
 ```python
 from dataclasses import dataclass
 

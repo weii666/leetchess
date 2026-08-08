@@ -9,7 +9,7 @@
   - 完成狀態:`uv sync` 可在乾淨環境建立 `.venv`,且 `uv run python -c "import fastapi, pydantic"` 無錯誤結束
   - 此任務為其餘所有任務的前提,不得假設環境已存在
 
-- [ ] 1.2 定義領域型別與錯誤模型
+- [x] 1.2 定義領域型別與錯誤模型
   - 建立紅黑雙方、三態信號、引擎評分、最佳著法、對局狀態、題目等領域型別,全部標註型別提示
   - 定義七種錯誤類別的列舉與對應的服務例外型別,每個錯誤類別帶穩定的機器可讀代碼
   - 領域型別集中於單一模組,使題庫與對局服務共用而不互相依賴
@@ -188,3 +188,15 @@
 ## 落地後待同步項
 
 `.kiro/steering/structure.md` 的目錄清單尚無後端服務目錄。本 spec 實作落地後應補上,使 steering 與實際結構一致。
+
+## Implementation Notes
+
+- 1.1:專案採**非套件模式**(`[tool.uv] package = false`),`service/` 不會被安裝進 `.venv`。`pyproject.toml` 已設 `[tool.pytest.ini_options] pythonpath = ["."]`,測試才能 `import service`;若移除該設定,所有測試會 `ModuleNotFoundError`。
+- 1.1:測試傳輸層用 **`httpx2`** 而非 `httpx` —— starlette 1.5.0 已棄用 httpx 1.x 搭配 `TestClient`,用 `httpx` 每次匯入都會發出 `StarletteDeprecationWarning`。
+- 1.1:Python 鎖定 **3.12**(uv 自行下載 3.12.13)。系統 python3 為 3.9.6,不支援 design 大量使用的 `str | None`(PEP 604)語法,一律走 `uv run`。
+- 1.1:尚無測試檔時裸跑 `uv run pytest` 會以 exit code 5(no tests collected)結束,不可直接當成失敗。
+- 1.2:**`Position` 定義在 `service/types.py`,不在 `positions.py`**(經 review 裁決)。任務 3.1 必須 `from service.types import Position`,**不得重新定義** —— 兩份同名型別會讓 `isinstance` 與 Pydantic 轉換靜默失效。design 的 PositionRepository Service Interface 區塊僅示意結構,已補註說明。
+- 1.2:`InternalError.__init__` **接受但丟棄** `message` 參數(刻意設計,滿足 5.4)。要保留失敗細節必須 `raise InternalError() from cause`;傳字串是靜默的空操作。
+- 1.2:`GameState` 與 `Position` 是**淺層 frozen** —— `list[str]` 欄位仍可變,且兩者 unhashable。後續任務不得將它們用作 dict key 或放入 set。
+- 1.2:5.4 目前只在 `InternalError` 層級強制。其餘六種錯誤依設計接受呼叫端訊息(5.2 需指出違規著法)。**真正的 5.4 卡點在任務 4.3 的全域例外處理器** —— 它不得把引擎 stdout 或例外的 `str()` 塞進 503/504 的訊息欄位。
+- 1.2:`ServiceError.code` 預設為 `INTERNAL`,新增第八種例外型別時若忘記在 `EXCEPTION_BY_CODE` 註冊,會靜默回報 INTERNAL/500 而非明確失敗。
