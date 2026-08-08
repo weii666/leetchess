@@ -1,0 +1,11 @@
+{
+  "id": 1,
+  "title": "盡善克終",
+  "description": "適情雅趣 第二一局 盡善克終",
+  "fen": "3ak4/3RaR3/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 w - - 0 1",
+  "side_to_move": "red",
+  "difficulty": 3,
+  "tags": ["雙馬", "連將殺", "鬥快"],
+  "max_dtm": 16,
+  "solvable": true
+}
