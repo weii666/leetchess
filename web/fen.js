@@ -19,6 +19,17 @@ export const FILES = 9;
 /** 列數(rank):0–9。 */
 export const RANKS = 10;
 
+/**
+ * FEN 棋子代碼到中文名的對照。大寫為紅、小寫為黑,同一兵種紅黑用字不同。
+ *
+ * 放在 `fen.js` 是因為棋子代碼本來就是 FEN 的一部分,而 `notation.js`(記譜)與
+ * `board.js`(繪製)都需要它 —— 各自複製一份遲早會漂移成兩套字。
+ */
+export const NAMES = {
+  R: '俥', N: '傌', B: '相', A: '仕', C: '炮', P: '兵', K: '帥',
+  r: '車', n: '馬', b: '象', a: '士', c: '包', p: '卒', k: '將',
+};
+
 /** `'f8'` -> `[file, rank]`,即 `[5, 8]`。 */
 export const sq2fr = (square) => [square.charCodeAt(0) - 97, +square[1]];
 

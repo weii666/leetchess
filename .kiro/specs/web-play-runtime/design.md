@@ -160,7 +160,7 @@ tests/
 
 ### 自 POC 移植的內容
 
-`poc/index.html` 的六個函式合計約 150 行為純呈現邏輯,直接移植:`parseFen`、`applyMove`(→ `fen.js`)、`drawGrid`、`render`(→ `board.js`)、`uci2cn`、`renderMoves`(→ `notation.js`)。
+`poc/index.html` 的六個函式合計約 150 行為純呈現邏輯,直接移植:`parseFen`、`applyMove`(→ `fen.js`)、`drawGrid`、`render`(→ `board.js`)、`uci2cn`(→ `notation.js`);`renderMoves` 操作 DOM,不屬純函式模組,歸 `app.js`(見 tasks 4.3)。
 
 **POC 的 `api()`、`humanMove()`、`start()` 整份丟棄** —— 綁死舊端點與 query string,且無逾時與錯誤模型。`renderSignal` 重寫:新契約給的是已分類的 `signal` 與 `mate_in`,前端不再需要自己判斷 mate 正負。
 
