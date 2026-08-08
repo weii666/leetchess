@@ -20,11 +20,17 @@ Python 既有的行緩衝,較不易出錯。
 這也是 requirements 1.6 的保證方式 —— 判定全部取自引擎輸出,服務不實作任何規則
 邏輯,因此必然與所執行的引擎一致。
 
+## 走法序列驗證(5.3)
+
+引擎對 `position ... moves ...` 中的非法著法**靜默忽略,不回報任何錯誤**,並以它
+實際解析到的局面回應後續指令。不驗證的後果因此不是拋錯,而是把**別的局面**的合法
+著法當成當前局面回給前端 —— 使用者看到一盤錯誤的棋,雙方都不會察覺。這比拋錯危險
+得多,故 `_query` 在送出 `position` 之後、送出查詢指令之前插入一道 `d` 比對實際
+套用的步數。驗證是協定層的內建保證,不是呼叫方的責任:呼叫方無從得知引擎忽略了
+哪一步。
+
 ## 尚未在此的部分
 
-- **走法序列驗證(5.3)**屬 tasks 2.2:引擎對非法著法靜默忽略,須在送出 `position`
-  之後、送出查詢指令之前插入一道 `d` 指令比對。銜接點是 `_query` 內兩次 `_send`
-  之間,該處的逾時已由同一個 deadline 涵蓋。
 - **逾時的兩段式處置(4.1、4.2)**屬 tasks 2.5:先送 `stop` 進寬限期、寬限期內回應
   則進程可繼續服役。本模組目前一律將逾時視為進程不可再用(標記為不健康),是安全
   的一側 —— 逾時後管線裡可能還躺著上一道指令的殘留輸出,重用會讀到錯位的結果。
@@ -40,7 +46,11 @@ import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from service.errors import EngineTimeoutError, InternalError
+from service.errors import (
+    EngineTimeoutError,
+    IllegalMoveSequenceError,
+    InternalError,
+)
 from service.types import BestMove, Score, ScoreKind
 
 __all__ = [
@@ -57,6 +67,20 @@ SCORE_PATTERN = re.compile(r"\bscore (mate|cp) (-?\d+)\b")
 
 PERFT_TERMINATOR = "Nodes searched"
 BESTMOVE_PREFIX = "bestmove"
+
+#: 顯示當前局面的指令,以及其輸出中要讀的行與最後一行。
+#: `d` 先畫盤面,再依序輸出 `Fen:`、`Key:`、`Checkers:`;讀到 `Checkers:` 才算收完,
+#: 少讀一行就會有殘留輸出被下一道指令的讀取當成自己的結果。
+DISPLAY_COMMAND = "d"
+FEN_PREFIX = "Fen:"
+DISPLAY_TERMINATOR = "Checkers"
+
+#: FEN 的欄位序:盤面、行棋方、兩個象棋用不到的欄位、halfmove clock、fullmove。
+FEN_FIELD_COUNT = 6
+FEN_SIDE_INDEX = 1
+FEN_FULLMOVE_INDEX = 5
+RED_TO_MOVE = "w"
+BLACK_TO_MOVE = "b"
 
 #: 引擎回報無著可走時 `bestmove` 帶的 token。
 NO_MOVE_TOKENS = frozenset({"(none)", "none", "0000"})
@@ -151,6 +175,41 @@ def _parse_legal_moves(lines: Sequence[str]) -> list[str]:
     return moves
 
 
+def _ply_number(fen: str) -> int:
+    """把 FEN 的行棋方與 fullmove 換算成半回合序號(紅先且 fullmove 為 1 時為 0)。
+
+    fullmove 在黑方走完後才進位,故序號為 `2 * (fullmove - 1) + (行棋方為黑則 1)`。
+    這個換算是**雙射**的:一個序號對應唯一的(行棋方, fullmove)組合,因此比對序號
+    等同於同時比對兩者,且「走了幾步」直接是兩個序號的差。
+
+    起始局面未必紅先、fullmove 未必為 1,所以基準一律取自傳入的 FEN,不得寫死。
+
+    **halfmove clock(欄位 4)絕不參與換算** —— 它會因吃子而重置,含吃子的合法序列
+    會被它算成零步而遭誤判。此函式因此只讀欄位 1 與 5。
+    """
+    fields = fen.split()
+    if len(fields) < FEN_FIELD_COUNT:
+        raise InternalError()
+    side = fields[FEN_SIDE_INDEX]
+    if side not in (RED_TO_MOVE, BLACK_TO_MOVE):
+        raise InternalError()
+    try:
+        fullmove = int(fields[FEN_FULLMOVE_INDEX])
+    except ValueError as cause:
+        raise InternalError() from cause
+    if fullmove < 1:
+        raise InternalError()
+    return 2 * (fullmove - 1) + (0 if side == RED_TO_MOVE else 1)
+
+
+def _parse_displayed_fen(lines: Sequence[str]) -> str:
+    """從 `d` 的輸出取出 `Fen:` 行的局面。"""
+    for line in lines:
+        if line.startswith(FEN_PREFIX):
+            return line[len(FEN_PREFIX) :].strip()
+    raise InternalError()
+
+
 def _parse_score(lines: Sequence[str]) -> Score | None:
     """取最後一行分數。迭代加深會輸出多行,最後一行才是本次搜尋的結論。"""
     score = None
@@ -221,6 +280,9 @@ class EngineProcess:
         規則邏輯,循環規則局面亦然(1.1、1.6)。
 
         Raises:
+            IllegalMoveSequenceError: `moves` 未能在 `fen` 上完整走出(5.3)。此時
+                絕不回傳任何著法 —— 引擎會拿它自己解析到的那個局面回答,回傳等於
+                把別的局面的著法交給前端。
             EngineTimeoutError: 引擎在 `timeout` 內未輸出完整結果(4.1)。
             InternalError: 引擎已終止或輸出無法解析。
         """
@@ -241,6 +303,7 @@ class EngineProcess:
         呼叫端只在輪方為黑時請求應手,故該分數即黑方視角。
 
         Raises:
+            IllegalMoveSequenceError: `moves` 未能在 `fen` 上完整走出(5.3)。
             EngineTimeoutError: 引擎在 `timeout` 內未回報 `bestmove`(4.1)。
             InternalError: 引擎已終止或輸出無法解析。
         """
@@ -278,17 +341,42 @@ class EngineProcess:
         done: Callable[[str], bool],
         timeout: float,
     ) -> list[str]:
-        """重送完整局面、送出查詢指令,收集輸出直到終止行。
+        """重送完整局面、驗證序列已完整套用、送出查詢指令,收集輸出直到終止行。
 
-        `deadline` 在進入時就算好,整趟交換(含 2.2 將插入於兩次 `_send` 之間的
-        序列驗證)共用同一個上界,因此方法的總等待時間不超過傳入的 `timeout`。
+        `deadline` 在進入時就算好,整趟交換(含中間那道 `d`)共用同一個上界,因此
+        方法的總等待時間不超過傳入的 `timeout`。
+
+        Raises:
+            IllegalMoveSequenceError: 引擎未套用完整個序列(5.3)。
         """
         deadline = time.monotonic() + timeout
         with self._lock:
             self._ensure_usable()
             self._send(_position_command(fen, moves))
+            self._verify_sequence_applied(fen, moves, deadline)
             self._send(command)
             return self._read_until(done, deadline)
+
+    def _verify_sequence_applied(
+        self, fen: str, moves: Sequence[str], deadline: float
+    ) -> None:
+        """比對引擎實際套用的步數與請求所帶的走法數,不符即拋錯(5.3)。
+
+        必須在送出查詢指令**之前**完成:查詢送出後才發現不一致,管線裡就多了一份
+        沒人收的搜尋輸出,下一道指令會讀到錯位的結果。
+
+        不一致時**不**把進程標記為不健康 —— 這是呼叫端的序列有問題,不是引擎故障;
+        `d` 的輸出已完整讀到終止行,進程可以直接服務下一個請求。
+
+        只判斷「序列是否完整套用」,不指出是哪一步非法:引擎丟棄第一個非法著法後
+        連同其後的著法一併不套用,本就無從分辨;而前端每一步都取自本服務回傳的合法
+        著法集合,序列對不上即代表 client 狀態已損毀,精確定位沒有實際價值。
+        """
+        self._send(DISPLAY_COMMAND)
+        lines = self._read_until(_starts_with(DISPLAY_TERMINATOR), deadline)
+        expected = _ply_number(fen) + len(moves)
+        if _ply_number(_parse_displayed_fen(lines)) != expected:
+            raise IllegalMoveSequenceError()
 
     def _handshake(self, timeout: float) -> None:
         """`uci` / 選項 / `isready`。`Threads=1`、`Hash=128` 依 `tech.md` 固定。"""

@@ -96,10 +96,13 @@ moves a1a2(非法)  →  go perft 1 回傳 44 個合法著法(起始局面)
 偵測手段為 `d` 指令 —— 它輸出當前局面的 FEN,其中 `side_to_move` 與 fullmove number 可推出實際套用了幾步:
 
 ```
-走 1 步    Fen: ... b - - 1 1     預期 side=b, fullmove=1   相符
-走 3 步    Fen: ... w - - 0 2     預期 side=w, fullmove=2   相符
-非法忽略   Fen: ... w - - 0 1     預期 side=b, fullmove=1   不符,偵測到
+moves f8f9                  Fen: ... b - - 1 1    預期 side=b fullmove=1   相符
+moves f8f9 e8f9             Fen: ... w - - 0 2    預期 side=w fullmove=2   相符
+moves f8f9 e8f9 d8d9        Fen: ... b - - 0 2    預期 side=b fullmove=2   相符
+moves f8f9 e9f9 d8f8        Fen: ... w - - 0 2    預期 side=b fullmove=2   不符,偵測到
 ```
+
+**最後一列是真實的靜默忽略案例**:`d8f8` 在該局面不合法,引擎只套用了前兩步就停下,回報的卻是一個看起來完全正常的局面。本節初稿曾把這一列誤標為「走 3 步且相符」—— 用來論證這個陷阱的例子,自己就踩了這個陷阱,直到實作階段以合法的三步序列 `f8f9 e8f9 d8d9` 重測才發現。這正說明為何驗證必須內建於協定層,而不能靠人工判讀。
 
 推導規則(起始為紅先、fullmove 為 1 時):走 `N` 步後 `fullmove = 1 + N // 2`,`side` 於 `N` 為偶數時是紅、奇數時是黑。halfmove clock **不可用於此判斷** —— 它會因吃子而重置。
 

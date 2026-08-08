@@ -10,10 +10,18 @@
     normal                 完整回應;`go nodes` 給 cp 分數
     mate                   完整回應;`go nodes` 給 mate 分數(兩行,後者較淺)
     no_legal_moves         perft 回報 0 個著法;`go nodes` 回 `bestmove (none)`
+    ignores_moves          複製真實引擎對非法著法的靜默忽略:`d` 恆回起始局面
     mute                   完全不輸出,連握手都不回應
     mute_after_handshake   握手正常,`go` 之後永遠沉默
+    mute_on_display        握手與 `go` 都正常,只有 `d` 永遠沉默
     exit_on_go             握手正常,收到 `go` 即異常終止
     truncated_go           握手正常,`go` 只輸出一半就停住(無終止行)
+
+`d` 指令會回出「套用了所送走法數之後」的局面 FEN,使協定層的序列驗證(5.3)在
+替身下也走完整條路徑。兩個例外:`ignores_moves` 恆回起始局面,重現真實引擎丟棄
+非法著法後**不回報任何錯誤**的行為,那正是驗證要攔下的情況;`mute_on_display`
+則對 `d` 完全沉默,使序列驗證那道讀取成為唯一的卡點 —— 它讓「該讀取是否受呼叫端
+傳入的逾時管轄」可被測到,`mute_after_handshake` 停在更後面的 `go`,測不到這裡。
 
 若環境變數 `FAKE_ENGINE_LOG` 指向一個檔案,收到的每道指令會逐行附加進去,
 使測試能斷言送出的指令序列(例如 `Threads=1`、`Hash=128`)。
@@ -31,8 +39,10 @@ LOG_ENV = "FAKE_ENGINE_LOG"
 MODE_NORMAL = "normal"
 MODE_MATE = "mate"
 MODE_NO_LEGAL_MOVES = "no_legal_moves"
+MODE_IGNORES_MOVES = "ignores_moves"
 MODE_MUTE = "mute"
 MODE_MUTE_AFTER_HANDSHAKE = "mute_after_handshake"
+MODE_MUTE_ON_DISPLAY = "mute_on_display"
 MODE_EXIT_ON_GO = "exit_on_go"
 MODE_TRUNCATED_GO = "truncated_go"
 
@@ -40,8 +50,10 @@ MODES = (
     MODE_NORMAL,
     MODE_MATE,
     MODE_NO_LEGAL_MOVES,
+    MODE_IGNORES_MOVES,
     MODE_MUTE,
     MODE_MUTE_AFTER_HANDSHAKE,
+    MODE_MUTE_ON_DISPLAY,
     MODE_EXIT_ON_GO,
     MODE_TRUNCATED_GO,
 )
@@ -74,6 +86,40 @@ SEARCH_NO_MOVE_LINES = ("bestmove (none)",)
 SEARCH_TRUNCATED_LINES = (
     "info depth 12 seldepth 15 multipv 1 score cp 25 nodes 1024 time 3 pv e8f9",
 )
+
+POSITION_PREFIX = "position fen "
+MOVES_SEPARATOR = " moves "
+
+#: 尚未收到 `position` 前 `d` 所回報的局面。真實引擎此時回報象棋開局局面。
+DEFAULT_FEN = "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1"
+
+
+class _Board:
+    """替身記得的局面:起始 FEN 與**實際套用的步數**。
+
+    只追蹤步數、不真的走棋 —— 序列驗證讀的是行棋方與 fullmove,兩者都由步數決定,
+    盤面本身對驗證沒有作用。
+    """
+
+    def __init__(self) -> None:
+        self.fen = DEFAULT_FEN
+        self.applied = 0
+
+    def set_position(self, command: str, mode: str) -> None:
+        base, _, move_text = command[len(POSITION_PREFIX) :].partition(MOVES_SEPARATOR)
+        self.fen = base.strip()
+        # 靜默忽略模式一步都不套用,局面停在起始處 —— 這正是真實引擎遇到非法著法
+        # 時的行為,且它同樣不輸出任何錯誤。
+        self.applied = 0 if mode == MODE_IGNORES_MOVES else len(move_text.split())
+
+    def displayed_fen(self) -> str:
+        fields = self.fen.split()
+        ply = 2 * (int(fields[5]) - 1) + (0 if fields[1] == "w" else 1) + self.applied
+        fields[1] = "w" if ply % 2 == 0 else "b"
+        # halfmove 一律回 0:替身不追蹤吃子,而驗證本來就不得讀這一欄(它會被吃子重置)。
+        fields[4] = "0"
+        fields[5] = str(ply // 2 + 1)
+        return " ".join(fields)
 
 
 def _record(command: str) -> None:
@@ -114,14 +160,26 @@ def _handle_go(mode: str, command: str) -> None:
         _emit(SEARCH_CP_LINES)
 
 
-def _handle(mode: str, command: str) -> None:
+def _handle_display(mode: str, board: _Board) -> None:
+    """`d` 的輸出。真實引擎先畫盤面再列這三行,序列驗證只讀 `Fen:`,終止行為 `Checkers:`。"""
+    if mode == MODE_MUTE_ON_DISPLAY:
+        # 只在 `d` 上沉默;握手與 `go` 照常,進程因此走得到序列驗證那道讀取才卡住。
+        return
+    _emit((f"Fen: {board.displayed_fen()}", "Key: 0000000000000000", "Checkers: "))
+
+
+def _handle(mode: str, command: str, board: _Board) -> None:
     if command == "uci":
         _emit(UCI_LINES)
     elif command == "isready":
         _emit(("readyok",))
+    elif command.startswith(POSITION_PREFIX):
+        board.set_position(command, mode)  # 真實引擎對此不輸出任何內容
+    elif command == "d":
+        _handle_display(mode, board)
     elif command.startswith("go"):
         _handle_go(mode, command)
-    # setoption / position / d 等其餘指令在真實引擎中也不產生輸出。
+    # setoption 等其餘指令在真實引擎中也不產生輸出。
 
 
 def main(argv: list[str]) -> int:
@@ -129,6 +187,7 @@ def main(argv: list[str]) -> int:
     if mode not in MODES:
         sys.stderr.write(f"fake_engine: 未知的模式 {mode!r}\n")
         return 2
+    board = _Board()
     while True:
         raw = sys.stdin.readline()
         if raw == "":  # stdin 關閉
@@ -140,7 +199,7 @@ def main(argv: list[str]) -> int:
         if command == "quit":
             return 0
         if mode != MODE_MUTE:
-            _handle(mode, command)
+            _handle(mode, command, board)
 
 
 if __name__ == "__main__":

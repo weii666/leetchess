@@ -21,7 +21,7 @@ from typing import Any, Callable
 import pytest
 
 from service.engine.process import EngineProcess
-from service.errors import EngineTimeoutError, ServiceError
+from service.errors import EngineTimeoutError, IllegalMoveSequenceError, ServiceError
 from service.types import BestMove, Score, ScoreKind
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -30,9 +30,23 @@ REAL_ENGINE = PROJECT_ROOT / "engine" / "pikafish"
 #: 《適情雅趣》第 21 局起始局面(紅先)。
 PUZZLE_FEN = "3ak4/3RaR3/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 w - - 0 1"
 
+#: 同一局走 `f8f9` 之後的局面,**黑先且 fullmove 仍為 1**。
+#: 用於證明步數推導以起始 FEN 實際的行棋方與回合數為基準,而非硬編「紅先、fullmove 1」。
+PUZZLE_FEN_BLACK_TO_MOVE = (
+    "3akR3/3Ra4/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 b - - 1 1"
+)
+
 #: 起始局面紅方的合法著法數,以及走 `f8f9` 後黑方僅剩的兩著(皆為實測值)。
 PUZZLE_LEGAL_MOVE_COUNT = 44
 PUZZLE_BLACK_REPLIES = {"e8f9", "e9f9"}
+
+#: 一段連續吃子的合法序列(實測):`e8f9` 與 `d8d9` 都是吃子。
+#: 走完三步後引擎回報 `b - - 0 2` —— **halfmove clock 被吃子重置為 0**,
+#: 用它推步數會得出「零步」而漏判,故推導只能用行棋方與 fullmove。
+PUZZLE_CAPTURING_SEQUENCE = ["f8f9", "e8f9", "d8d9"]
+
+#: 起始局面下走不出的一步:a1 是空格。引擎對它**靜默忽略**,不回報任何錯誤。
+ILLEGAL_MOVE = "a1a2"
 
 #: 替身測試用的逾時。取小值使測試快,仍遠大於替身的回應時間。
 FAKE_TIMEOUT = 0.3
@@ -89,6 +103,18 @@ def _run_bounded(call: Callable[[], Any], wait: float = BOUNDED_WAIT) -> _Outcom
     if not outcome.finished:
         outcome.elapsed = time.monotonic() - started
     return outcome
+
+
+def _capture(call: Callable[[], Any]) -> tuple[Any, ServiceError | None]:
+    """執行 `call`,回傳(值, 服務錯誤)。
+
+    序列驗證失效時的失敗表現**不是拋錯,而是回傳別的局面的資料**,因此測試必須
+    同時看見「回傳了什麼」與「拋了什麼」;`pytest.raises` 只看得到後者。
+    """
+    try:
+        return call(), None
+    except ServiceError as error:
+        return None, error
 
 
 def _start(fake, mode: str) -> EngineProcess:
@@ -189,6 +215,142 @@ def test_best_move_uses_go_nodes_not_go_movetime(fake_engine) -> None:
         process.terminate()
     assert "go nodes 200000" in engine.commands()
     assert not any(command.startswith("go movetime") for command in engine.commands())
+
+
+# --- 走法序列驗證(5.3)-------------------------------------------------
+#
+# 引擎對 `position ... moves ...` 中的非法著法**靜默忽略,不回報任何錯誤**,並以
+# 它實際解析到的局面回應後續指令。不驗證的後果不是拋錯,而是把**別的局面**的合法
+# 著法當成當前局面回給前端 —— 使用者看到一盤錯誤的棋,雙方都不會察覺。
+#
+# 驗證因此內建於協定層的兩個查詢方法之中,不交由呼叫方負責:呼叫方無從得知引擎
+# 忽略了哪一步。
+
+
+@pytest.mark.parametrize(
+    ("query", "command"),
+    [
+        (lambda p: p.legal_moves(PUZZLE_FEN, ["f8f9"], FAKE_TIMEOUT), "go perft 1"),
+        (lambda p: p.best_move(PUZZLE_FEN, ["f8f9"], 1000, FAKE_TIMEOUT), "go nodes 1000"),
+    ],
+)
+def test_the_applied_sequence_is_checked_before_the_query_command(
+    fake_engine, query, command
+) -> None:
+    """`d` 必須夾在 `position` 與查詢指令之間 —— 查詢送出後才發現不一致已經太遲。"""
+    engine = fake_engine("normal")
+    process = EngineProcess(engine.path, startup_timeout=BOUNDED_WAIT)
+    try:
+        query(process)
+    finally:
+        process.terminate()
+    commands = engine.commands()
+    assert f"position fen {PUZZLE_FEN} moves f8f9" in commands
+    assert "d" in commands
+    assert commands.index("d") > commands.index(f"position fen {PUZZLE_FEN} moves f8f9")
+    assert commands.index("d") < commands.index(command)
+
+
+def test_legal_moves_rejects_a_sequence_the_engine_did_not_fully_apply(
+    fake_engine,
+) -> None:
+    """替身模擬引擎的靜默忽略:局面停在起始處,回報的步數對不上請求所帶的走法數。"""
+    process = _start(fake_engine, "ignores_moves")
+    try:
+        value, error = _capture(
+            lambda: process.legal_moves(PUZZLE_FEN, ["f8f9"], timeout=FAKE_TIMEOUT)
+        )
+    finally:
+        process.terminate()
+    assert value is None, "序列未完整套用時仍回傳了著法"
+    assert isinstance(error, IllegalMoveSequenceError)
+
+
+def test_best_move_rejects_a_sequence_the_engine_did_not_fully_apply(
+    fake_engine,
+) -> None:
+    process = _start(fake_engine, "ignores_moves")
+    try:
+        value, error = _capture(
+            lambda: process.best_move(
+                PUZZLE_FEN, ["f8f9"], nodes=1000, timeout=FAKE_TIMEOUT
+            )
+        )
+    finally:
+        process.terminate()
+    assert value is None, "序列未完整套用時仍回傳了應手"
+    assert isinstance(error, IllegalMoveSequenceError)
+
+
+def test_an_inconsistent_sequence_does_not_send_the_query_command(fake_engine) -> None:
+    """不一致時必須在送出查詢前就止住,否則管線裡會留下沒人收的搜尋輸出。"""
+    engine = fake_engine("ignores_moves")
+    process = EngineProcess(engine.path, startup_timeout=BOUNDED_WAIT)
+    try:
+        _capture(lambda: process.legal_moves(PUZZLE_FEN, ["f8f9"], FAKE_TIMEOUT))
+    finally:
+        process.terminate()
+    assert not any(command.startswith("go") for command in engine.commands())
+
+
+def test_the_process_stays_usable_after_an_inconsistent_sequence(fake_engine) -> None:
+    """序列不一致是呼叫端的問題,不是引擎故障 —— 進程不得因此被判為不健康。"""
+    process = _start(fake_engine, "ignores_moves")
+    try:
+        _capture(lambda: process.legal_moves(PUZZLE_FEN, ["f8f9"], FAKE_TIMEOUT))
+        assert process.is_healthy()
+        # 空序列在該替身下必然一致,證明管線沒有殘留而錯位。
+        assert process.legal_moves(PUZZLE_FEN, [], timeout=FAKE_TIMEOUT) == [
+            "e8f9",
+            "e9f9",
+        ]
+    finally:
+        process.terminate()
+
+
+def test_the_inconsistency_error_leaks_no_engine_output(fake_engine) -> None:
+    """5.4:對外訊息不得含引擎原始輸出(此處是 `d` 的 FEN)或內部路徑。"""
+    process = _start(fake_engine, "ignores_moves")
+    try:
+        _, error = _capture(
+            lambda: process.legal_moves(PUZZLE_FEN, ["f8f9"], FAKE_TIMEOUT)
+        )
+    finally:
+        process.terminate()
+    message = str(error)
+    assert "Fen" not in message
+    assert "Checkers" not in message
+    assert "/" not in message, "訊息含路徑或 FEN 片段"
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        lambda p: p.legal_moves(PUZZLE_FEN, ["f8f9"], timeout=FAKE_TIMEOUT),
+        lambda p: p.best_move(PUZZLE_FEN, ["f8f9"], nodes=1000, timeout=FAKE_TIMEOUT),
+    ],
+    ids=["legal_moves", "best_move"],
+)
+def test_the_sequence_check_read_is_bounded_by_the_given_timeout(
+    fake_engine, query
+) -> None:
+    """序列驗證那道 `d` 的讀取同樣受傳入的逾時管轄,不得自帶更寬的上界。
+
+    這是 2.1 解掉無上界讀取之後新增的第一個阻塞讀取,若它改用自己算的 deadline
+    (例如寫死一個大值),方法的總等待時間就會超過呼叫端給的 `timeout`,而其餘
+    逾時測試全都停在 `go` 那一段、看不到這裡。替身握手與 `go` 都正常,只在 `d`
+    上沉默,使進程必然走到這道讀取才卡住。
+    """
+    process = _start(fake_engine, "mute_on_display")
+    try:
+        outcome = _run_bounded(lambda: query(process))
+        # finished 為假代表呼叫仍卡在 `d` 的讀取上 —— 上界失效的正是這個樣子。
+        assert outcome.finished, "序列驗證的 `d` 讀取在引擎不輸出時永久阻塞"
+        assert isinstance(outcome.error, EngineTimeoutError)
+        assert outcome.elapsed >= FAKE_TIMEOUT
+        assert outcome.elapsed < BOUNDED_WAIT
+    finally:
+        process.terminate()
 
 
 # --- 輸出解析 -----------------------------------------------------------
@@ -413,3 +575,106 @@ def test_real_engine_reports_a_mate_score_against_black(real_process) -> None:
 @requires_real_engine
 def test_real_engine_process_reports_itself_healthy(real_process) -> None:
     assert real_process.is_healthy()
+
+
+# --- 真實引擎:序列驗證(5.3)------------------------------------------
+
+
+@requires_real_engine
+def test_real_engine_accepts_a_capturing_sequence(real_process) -> None:
+    """含吃子的合法序列不得被誤判。
+
+    走完這三步後引擎回報的 halfmove clock 為 0(被吃子重置),若推導把它當成步數
+    來源,這個完全合法的序列會被判成不一致。步數只能由行棋方與 fullmove 推得。
+    """
+    moves = real_process.legal_moves(
+        PUZZLE_FEN, PUZZLE_CAPTURING_SEQUENCE, timeout=REAL_TIMEOUT
+    )
+    assert moves, "合法的吃子序列被誤判為不一致"
+
+
+@requires_real_engine
+def test_real_engine_rejects_an_illegal_sequence_instead_of_returning_another_position(
+    real_process,
+) -> None:
+    """驗證失效的表現不是拋錯,而是回傳**起始局面**的 44 著。
+
+    因此先斷言回傳內容不是那一組著法 —— 只斷言「有拋錯」的測試抓不到這個 bug。
+    """
+    start_moves = set(real_process.legal_moves(PUZZLE_FEN, [], timeout=REAL_TIMEOUT))
+    assert len(start_moves) == PUZZLE_LEGAL_MOVE_COUNT
+
+    value, error = _capture(
+        lambda: real_process.legal_moves(
+            PUZZLE_FEN, [ILLEGAL_MOVE], timeout=REAL_TIMEOUT
+        )
+    )
+    assert value is None or set(value) != start_moves, (
+        "序列驗證失效:把起始局面的合法著法當成當前局面回傳了"
+    )
+    assert value is None, "非法著法被忽略後仍回傳了著法"
+    assert isinstance(error, IllegalMoveSequenceError)
+
+
+@requires_real_engine
+def test_real_engine_rejects_an_illegal_move_in_the_middle_of_a_sequence(
+    real_process,
+) -> None:
+    """非法著法之後的著法也一併被引擎丟棄,套用步數同樣對不上。"""
+    replies = set(
+        real_process.legal_moves(PUZZLE_FEN, ["f8f9"], timeout=REAL_TIMEOUT)
+    )
+    assert replies == PUZZLE_BLACK_REPLIES
+
+    value, error = _capture(
+        lambda: real_process.legal_moves(
+            PUZZLE_FEN, ["f8f9", ILLEGAL_MOVE, "e8f9"], timeout=REAL_TIMEOUT
+        )
+    )
+    assert value is None or set(value) != replies, "序列驗證失效:回傳了中途局面的著法"
+    assert value is None
+    assert isinstance(error, IllegalMoveSequenceError)
+
+
+@requires_real_engine
+def test_real_engine_best_move_rejects_an_illegal_sequence(real_process) -> None:
+    """驗證是兩個查詢方法共同的保證,不是只有 `legal_moves` 才有。"""
+    value, error = _capture(
+        lambda: real_process.best_move(
+            PUZZLE_FEN, [ILLEGAL_MOVE], nodes=1000, timeout=REAL_TIMEOUT
+        )
+    )
+    assert value is None, "非法著法被忽略後仍回傳了別的局面的應手"
+    assert isinstance(error, IllegalMoveSequenceError)
+
+
+@requires_real_engine
+def test_real_engine_sequence_check_uses_the_given_fen_not_a_hardcoded_start(
+    real_process,
+) -> None:
+    """起始 FEN 未必紅先、fullmove 未必為 1,推導須以該題目的 FEN 為基準。"""
+    moves = real_process.legal_moves(
+        PUZZLE_FEN_BLACK_TO_MOVE, ["e8f9"], timeout=REAL_TIMEOUT
+    )
+    assert moves, "黑先起始局面的合法序列被誤判為不一致"
+
+    value, error = _capture(
+        lambda: real_process.legal_moves(
+            PUZZLE_FEN_BLACK_TO_MOVE, [ILLEGAL_MOVE], timeout=REAL_TIMEOUT
+        )
+    )
+    assert value is None
+    assert isinstance(error, IllegalMoveSequenceError)
+
+
+@requires_real_engine
+def test_real_engine_stays_usable_after_an_illegal_sequence(real_process) -> None:
+    """序列不一致不是引擎故障:同一個進程必須能立刻服務下一個請求。"""
+    _capture(
+        lambda: real_process.legal_moves(
+            PUZZLE_FEN, [ILLEGAL_MOVE], timeout=REAL_TIMEOUT
+        )
+    )
+    assert real_process.is_healthy()
+    moves = real_process.legal_moves(PUZZLE_FEN, ["f8f9"], timeout=REAL_TIMEOUT)
+    assert set(moves) == PUZZLE_BLACK_REPLIES
