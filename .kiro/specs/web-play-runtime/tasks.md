@@ -55,7 +55,7 @@
 
 ## 4. 對局推進
 
-- [ ] 4.1 實作後端 client
+- [x] 4.1 實作後端 client
   - `web/api.js`:載入題目與取得對手應手兩個操作,走法序列以請求主體傳遞
   - **每次請求都要有逾時上界**,逾時與連線失敗都轉為可辨識的失敗
   - **後端錯誤有兩種形狀**:端點錯誤為帶類別碼的結構,路由層則是框架原生格式。無法辨識的形狀一律歸為通用錯誤,**絕不把原始內容交給呈現層**
@@ -157,3 +157,8 @@
 - 3.2:**吃子標示的 `pointer-events: all` 是 load-bearing**。它是 `fill="none"` 的圓環,SVG hit-testing 會讓點擊穿過未填色的內部打到底下的棋子 —— 移除後點吃子圈中央會完全落空。5.1 改樣式時不可拿掉。
 - 3.2:盤面留白帶(40px)上 `elementFromPoint` 回傳的是 `rect.board-bg`,與格點上的 `path.grid` 是**兩條不同的 hit-testing 路徑**。首輪 review 因留白帶未被覆蓋而 REJECTED,已補座標點擊測試。
 - 3.2:`legalMoves` 含長度不足 4 的項目會拋 `TypeError`(不防護,與 `applyMove` 同一取捨 —— 合法性一律來自後端)。拋錯優於靜默畫錯。
+- 4.1:`web/api.js` 匯出 `loadPosition(id, options)` 與 `requestBlackMove(id, moves, options)`。失敗一律是單一 `ApiError`,**只帶 code,`message` 也設成 code 本身** —— 連 `String(err)` 都洩漏不了後端文字。code 為七種契約碼加 `TIMEOUT` / `NETWORK` / `UNKNOWN`。
+- 4.1:**⚠ 給 4.4 的交付事實**:(a) **呈現層必須自己把 code 對應成繁體中文** —— 沒有任何後端訊息會抵達它;(b) `mate_in: 0` 與 `move: null` **原樣穿透不加工**,falsy 陷阱歸 4.4 避。
+- 4.1:分類**只讀 `code` 不看 HTTP 狀態**,且以 `Set` 精確比對 —— 契約外的碼(後端日後新增第八種、大小寫變體、前綴相同者)一律歸 `UNKNOWN` 而非放行。
+- 4.1:逾時預設 10 秒,刻意大於後端的 `DEFAULT_TOTAL_TIME_BUDGET = 8.0`,否則合法的慢回應會被誤判成逾時。計時器在 `finally` 才解除,**涵蓋讀取回應本體的階段**。
+- 4.1:**待補的回歸護欄**(review 發現,非阻斷):現有測試鎖不住「逾時涵蓋讀 body」—— 把 `clearTimeout` 移到 `await response.text()` 之前,35 個測試仍全綠。要驗得出來需真實 HTTP 伺服器(送出 header 後停住 body),`page.route()` 的 `fulfill` 做不到。另外兩個逾時測試在退化時會**掛住**而非乾淨轉紅,建議加 `Promise.race` 看門狗。可於 5.2 一併處理。
