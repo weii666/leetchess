@@ -24,6 +24,9 @@ CONFIG_ALLOWED_SERVICE_MODULES = {"service.types", "service.errors"}
 #: `engine/` 位於左端第三層,只能向左依賴 `types`、`errors` 與 `config`。
 ENGINE_ALLOWED_SERVICE_MODULES = CONFIG_ALLOWED_SERVICE_MODULES | {"service.config"}
 
+#: `positions.py` 與 `engine/` 同層,允許的匯入範圍相同。
+POSITIONS_ALLOWED_SERVICE_MODULES = ENGINE_ALLOWED_SERVICE_MODULES
+
 
 def _imported_module_names(source_path: pathlib.Path) -> set[str]:
     tree = ast.parse(source_path.read_text(encoding="utf-8"), str(source_path))
@@ -75,6 +78,32 @@ def test_engine_process_imports_only_modules_to_its_left() -> None:
         assert root in ENGINE_ALLOWED_SERVICE_MODULES, (
             f"engine/process.py 不得 import {name}"
         )
+
+
+def test_positions_imports_only_modules_to_its_left() -> None:
+    """`positions.py` 只能 import types / errors / config,不得認識 game 或 models。"""
+    path = SERVICE_DIR / "positions.py"
+    assert path.is_file(), f"{path} 必須存在"
+    for name in _imported_module_names(path):
+        assert not name.startswith("."), f"positions.py 不得使用相對匯入 {name}"
+        if not name.startswith("service"):
+            continue
+        root = ".".join(name.split(".")[:2])
+        assert root in POSITIONS_ALLOWED_SERVICE_MODULES, (
+            f"positions.py 不得 import {name}"
+        )
+
+
+def test_positions_does_not_redefine_domain_types() -> None:
+    """`Position` 只有一份。
+
+    兩份同名型別會讓 `isinstance` 檢查與日後 `models.py` 的 Pydantic 轉換靜默失效,
+    故 `positions.py` 必須由 `types.py` 匯入而非自行定義。
+    """
+    from service import positions
+    from service.types import Position
+
+    assert positions.Position is Position
 
 
 def _import_in_fresh_interpreter(statement: str) -> subprocess.CompletedProcess[str]:
