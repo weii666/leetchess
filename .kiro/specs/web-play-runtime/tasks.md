@@ -4,7 +4,7 @@
 
 ## 1. 基礎:測試工具與可開啟的頁面
 
-- [ ] 1.1 加入 Playwright 開發依賴並驗證瀏覽器可用
+- [x] 1.1 加入 Playwright 開發依賴並驗證瀏覽器可用
   - 以 uv 加入 `playwright` 開發依賴,取得其瀏覽器 binary
   - 建立最小的 Playwright 夾具,能開啟一個頁面並執行 JS
   - **這是整個測試策略的前提** —— vanilla JS 無 node 工具鏈,沒有它則 38 條 AC 全部只能手動驗證
@@ -131,3 +131,7 @@
 ## Implementation Notes
 
 - 移植來源行號以 `poc/index.html` 目前的內容為準。POC 本身不改動,功成身退。
+- 1.1:**可行性閘門已通過** —— Playwright 的 chromium 可在此環境下載並執行,測試策略成立。實測 `HeadlessChrome/151`,`page.evaluate()` 確為真瀏覽器回值。
+- 1.1:**瀏覽器 binary 不由 `uv sync` 取得**,新環境須 `uv run playwright install chromium`(務必指明 chromium,裸跑會多抓 firefox 與 webkit 約 1GB)。已寫入 `tech.md`。
+- 1.1:夾具在 `tests/conftest_web.py`,經 `tests/conftest.py` 註冊。`browser` 為 session 級、`browser_page` 為 function 級並每測試獨立 context(cookie / storage / `page.route()` 規則彼此隔離)。**後續任務直接用 `browser_page`**。
+- 1.1:`playwright` 的 import 刻意置於夾具函式內而非模組頂層。review 實測該惰性省下約 25-30ms、對整體套件時間無可測影響 —— 真正的節省來自 pytest session 夾具本身的惰性,不需額外保護。

@@ -15,6 +15,7 @@ dev = [
     # fastapi.testclient.TestClient 的 HTTP 傳輸層;starlette 已棄用搭配 httpx(1.x),
     # 改用 httpx2 才不會在每次 TestClient 匯入時發出 StarletteDeprecationWarning。
     "httpx2>=2.9",
+    "playwright>=1.62.0",
 ]
 
 [tool.pytest.ini_options]

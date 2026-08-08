@@ -7,6 +7,10 @@ tasks 5.5 的逾時與崩潰恢復測試會沿用同一組夾具。
 替身本體是 `tests/fakes/fake_engine.py`,但 `EngineProcess` 啟動的是「一個執行檔」
 而非「一條命令列」,因此此處再包一層 shell wrapper,由 wrapper 以本次 venv 的
 直譯器執行替身,並帶上模式與指令記錄檔的環境變數。
+
+前端測試的 Playwright 夾具放在 `tests/conftest_web.py`(檔名取自 design 的
+File Structure Plan),在此匯入以完成註冊 —— pytest 只自動載入名為 `conftest.py`
+的檔案。該模組不在頂層匯入 playwright,故此匯入不影響既有測試的啟動時間。
 """
 
 from __future__ import annotations
@@ -18,6 +22,8 @@ import sys
 from dataclasses import dataclass
 
 import pytest
+
+from tests.conftest_web import browser, browser_page  # noqa: F401
 
 FAKES_DIR = pathlib.Path(__file__).resolve().parent / "fakes"
 FAKE_ENGINE_SCRIPT = FAKES_DIR / "fake_engine.py"

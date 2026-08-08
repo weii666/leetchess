@@ -91,6 +91,14 @@ EngineAdapter.legal_moves(fen, moves)      -> [uci_move, ...]
 - `uv sync` 建立/同步 `.venv`(uv 自動管理,不另手動維護);`.venv/` 進 `.gitignore`
 - 一律走 `uv run <script.py>`,不直接 `python3 <script.py>`,確保版本與依賴可重現且與系統環境隔離
 
+**前端測試需要額外一步**:`playwright` 的瀏覽器 binary **不由 `uv sync` 取得**,新環境須另外執行
+
+```
+uv run playwright install chromium
+```
+
+**務必指明 `chromium`** —— 裸跑 `playwright install`(Playwright 自己的錯誤訊息就是這樣建議的)會連 firefox 與 webkit 一起下載,多約 1GB。漏掉這一步時前端測試會以 Playwright 的「Executable doesn't exist」錯誤失敗,訊息本身可自我說明,不會靜默通過。
+
 > POC 的 `poc/server.py` 為零依賴、純標準庫的一次性工具,不受此約束。
 
 ## 授權約束
