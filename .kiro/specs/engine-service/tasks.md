@@ -83,7 +83,7 @@
   - _Requirements: 6.1, 6.2, 6.3_
   - _Boundary: PositionRepository_
 
-- [ ] 3.2 實作對局狀態判定
+- [x] 3.2 實作對局狀態判定
   - 由題目起手方與走法數推導當前行棋方
   - **終局判定只依據合法著法數為零**,與任何評分無關;合法著法數為零時該行棋方為負方
   - 尚未達真終局時一律回報對局進行中,不得以任何其他條件宣告結束
@@ -225,3 +225,7 @@
 - 3.1:`PositionRepository` 額外提供 `source_of(id)` 與 `__len__`(review 判定為合理補完)—— 出處來自**題庫根目錄下第一層資料夾名稱**,不是欄位。未知欄位、根目錄裸檔、重複題號皆**拒絕啟動**(內建 `ValueError`),使資料錯誤在部署階段暴露。
 - 3.1:**隱藏檔過濾是真實防禦不是裝飾** —— macOS 的 AppleDouble sidecar `._0001.json` 同時是隱藏檔且帶 `.json` 副檔名,解壓題目批次或經隨身碟搬運會產生。首輪 review 發現該路徑從未被測到(測的是 `.DS_Store`,而 `rglob("*.json")` 本來就掃不到它),已補測。
 - 3.1:題庫 `positions/0001.json` 已遷移為 `positions/適情雅趣/0001.json` 並轉為新 schema(嚴格屬 position-corpus spec,此處先行遷移是為了讓端點有題可測)。
+- 3.2:`GameService` 額外提供 `side_to_move(id, moves)`(review 判定正當)—— **不借引擎**即可判定輪方,使 3.3 能在進入併發閘門**之前**拒絕輪方不符的請求,否則池滿時使用者會收到誤導性的「服務忙碌」而非「輪方不符」。
+- 3.2:**終局判定與評分無關是結構性保證** —— `_game_state()` 的參數裡沒有分數,`_state_with()` 只呼叫 `legal_moves()` 從不呼叫 `best_move()`。review 必須「加入」一個 `best_move()` 呼叫才能破壞它。
+- 3.2:**⚠ 待 3.1 補強**:輪方基準取自題目 JSON 的 `side_to_move`,而 `positions.py` 的 `_read_side()` **未與 FEN 第 2 欄交叉檢核**。資料不一致時引擎依 FEN 判合法著法、服務依 JSON 判輪方,**勝方會靜默反向且無任何錯誤**。在 `game.py` 解析 FEN 會與 `engine/process.py` 的 `_ply_number()` 跨層重複,故應在題庫載入期補檢查。
+- 3.2:**⚠ 4.2 的前置決策**:design 的 API Contract 說 `GET /api/positions/{id}` 回「起始局面**與題目資訊**」,但 Boundary Map 只有 `Routes → GameService`,無 `Routes → PositionRepository`,4.2 無合法途徑取得題目資訊。須決定由 `start()` 加傳 `Position`,或開放 Routes 直取題庫。
