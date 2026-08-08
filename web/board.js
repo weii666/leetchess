@@ -19,10 +19,21 @@
  * 情況下也畫得出完整棋盤;`style.css` 的規則勝過呈現屬性,要改樣式不必回頭動這裡。
  *
  * 依賴方向:本模組位於 `fen.js` 的右邊一層,**只能匯入 `fen.js`** —— 不碰 API、
- * 不知道對局狀態機的存在。棋規一概不判斷:合法落點(tasks 3.2)一律由外部傳入。
+ * 不知道對局狀態機的存在。棋規一概不判斷:合法落點一律由外部傳入。
+ *
+ * 選子互動(tasks 3.2)照這兩條走:
+ *
+ * - **可選取 = 傳進來的著法裡有自該格出發的**。「是不是己方的子」不由本模組判斷
+ *   (requirements 2.4)—— 後端給的合法著法只會自輪方的子出發,這個定義因此與
+ *   POC 的 `!busy && isRed && legal.some(...)` 等價,而且不需要知道誰是己方。
+ *   等待中與非我方回合(requirements 2.5、6.2)由 `game.js` 給出空的著法集合
+ *   來表達,盤面自然就整片不可選。
+ * - **選中狀態一樣不記在這裡**。點擊只經回呼往外通知,畫面要變得由外部帶著新的
+ *   `selected` 再畫一次。POC `selectPiece` 的切換(再點一次已選中的子等於取消)
+ *   是傳入值的純推導,故保留在此:點到 `selected` 那格時通知的是 `null`。
  */
 
-import { FILES, RANKS, NAMES } from './fen.js';
+import { FILES, RANKS, NAMES, fr2sq, sq2fr } from './fen.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -48,6 +59,14 @@ const RIVER = '#8a6d3b';
 const PIECE_BG = '#f7ecd0';
 const RED = '#c0392b';
 const BLACK = '#1c1c1c';
+
+/** 選中框與落點標示的用色 —— 取自 POC 的 `.selected` / `.dot`。 */
+const HIGHLIGHT = '#2e86de';
+const DOT_FILL = 'rgba(46, 134, 222, 0.55)';
+const DOT_RING = 'rgba(46, 134, 222, 0.85)';
+
+/** 子的圓半徑。選中框比它大一圈,落點的吃子圈則與 POC 的 `.dot.capture` 同寬。 */
+const DISC_R = CELL * 0.43;
 
 /** 建一個 SVG 元素;`text` 非空時作為其文字內容。 */
 function svgElement(name, attributes, text) {
@@ -110,25 +129,46 @@ function riverLabels() {
 /**
  * 一個子:圓底加中文字。紅子為 FEN 的大寫,黑子為小寫。
  *
- * 整個子包在一個 `<g>` 裡,選子互動(tasks 3.2)因此有單一的掛載點,點到字或
- * 點到圓都算點到同一個子。
+ * 整個子包在一個 `<g>` 裡,選子互動因此有單一的掛載點,點到字或點到圓都算點到
+ * 同一個子。
+ *
+ * 選中的子多畫一圈套在外緣 —— POC 用的是 `box-shadow`,而 `.piece` 現在是 SVG
+ * 的 `<g>`,`box-shadow` 對它無效(tasks 3.1 的交付事實),只能自繪。
  */
-function pieceElement(code, file, rank) {
+function pieceElement(code, file, rank, { selectable, selected }) {
   const isRed = code === code.toUpperCase();
   const color = isRed ? RED : BLACK;
   const group = svgElement('g', {
-    class: `piece ${isRed ? 'red' : 'black'}`,
+    class:
+      `piece ${isRed ? 'red' : 'black'}`
+      + (selectable ? ' selectable' : '')
+      + (selected ? ' selected' : ''),
   });
   group.append(
     svgElement('circle', {
       class: 'piece-disc',
       cx: px(file),
       cy: py(rank),
-      r: CELL * 0.43,
+      r: DISC_R,
       fill: PIECE_BG,
       stroke: color,
       'stroke-width': 2,
     }),
+  );
+  if (selected) {
+    group.append(
+      svgElement('circle', {
+        class: 'piece-selection',
+        cx: px(file),
+        cy: py(rank),
+        r: DISC_R + 3,
+        fill: 'none',
+        stroke: HIGHLIGHT,
+        'stroke-width': 4,
+      }),
+    );
+  }
+  group.append(
     svgElement(
       'text',
       {
@@ -148,19 +188,60 @@ function pieceElement(code, file, rank) {
 }
 
 /**
+ * 一個合法落點的標示。終點原本有子(吃子)時改畫成大一圈的空心圈,與 POC 的
+ * `.dot.capture` 相同。
+ *
+ * `pointer-events: all` 是必要的:空心圈的 `fill` 為 `none`,SVG 預設只有筆畫
+ * 吃得到點擊,圈內會直接穿透到底下那枚被吃的子 —— 使用者點在圈中央會落空。
+ */
+function destinationElement(file, rank, capture) {
+  return svgElement('circle', {
+    class: `dot${capture ? ' capture' : ''}`,
+    cx: px(file),
+    cy: py(rank),
+    r: capture ? CELL * 0.4 : 11,
+    fill: capture ? 'none' : DOT_FILL,
+    stroke: capture ? DOT_RING : 'none',
+    'stroke-width': capture ? 3 : 0,
+    'pointer-events': 'all',
+  });
+}
+
+/**
  * 把一份盤面畫進 `container`。
  *
  * 每次呼叫都自 `board` 重建整個盤面並整份換掉容器的內容 —— 沒有增量更新,也就
  * 沒有「上一次畫了什麼」需要記住。重繪不會累積,換一份資料進來畫面就完全是那份
  * 資料的樣子。
  *
- * 選子與合法落點的標示(tasks 3.2)以擴充 options 的方式加入,呼叫形式不變。
+ * 選子與合法落點的標示同樣只是資料:給什麼畫什麼,不給就沒有。
  *
  * @param {Element} container 盤面容器,內容會被整份取代。
- * @param {{board: (string|null)[][]}} options `board` 為 `fen.js` 給出的
- *   `board[rank][file]` 陣列,空格為 `null`。
+ * @param {object} options
+ * @param {(string|null)[][]} options.board `fen.js` 給出的 `board[rank][file]`
+ *   陣列,空格為 `null`。
+ * @param {string[]} [options.legalMoves] 當前可走的 UCI 著法,例如 `['d8d9']`。
+ *   **由外部(後端)提供,本模組不驗證也不推導**。
+ * @param {string|null} [options.selected] 選中的格名,例如 `'d8'`。落點只為這一
+ *   格標示。
+ * @param {(square: string|null) => void} [options.onSelect] 點到可選取的子時
+ *   呼叫;點到已選中的那一格時給 `null`(取消選取)。
+ * @param {(uci: string) => void} [options.onMove] 點到已標示的落點時呼叫,帶完整
+ *   的 UCI 著法。盤面**不**因此自行更新。
  */
-export function renderBoard(container, { board }) {
+export function renderBoard(
+  container,
+  {
+    board,
+    legalMoves = [],
+    selected = null,
+    onSelect = () => {},
+    onMove = () => {},
+  },
+) {
+  /** 自 `square` 出發的著法 —— 可選取與落點標示都只看這個。 */
+  const movesFrom = (square) =>
+    legalMoves.filter((move) => move.slice(0, 2) === square);
   const svg = svgElement('svg', {
     class: 'board',
     viewBox: `0 0 ${WIDTH} ${HEIGHT}`,
@@ -188,8 +269,28 @@ export function renderBoard(container, { board }) {
   for (let rank = 0; rank < RANKS; rank++) {
     for (let file = 0; file < FILES; file++) {
       const code = board[rank][file];
-      if (code) svg.append(pieceElement(code, file, rank));
+      if (!code) continue;
+      const square = fr2sq(file, rank);
+      const isSelected = square === selected;
+      const selectable = movesFrom(square).length > 0;
+      const piece = pieceElement(code, file, rank, {
+        selectable,
+        selected: isSelected,
+      });
+      if (selectable) {
+        piece.addEventListener('click', () =>
+          onSelect(isSelected ? null : square),
+        );
+      }
+      svg.append(piece);
     }
+  }
+  // 落點畫在棋子之後 —— 吃子的標示必須蓋在被吃的子上面才點得到。
+  for (const move of selected ? movesFrom(selected) : []) {
+    const [file, rank] = sq2fr(move.slice(2, 4));
+    const dot = destinationElement(file, rank, board[rank][file] !== null);
+    dot.addEventListener('click', () => onMove(move));
+    svg.append(dot);
   }
   container.replaceChildren(svg);
 }

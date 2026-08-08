@@ -45,7 +45,7 @@
   - _Requirements: 1.1, 1.5_
   - _Boundary: web/board.js_
 
-- [ ] 3.2 實作選子與合法落點互動
+- [x] 3.2 實作選子與合法落點互動
   - 自 `poc/index.html` 的 `selectPiece`(第 182 行)與 `render` 中的落點標示邏輯移植
   - 選取己方棋子後標示其所有合法落點;**合法落點一律取自外部傳入的資料,不自行判斷任何棋規**
   - 選取非己方棋子或未標示的位置時不改變盤面、不觸發任何動作
@@ -152,3 +152,8 @@
 - 3.1:`renderBoard(container, { board })` 以 options 物件為入口,3.2 擴充 `selected` / 合法落點 / 事件回呼不改變呼叫形式。每個子是單一 `<g class="piece">`,點字或點圓都算點到同一個子。
 - 3.1:`svg` 同時帶 `width`/`height` 屬性與 `viewBox`。5.1 用 `#board svg { width:100%; height:auto }` 即可蓋掉屬性,長寬比由 `viewBox` 自動保持。
 - 3.1:依賴方向測試補強 —— 只斷言 import 路徑擋不住「仍匯入 `fen.js` 但自行定義一份 `NAMES`」,已加 `test_board_does_not_redefine_the_shared_piece_names` 並以突變確認會捕捉。
+- 3.2:**⚠ 給 4.2 的強制約束**:`board.js` **不判斷子的歸屬** —— 「可選取」的定義就是「該格有著法可出發」。因此 **requirements 2.5 / 6.2(非我方回合、等待中不接受走子)完全落在 `game.js`:那些狀態下必須傳入空的 `legalMoves`**。review 已實測風險為真 —— 傳入黑方著法時點黑將會回報 `['select','e9']`。
+- 3.2:`renderBoard(container, { board, legalMoves, selected, onSelect, onMove })`。點擊只以回呼往外通知,**不重繪就沒有任何視覺變化**(選中狀態也不留在 board.js)。再次點選已選中的格會回報 `onSelect(null)`。
+- 3.2:**吃子標示的 `pointer-events: all` 是 load-bearing**。它是 `fill="none"` 的圓環,SVG hit-testing 會讓點擊穿過未填色的內部打到底下的棋子 —— 移除後點吃子圈中央會完全落空。5.1 改樣式時不可拿掉。
+- 3.2:盤面留白帶(40px)上 `elementFromPoint` 回傳的是 `rect.board-bg`,與格點上的 `path.grid` 是**兩條不同的 hit-testing 路徑**。首輪 review 因留白帶未被覆蓋而 REJECTED,已補座標點擊測試。
+- 3.2:`legalMoves` 含長度不足 4 的項目會拋 `TypeError`(不防護,與 `applyMove` 同一取捨 —— 合法性一律來自後端)。拋錯優於靜默畫錯。

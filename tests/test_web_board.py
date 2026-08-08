@@ -1,4 +1,4 @@
-"""SVG 棋盤繪製的驗證(tasks 3.1、requirements 1.1、1.5)。
+"""SVG 棋盤繪製與選子互動的驗證(tasks 3.1、3.2;requirements 1.1、1.5、2.1、2.3、2.4)。
 
 `web/board.js` 只接受資料並繪製,自身不記憶任何狀態(design 的「模組結構與依賴
 方向」)。這使它可以像純函式一樣測:餵一份盤面陣列進去,看畫出來的 DOM。
@@ -47,6 +47,10 @@ EXPECTED_PIECES = {
 #: 上表中屬紅方(FEN 大寫)的格。
 RED_SQUARES = {"d8", "f8", "i7", "g6", "e3", "a2", "e2", "i2", "e0"}
 
+#: 一組合法著法,扮演「後端給的 `legal_moves`」。三枚子各有著法,其中 `d8d9`
+#: 的終點有黑士(吃子)。內容是什麼由外部決定,`board.js` 不參與判斷。
+LEGAL_MOVES = ["d8d9", "d8c8", "d8d7", "f8f9", "e2e1"]
+
 
 @pytest.fixture
 def board_page(browser_page) -> Iterator:
@@ -81,15 +85,32 @@ def board_page(browser_page) -> Iterator:
     yield browser_page
 
 
-def draw(page, fen: str = PUZZLE_FEN) -> None:
-    """把 `fen` 的局面畫進 `#board`,走的是 `board.js` 對外的唯一入口。"""
+def draw(
+    page,
+    fen: str = PUZZLE_FEN,
+    *,
+    legal_moves: list[str] | None = None,
+    selected: str | None = None,
+) -> None:
+    """把 `fen` 的局面畫進 `#board`,走的是 `board.js` 對外的唯一入口。
+
+    合法落點與選中格都是**傳進去的資料**;兩個回呼把互動往外通知,呼叫記錄留在
+    `window.calls` 供 `reported()` 取回。每次繪製都重設記錄。
+    """
     page.evaluate(
-        """async (fen) => {
+        """async ({ fen, legalMoves, selected }) => {
           const { parseFen } = await import('/fen.js');
           const { renderBoard } = await import('/board.js');
-          renderBoard(document.getElementById('board'), { board: parseFen(fen) });
+          window.calls = [];
+          renderBoard(document.getElementById('board'), {
+            board: parseFen(fen),
+            legalMoves,
+            selected,
+            onSelect: (square) => window.calls.push(['select', square]),
+            onMove: (uci) => window.calls.push(['move', uci]),
+          });
         }""",
-        fen,
+        {"fen": fen, "legalMoves": legal_moves or [], "selected": selected},
     )
 
 
@@ -304,6 +325,274 @@ def test_two_containers_are_drawn_independently(board_page) -> None:
     )
 
     assert counts == {"first": len(EXPECTED_PIECES), "second": len(EXPECTED_PIECES)}
+
+
+# --- 選子與合法落點 -----------------------------------------------------
+
+
+def click_square(page, square: str) -> None:
+    """點在 `square` 這一格的正中央。
+
+    刻意不用選擇器挑元素,而是對盤面的實際座標按下去 —— 命中誰由瀏覽器的
+    hit test 決定。這樣「點空白處」「點被落點標示蓋住的子」才測得到真的行為,
+    而不是測到我們自己寫上去的識別屬性。
+    """
+    file, rank = ord(square[0]) - 97, int(square[1])
+    page.locator("#board svg").click(position={"x": x_of(file), "y": y_of(rank)})
+
+
+def markers(page) -> list[dict]:
+    """畫出來的每個落點標示:所在格、是否為吃子。"""
+    dots = page.evaluate(
+        """() => [...document.querySelectorAll('#board .dot')].map(dot => ({
+          x: Number(dot.getAttribute('cx')),
+          y: Number(dot.getAttribute('cy')),
+          capture: dot.classList.contains('capture'),
+        }))"""
+    )
+    return [
+        {"square": square_at(dot["x"], dot["y"]), "capture": dot["capture"]}
+        for dot in dots
+    ]
+
+
+def marked_squares(page) -> set[str]:
+    return {marker["square"] for marker in markers(page)}
+
+
+def reported(page) -> list[list]:
+    """自繪製起,`board.js` 經回呼往外通知過的每一件事。"""
+    return page.evaluate("() => window.calls")
+
+
+def test_selecting_a_piece_marks_exactly_its_own_legal_destinations(
+    board_page,
+) -> None:
+    """2.1:選中的子,其所有合法落點都被標示 —— 且只有它的。
+
+    著法集合裡另外兩枚子(f8、e2)的落點必須不出現,否則使用者看到的是一堆
+    與選中子無關的點。
+    """
+    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
+
+    assert marked_squares(board_page) == {"d9", "c8", "d7"}
+
+
+def test_destination_markers_are_actually_visible(board_page) -> None:
+    """2.1:標示要看得見 —— 元素存在但沒有尺寸或沒有顏色等於沒標。"""
+    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
+
+    dots = board_page.locator("#board .dot")
+    assert dots.count() == 3
+    for index in range(dots.count()):
+        dot = dots.nth(index)
+        dot.wait_for(state="visible")
+        box = dot.bounding_box()
+        assert box["width"] > 0 and box["height"] > 0
+        painted = board_page.evaluate(
+            """(element) => {
+              const style = getComputedStyle(element);
+              return { fill: style.fill, stroke: style.stroke };
+            }""",
+            dot.element_handle(),
+        )
+        assert painted["fill"] != "none" or painted["stroke"] != "none"
+
+
+def test_nothing_is_marked_when_no_piece_is_selected(board_page) -> None:
+    """沒有選中的子就沒有落點標示 —— 合法著法本身不觸發任何標示。"""
+    draw(board_page, legal_moves=LEGAL_MOVES)
+
+    assert markers(board_page) == []
+
+
+def test_markers_come_verbatim_from_the_given_moves(board_page) -> None:
+    """2.4:落點一律照抄傳進來的資料,`board.js` 不判斷任何棋規。
+
+    給紅帥三個橫跨全盤、任何象棋規則都不會允許的落點。若模組心裡藏著哪怕
+    一條「帥只能在九宮內走一格」的知識,這裡就會少標。
+    """
+    absurd = ["e0a9", "e0i0", "e0e5"]
+
+    draw(board_page, legal_moves=absurd, selected="e0")
+
+    assert marked_squares(board_page) == {"a9", "i0", "e5"}
+
+
+def test_capture_destinations_are_distinguishable(board_page) -> None:
+    """吃子的落點與空格的落點在呈現上有別(POC `render` 的 `capture` 類別)。
+
+    是不是吃子由**盤面上該格有沒有子**決定,不需要任何棋規知識。
+    """
+    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
+
+    by_square = {marker["square"]: marker["capture"] for marker in markers(board_page)}
+
+    assert by_square == {"d9": True, "c8": False, "d7": False}
+
+
+def test_the_selected_piece_is_marked_out_from_the_others(board_page) -> None:
+    """2.1:選中的子在盤面上看得出是被選中的那個。
+
+    標示必須是自繪的 SVG 圖形:`.piece` 是 `<g>`,POC 用的 `box-shadow` 在
+    SVG 元素上一律無效(tasks 3.1 的交付事實)。
+    """
+    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
+
+    selected = board_page.locator("#board .piece.selected")
+    assert selected.count() == 1
+
+    ring = board_page.evaluate(
+        """() => {
+          const piece = document.querySelector('#board .piece.selected');
+          const disc = piece.querySelector('circle.piece-disc');
+          const extra = [...piece.querySelectorAll('circle')]
+            .find(circle => circle !== disc);
+          if (!extra) return null;
+          const style = getComputedStyle(extra);
+          return {
+            biggerThanDisc:
+              Number(extra.getAttribute('r')) > Number(disc.getAttribute('r')),
+            painted: style.stroke !== 'none' && parseFloat(style.strokeWidth) > 0,
+            centre: [
+              Number(extra.getAttribute('cx')),
+              Number(extra.getAttribute('cy')),
+            ],
+          };
+        }"""
+    )
+
+    assert ring is not None, "選中標示必須自繪,不能靠 CSS box-shadow"
+    assert ring["biggerThanDisc"], "標示要圈在子的外圍才看得見"
+    assert ring["painted"]
+    assert square_at(*ring["centre"]) == "d8"
+
+
+def test_clicking_a_piece_with_legal_moves_reports_the_selection(board_page) -> None:
+    """2.1:點選一枚有合法著法的子,經回呼往外通知選了哪一格。
+
+    `board.js` 自身不記憶選中狀態(design 的「模組結構與依賴方向」),因此
+    它不會自己冒出落點 —— 畫面要變,得由外部帶著新的 `selected` 再畫一次。
+    """
+    draw(board_page, legal_moves=LEGAL_MOVES)
+
+    click_square(board_page, "d8")
+
+    assert reported(board_page) == [["select", "d8"]]
+    assert markers(board_page) == [], "選中狀態不由 board.js 自行記下"
+
+
+def test_clicking_the_selected_piece_again_reports_a_cleared_selection(
+    board_page,
+) -> None:
+    """POC `selectPiece` 的切換行為:再點一次已選中的子等於取消選取。
+
+    結果一樣是往外通知(這次是「沒有選中」),而不是自己改畫面。
+    """
+    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
+
+    click_square(board_page, "d8")
+
+    assert reported(board_page) == [["select", None]]
+
+
+def test_clicking_another_piece_switches_the_reported_selection(board_page) -> None:
+    """已選中一枚子時點另一枚有著法的子,通知的是新的那一格。"""
+    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
+
+    click_square(board_page, "f8")
+
+    assert reported(board_page) == [["select", "f8"]]
+
+
+def test_clicking_a_marked_destination_reports_that_move(board_page) -> None:
+    """2.1 的下一步:點在標示的落點上,往外通知的是完整的 UCI 著法。
+
+    盤面**不會**自己更新 —— 走法序列是 `game.js` 的唯一真相,`board.js` 只回報。
+    """
+    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
+    before = drawn_pieces(board_page)
+
+    click_square(board_page, "c8")
+
+    assert reported(board_page) == [["move", "d8c8"]]
+    assert drawn_pieces(board_page) == before
+
+
+def test_clicking_a_capture_destination_reports_the_move_not_the_piece_under_it(
+    board_page,
+) -> None:
+    """吃子的落點蓋在對方子上,點下去要走出那手,而不是穿過去點到底下的子。
+
+    這是 SVG 的實際陷阱:`fill="none"` 的圈只有筆畫吃得到點擊,圈內會直接
+    穿透到下層。
+    """
+    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
+
+    click_square(board_page, "d9")
+
+    assert reported(board_page) == [["move", "d8d9"]]
+
+
+def test_clicking_a_piece_without_legal_moves_reports_nothing(board_page) -> None:
+    """2.3:點選沒有合法著法的子(對方的子即屬此類)不改變盤面、不觸發任何動作。
+
+    「是不是己方的子」同樣不由 `board.js` 判斷 —— 後端給的合法著法只會自輪方的
+    子出發,「有著法可走」因此就是可選取的完整定義(2.4)。
+    """
+    draw(board_page, legal_moves=LEGAL_MOVES)
+    before = drawn_pieces(board_page)
+
+    click_square(board_page, "e9")  # 黑將
+    click_square(board_page, "e3")  # 紅兵,但這組著法裡沒有它的
+
+    assert reported(board_page) == []
+    assert drawn_pieces(board_page) == before
+    assert markers(board_page) == []
+
+
+def test_clicking_an_unmarked_empty_square_reports_nothing(board_page) -> None:
+    """2.3:點在未標示的空格上,盤面不變、不送出任何東西。
+
+    連取消選取都不做 —— 那是 POC 的行為,選中的子仍留著。
+    """
+    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
+    before = drawn_pieces(board_page)
+
+    click_square(board_page, "a5")  # 空格,且不在 d8 的落點裡
+    click_square(board_page, "b0")
+
+    assert reported(board_page) == []
+    assert drawn_pieces(board_page) == before
+    assert marked_squares(board_page) == {"d9", "c8", "d7"}
+
+
+def test_clicking_the_margin_outside_the_grid_reports_nothing(board_page) -> None:
+    """2.3:盤面四周的留白帶也是使用者點得到的區域,同樣不得送出任何東西。
+
+    這一條不能靠 `click_square` 涵蓋 —— 它只映射 90 個格點,而格點上蓋的是
+    `path.grid`。留白帶上 `elementFromPoint` 回傳的是底層的 `rect.board-bg`,
+    是另一條 hit-testing 路徑:在那個元素上掛 click 的話,使用者點棋盤邊緣就會
+    觸發回呼,而格點測試一個都抓不到。
+    """
+    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
+    before = drawn_pieces(board_page)
+
+    svg = board_page.locator("#board svg")
+    for x, y in ((5, 5), (300, 633), (570, 300), (20, 320)):
+        svg.click(position={"x": x, "y": y})
+
+    assert reported(board_page) == []
+    assert drawn_pieces(board_page) == before
+
+
+def test_redrawing_without_a_selection_clears_every_marker(board_page) -> None:
+    """選中狀態同樣不被記住:重畫時不給 `selected`,標示就全數消失。"""
+    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
+    draw(board_page, legal_moves=LEGAL_MOVES)
+
+    assert markers(board_page) == []
+    assert board_page.locator("#board .piece.selected").count() == 0
 
 
 # --- 依賴方向 -----------------------------------------------------------
