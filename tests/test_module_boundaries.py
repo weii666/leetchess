@@ -18,6 +18,9 @@ SERVICE_DIR = PROJECT_ROOT / "service"
 
 LEFTMOST_MODULES = ["types", "errors"]
 
+#: `config` 位於左端第二層,只能向左依賴 `types` 與 `errors`。
+CONFIG_ALLOWED_SERVICE_MODULES = {"service.types", "service.errors"}
+
 
 def _imported_module_names(source_path: pathlib.Path) -> set[str]:
     tree = ast.parse(source_path.read_text(encoding="utf-8"), str(source_path))
@@ -43,6 +46,18 @@ def test_leftmost_modules_import_no_other_service_module(module: str) -> None:
     for name in _imported_module_names(path):
         assert not name.startswith("service"), f"{module}.py 不得 import {name}"
         assert not name.startswith("."), f"{module}.py 不得使用相對匯入 {name}"
+
+
+def test_config_imports_only_leftmost_service_modules() -> None:
+    """config 只能 import types 與 errors,不得認識 positions / engine / game 等。"""
+    path = SERVICE_DIR / "config.py"
+    assert path.is_file(), f"{path} 必須存在"
+    for name in _imported_module_names(path):
+        assert not name.startswith("."), f"config.py 不得使用相對匯入 {name}"
+        if not name.startswith("service"):
+            continue
+        root = ".".join(name.split(".")[:2])
+        assert root in CONFIG_ALLOWED_SERVICE_MODULES, f"config.py 不得 import {name}"
 
 
 def _import_in_fresh_interpreter(statement: str) -> subprocess.CompletedProcess[str]:

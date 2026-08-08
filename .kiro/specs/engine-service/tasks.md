@@ -16,7 +16,7 @@
   - 完成狀態:錯誤類別列舉涵蓋設計所列全部七項,且題庫型別與對局型別皆可匯入而不產生循環匯入
   - _Requirements: 5.1_
 
-- [ ] 1.3 建立設定模組與時間預算約束
+- [x] 1.3 建立設定模組與時間預算約束
   - 提供池容量、借用等待上限、搜尋逾時、stop 寬限期、總時間預算、搜尋節點數、題庫路徑等設定項
   - 啟動時檢查三項分項逾時之和不超過總時間預算,不符即拒絕啟動
   - 池容量的預設值先留待 2.3 的實測結果填入,此任務只建立設定機制
@@ -200,3 +200,8 @@
 - 1.2:`GameState` 與 `Position` 是**淺層 frozen** —— `list[str]` 欄位仍可變,且兩者 unhashable。後續任務不得將它們用作 dict key 或放入 set。
 - 1.2:5.4 目前只在 `InternalError` 層級強制。其餘六種錯誤依設計接受呼叫端訊息(5.2 需指出違規著法)。**真正的 5.4 卡點在任務 4.3 的全域例外處理器** —— 它不得把引擎 stdout 或例外的 `str()` 塞進 503/504 的訊息欄位。
 - 1.2:`ServiceError.code` 預設為 `INTERNAL`,新增第八種例外型別時若忘記在 `EXCEPTION_BY_CODE` 註冊,會靜默回報 INTERNAL/500 而非明確失敗。
+- 1.3:設定以 `LEETCHESS_*` 環境變數覆寫,閘門在 `Settings.__post_init__`,任何建構路徑都會經過。啟動失敗用內建 `ValueError`,**不用**七種 HTTP 錯誤類別 —— 啟動失敗不經過 HTTP。
+- 1.3:**`DEFAULT_POOL_SIZE = 4` 無實測依據,僅為佔位。任務 2.3 必須以實測值取代**,在那之前不得引用它做容量規劃。搜尋逾時 5.0 秒與 stop 寬限期 1.0 秒同樣待 2.5 依實測調整。
+- 1.3:**待 2.3 順手修**(review 發現,不阻擋 1.3):`_trim()` 對 `inf` / `1e400` / `nan` 會拋 `OverflowError` 而非宣告的 `ValueError`,且訊息不指名是哪個環境變數。加 `math.isfinite` 防護即可。
+- 1.3:**預設值零餘裕** —— 三項分項之和(2.0+5.0+1.0)恰好等於總預算 8.0。字面符合 design「請求的時間預算」的等式,但 HTTP 序列化、請求解析、threadpool 排隊等池外開銷完全不在預算內,client 感受到的延遲必然超過總預算。屬 design 層級缺口,**2.3/2.5 取得實測數字時應提回 design 修訂**。
+- 1.3:`tests/test_module_boundaries.py` 的 allowlist 比對對 import 形式敏感 —— 合法的 `from service import types` 會被誤判失敗(誤拒不誤放)。config 日後需要 import `types` 時會踩到。
