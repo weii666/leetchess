@@ -73,6 +73,16 @@ EngineAdapter.legal_moves(fen, moves)      -> [uci_move, ...]
 
 檔 `a`–`i`(紅方左至右),列 `0`–`9`(紅方底線為 0)。例:炮二平五 = `h2e2`。
 
+## 前端:vanilla JS,無建置步驟
+
+前端一律 **vanilla JS + SVG,不引入任何框架與 node 工具鏈**。專案因此維持純 Python:沒有 `package.json`、沒有打包器、沒有建置步驟,`.js` 與 `.html` 直接就是交付物。
+
+- 理由:單題對局的狀態極小(走法序列、輪方、信號、等待態),框架帶來的狀態管理收益抵不過整條 node 工具鏈的維護成本
+- POC 的 `poc/index.html` 已驗證這條路可行 —— 棋盤繪製、中文記譜、信號側欄都是可直接移植的既有資產
+- **頁面由後端服務掛靜態檔提供**,與 API 同源,因此不需要 CORS 設定
+
+若日後 `problem-browser` 的列表與篩選複雜到 vanilla 難以維持,再回頭評估;那時的決定不應回溯改寫本 spec 已交付的對局介面。
+
 ## Python 執行環境:uv + venv
 
 專案的 Python(`tools/` 下的腳本等)一律以 **uv** 管理、在專案本地 **venv** 內執行,不使用系統全域 Python:

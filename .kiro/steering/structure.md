@@ -12,10 +12,12 @@
 
 ```
 engine/       第三方引擎:版本鎖定與取得腳本
+service/      後端引擎服務:HTTP 端點、對局判定、引擎池、題庫索引
 tools/        build-time 工具,唯一用到 Pikafish native 之處(規劃中)
 positions/    題目資料,人工編輯,進 git
-web/          前端(規劃中)
+web/          前端:vanilla JS + SVG,無建置步驟,由 service 掛靜態檔提供
 poc/          一次性驗證工具,不隨產品演進
+tests/        測試,與 service/ 平行
 .kiro/        規格與專案記憶
 ```
 
@@ -57,6 +59,12 @@ positions/
 | `solvable` | 布林 | 否 | 是否確認紅先必勝,由驗證工具回填 |
 
 **欄位擁有權**:`max_dtm` 與 `solvable` 由驗證工具寫入,其餘欄位人工編輯。工具不得改寫人工欄位,否則會互相覆蓋。
+
+### `service/` 與 `web/` 的交界
+
+後端服務**掛靜態檔提供前端頁面**,兩者同源,因此不需要 CORS 設定,本地開發也只需啟動一個進程。
+
+這條掛載是兩個 spec 之間唯一的實體交界:`web/` 的內容由 web-play-runtime 擁有,而 `service/` 中負責掛載它的那一小段由同一個 spec 加入並維護。engine-service 不擁有任何前端內容,只提供掛載點。
 
 ### `poc/`
 

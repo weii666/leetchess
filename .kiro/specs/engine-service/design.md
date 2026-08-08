@@ -40,6 +40,7 @@
 - **`max_dtm` 與 `solvable` 的產出** —— 屬 corpus-verification
 - **速率限制、版本校驗、健康端點與結構化日誌** —— 已列 Backlog,本輪不實作
 - **部署設定、資源配額、監控告警** —— 屬 service-deploy-ops
+- **前端內容** —— 屬 web-play-runtime。本服務**提供靜態檔掛載點**使前端與 API 同源(免去 CORS),但不擁有 `web/` 底下的任何內容,掛載那一小段由 web-play-runtime 加入並維護(見 `structure.md` 的「`service/` 與 `web/` 的交界」)
 
 ### Allowed Dependencies
 
