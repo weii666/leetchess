@@ -1,0 +1,22 @@
+{
+  "feature_name": "engine-service",
+  "created_at": "2026-08-08T09:39:25Z",
+  "updated_at": "2026-08-08T10:18:07Z",
+  "language": "zh-TW",
+  "phase": "tasks-generated",
+  "approvals": {
+    "requirements": {
+      "generated": true,
+      "approved": true
+    },
+    "design": {
+      "generated": true,
+      "approved": true
+    },
+    "tasks": {
+      "generated": true,
+      "approved": true
+    }
+  },
+  "ready_for_implementation": true
+}
