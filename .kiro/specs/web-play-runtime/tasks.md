@@ -37,7 +37,7 @@
 
 ## 3. 盤面呈現與走子互動
 
-- [ ] 3.1 移植 SVG 棋盤繪製
+- [x] 3.1 移植 SVG 棋盤繪製
   - 自 `poc/index.html` 的 `drawGrid`(第 125 行)與 `render`(第 149 行)移植到 `web/board.js`
   - 以紅方在下的視角呈現;`board.js` 只接受資料並繪製,**自身不記憶任何狀態**
   - 完成狀態:給定起始 FEN 後,瀏覽器中可見完整棋盤與正確的初始子力配置
@@ -147,3 +147,8 @@
 - 2.2:兩個記譜慣例的取捨已釘在測試裡(非缺陷,皆無歧義):仕/相同線時用「前/後」而非棋譜慣見的「相七退五」;同線四子以上用「一二三四」而非「前二三後」。要改的話改動點單一,測試 docstring 已註明位置。
 - 2.2:**`renderMoves` 歸 `app.js`**(design 第 163 行原本誤劃給 `notation.js`,與同段「純函式」矛盾,已修正)。tasks 4.3 本來就是這樣分的。
 - 2.2:`NAMES` 已移入 `web/fen.js` 並匯出(純新增,既有函式一字未動)。**任務 3.1 從那裡匯入,不得自行定義。**
+- 3.1:**棋子畫在 SVG 內,不是 POC 的絕對定位 `div`**。這是移植中唯一的實質偏離,經 review 實測證明必要:POC 的 `div.piece` 靠 `#board{position:relative}` + `.piece{position:absolute}` 這組全域 CSS 才定位,而 `style.css` 屬 5.1、`index.html` 不在 3.1 的 boundary —— 照搬會讓 32 個子 `position: static`、`distinctX: 1`,退化成一直列掉在棋盤下方。幾何(座標公式、10 橫線、河界斷開、九宮斜線、河界字樣位置、棋子直徑)與 POC 逐項相同。
+- 3.1:**⚠ 給 3.2 與 5.1 的交付事實**:`.piece` 現在是 `<g>`,POC CSS 的 `box-shadow`(`.piece.selected`、`.selectable:hover`)、`border`、`border-radius`、`background` 在 SVG 元素上**一律無效**;`<rect class="board-bg">` 也蓋掉了 `#board{background}`。**5.1 改樣式要針對 `circle.piece-disc` / `text.piece-label` 用 `fill`/`stroke`;3.2 的選中標示要自繪圈或改 `stroke-width`。**
+- 3.1:`renderBoard(container, { board })` 以 options 物件為入口,3.2 擴充 `selected` / 合法落點 / 事件回呼不改變呼叫形式。每個子是單一 `<g class="piece">`,點字或點圓都算點到同一個子。
+- 3.1:`svg` 同時帶 `width`/`height` 屬性與 `viewBox`。5.1 用 `#board svg { width:100%; height:auto }` 即可蓋掉屬性,長寬比由 `viewBox` 自動保持。
+- 3.1:依賴方向測試補強 —— 只斷言 import 路徑擋不住「仍匯入 `fen.js` 但自行定義一份 `NAMES`」,已加 `test_board_does_not_redefine_the_shared_piece_names` 並以突變確認會捕捉。
