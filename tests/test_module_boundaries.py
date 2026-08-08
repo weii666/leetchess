@@ -27,6 +27,9 @@ ENGINE_ALLOWED_SERVICE_MODULES = CONFIG_ALLOWED_SERVICE_MODULES | {"service.conf
 #: `positions.py` 與 `engine/` 同層,允許的匯入範圍相同。
 POSITIONS_ALLOWED_SERVICE_MODULES = ENGINE_ALLOWED_SERVICE_MODULES
 
+#: `models.py` 位於右端第二層:除了 `main` 以外皆可向左依賴。
+MODELS_FORBIDDEN_SERVICE_MODULES = {"service.main"}
+
 
 def _imported_module_names(source_path: pathlib.Path) -> set[str]:
     tree = ast.parse(source_path.read_text(encoding="utf-8"), str(source_path))
@@ -91,6 +94,23 @@ def test_positions_imports_only_modules_to_its_left() -> None:
         root = ".".join(name.split(".")[:2])
         assert root in POSITIONS_ALLOWED_SERVICE_MODULES, (
             f"positions.py 不得 import {name}"
+        )
+
+
+def test_models_does_not_import_the_application_module() -> None:
+    """`models.py` 是 HTTP 層的邊界轉換,只能向左依賴,**不得** import `main.py`。
+
+    反向依賴會使 `main.py` 的 app 組裝與模型定義互相牽制,且產生循環匯入。
+    """
+    path = SERVICE_DIR / "models.py"
+    assert path.is_file(), f"{path} 必須存在"
+    for name in _imported_module_names(path):
+        assert not name.startswith("."), f"models.py 不得使用相對匯入 {name}"
+        if not name.startswith("service"):
+            continue
+        root = ".".join(name.split(".")[:2])
+        assert root not in MODELS_FORBIDDEN_SERVICE_MODULES, (
+            f"models.py 不得 import {name}"
         )
 
 
