@@ -20,7 +20,7 @@
 
 POC 已驗證的 UCI 用法全部保留。`Threads value 1` 維持不變 —— 併發靠多進程而非單進程多執行緒,如此資源可預測、單請求延遲穩定,也符合 POC 實測「2M nodes 與 20k nodes 同一手」所顯示的低算力需求。
 
-**邊界**:本服務不自實作任何象棋規則(合法著與勝負一律由引擎判定,尤其不碰循環規則);不持有 session 狀態(單次挑戰內的應手穩定性由前端 memo 負責);不擁有題目 schema、部署設定與營運監控;不實作走脫判定表,但 API 契約須為日後新增走脫判定來源預留擴充空間。
+**邊界**:本服務不自實作任何象棋規則(合法著與勝負一律由引擎判定,尤其不碰循環規則);不持有 session 狀態(產品不提供悔棋,同一局面不會被重複請求,故無須任何應手穩定性保證);不擁有題目 schema、部署設定與營運監控;不實作走脫判定表,但 API 契約須為日後新增走脫判定來源預留擴充空間。
 
 詳細背景、範圍界線與約束見同目錄 `brief.md`,專案級決策見 `.kiro/steering/roadmap.md`。
 
@@ -38,7 +38,7 @@ engine-service 是 leetchess 的引擎後端。使用者執紅練習象棋排局
 ## Boundary Context
 
 - **In scope**:依題目載入起始局面、查詢任一局面的合法著法、判定真終局與勝負方、計算黑方應手並回傳三態評分、併發處理與忙碌回報、單請求逾時、引擎失效後的自動恢復、可判別的錯誤模型。
-- **Out of scope**:**濫用防護、引擎版本校驗、可觀測性(見 `## Backlog`,本輪不實作)**;走脫判定表與移動級「就是這一步」回饋(後續 phase);對局 session 狀態、悔棋記憶與應手穩定性(由前端持有);題目 schema 與題庫內容(position-corpus);題目真偽驗證與 `max_dtm` / `solvable` 的產出(corpus-verification);託管平台、資源配額與監控告警設定(service-deploy-ops);使用者帳號、練習進度與任何個人資料。
+- **Out of scope**:**濫用防護、引擎版本校驗、可觀測性(見 `## Backlog`,本輪不實作)**;走脫判定表與移動級「就是這一步」回饋(後續 phase);對局 session 狀態(由前端持有;產品不提供悔棋,故無悔棋記憶與應手穩定性需求);題目 schema 與題庫內容(position-corpus);題目真偽驗證與 `max_dtm` / `solvable` 的產出(corpus-verification);託管平台、資源配額與監控告警設定(service-deploy-ops);使用者帳號、練習進度與任何個人資料。
 - **Adjacent expectations**:前端持有完整對局狀態,每次請求重送題目識別碼與完整走法序列,服務不記憶任何一局的進度;題庫由 position-corpus 提供,其中 `solvable` 為 false 的題目不應被送到本服務;部署層的資源上限與對外速率策略由 service-deploy-ops 配置,本服務只負責在達到上限時表現正確。
 
 ## Requirements

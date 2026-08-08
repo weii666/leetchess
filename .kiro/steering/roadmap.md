@@ -27,7 +27,7 @@ repo 內已有本地 POC(`poc/`:Python 小後端包住 native pikafish + 單頁�
 
 - **In**:
   - 後端引擎服務:native Pikafish 封裝、併發管理、API 契約、逾時與錯誤處理、濫用防護
-  - 前端對局 client:棋盤、走子、真終局停局、三態諮詢信號、悔棋、中文記譜
+  - 前端對局 client:棋盤、走子、真終局停局、三態諮詢信號、中文記譜
   - 題庫:schema 定案、《適情雅趣》前 200 局收錄
   - Build-time 題目驗證:確認「紅先真的必勝」,剔除或改標註偽題
   - 選題瀏覽與練習進度
@@ -71,7 +71,7 @@ repo 內已有本地 POC(`poc/`:Python 小後端包住 native pikafish + 單頁�
 
 - [ ] engine-service -- 將 `poc/server.py` 產品化為引擎後端:native Pikafish 進程池、併發與逾時、HTTP API 契約、rate limit。Dependencies: none
 - [ ] position-corpus -- 題目 schema 定案與《適情雅趣》前 200 局收錄,一題一檔進 git。Dependencies: none
-- [ ] web-play-runtime -- 前端對局 client:棋盤、走子、真終局停局、三態信號、悔棋、中文記譜,以及網路延遲與失敗的互動處理。Dependencies: engine-service
+- [ ] web-play-runtime -- 前端對局 client:棋盤、走子、真終局停局、三態信號、中文記譜,以及網路延遲與失敗的互動處理。Dependencies: engine-service
 - [ ] corpus-verification -- `tools/verify.py`:長時間搜尋確認紅先必勝、剔除偽題、回填 max_dtm 與 solvable,加 CI 的 FEN 合法性檢查。Dependencies: position-corpus
 - [ ] problem-browser -- 題目列表、難度與標籤篩選、練習進度紀錄(localStorage)。Dependencies: web-play-runtime, position-corpus, corpus-verification
 - [ ] service-deploy-ops -- 服務部署、引擎版本鎖定的上線流程、監控與資源上限、濫用防護、引擎與 NNUE 授權標示。Dependencies: engine-service, web-play-runtime
