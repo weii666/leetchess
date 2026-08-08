@@ -212,3 +212,4 @@
 - 2.1:**待 2.5 修**(review 建議,現階段不可達):`_query` 的 `with self._lock` 無逾時,鎖等待未計入 deadline —— 實測競用下 timeout=1.0 的呼叫實際耗時 1.3 秒,違反 design 的 Invariant。目前由「池保證同一進程不同時借出」擋住,但 2.5 的 `stop` + 寬限期會拉長持鎖時間。改為 `self._lock.acquire(timeout=remaining)` 即可。
 - 2.1:三個突變存活,缺迴歸保護(程式碼本身正確):deadline 的擺放位置(取鎖前 vs 取鎖內)、握手失敗時的 `terminate()` 清理。2.5 補競用測試時可一併釘住。
 - 2.1:`SCORE_PATTERN` 把 `upperbound`/`lowerbound` 當精確分數解析(如 `score cp 526 upperbound` → `Score(CP, 526)`)。因 cp 一律歸「未知」故目前無害;日後若要顯示評分數值須處理。
+- 2.1 後續決策:**`DEFAULT_SEARCH_NODES` 已由 200k 改為 250k**(使用者決策,實測依據見 design 的「搜尋節點數與三態信號的關係」)。**任務 3.3 實作三態信號時須知:殺著倒數可能高估 1 步**,契約與 UI 表述宜為「約 N 步」。任務 5.6 量測回應時間時,基準為 250k 的約 0.12 秒。

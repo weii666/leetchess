@@ -58,9 +58,14 @@ def test_default_settings_load_and_satisfy_the_time_budget() -> None:
     assert settings.timeout_sum <= settings.total_time_budget
 
 
-def test_search_nodes_default_follows_the_poc_measurement() -> None:
-    """POC 實測 200k 與 2M 得同一手(poc/server.py 的 BLACK_NODES)。"""
-    assert c.load_settings(_env()).search_nodes == 200_000
+def test_search_nodes_default_is_the_measured_mate_threshold() -> None:
+    """250k 為實測的 mate 型別門檻,低於此三態信號會落在「未知」。
+
+    實測(《適情雅趣》第 21 局,全新進程即冷雜湊表):走 f8f9 後的黑方局面
+    200k 回 `cp 526`(未搜到殺),230k 起才回 `mate`。POC 註記的「200k 與 2M
+    同一手」只對**著法**成立,對 **mate 分數不成立**。
+    """
+    assert c.load_settings(_env()).search_nodes == 250_000
 
 
 def test_positions_dir_defaults_to_the_project_corpus_directory() -> None:
@@ -136,7 +141,7 @@ def test_the_budget_gate_also_guards_direct_construction() -> None:
             search_timeout=1.0,
             stop_grace_period=1.0,
             total_time_budget=2.0,
-            search_nodes=200_000,
+            search_nodes=250_000,
             positions_dir=PROJECT_ROOT / "positions",
             engine_path=PROJECT_ROOT / "engine" / "pikafish",
         )
