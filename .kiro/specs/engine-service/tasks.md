@@ -110,7 +110,7 @@
   - _Requirements: 5.2_
   - _Boundary: HTTP Routes_
 
-- [ ] 4.2 組裝應用與三個端點
+- [x] 4.2 組裝應用與三個端點
   - 實作題目起始局面、局面查詢、黑方應手三個端點
   - 啟動掛鉤建立題庫索引與引擎池,關閉掛鉤釋放全部引擎進程
   - 路由採同步形式以使用框架的執行緒池;**執行緒池容量須配置為大於引擎池容量**,否則請求會在觸及池之前先被卡住,使服務忙碌的語意與資源實況脫節
@@ -239,3 +239,7 @@
 - 4.1:**4.2 必須把模型宣告為 body 參數,不得在路由函式內手動 `model_validate`** —— 「未觸及引擎池」的保證來自「驗證失敗時路由函式本體完全沒被進入」。改成函式內驗證,借引擎的程式碼可能已先執行。
 - 4.1:**⚠ 待 4.3**:結構性驗證失敗(未知欄位、`position_id` 型別錯誤、`moves` 非陣列)目前回 FastAPI 的 `{"detail":[...]}`,而非 5.1 要求的 `{code, message}` 契約形狀。4.3 須註冊 `RequestValidationError` 處理器。
 - 4.1:`MoveSequenceRequest` 設 `extra="forbid"` —— `moves` 拼成 `move` 若被靜默忽略,請求會被當成起始局面處理並回傳**另一個局面**的合法著法,與引擎靜默忽略非法著法屬同一類失敗。
+- 4.2:**含最小錯誤映射**(只註冊 `ServiceError` 處理器),使服務可手動測試。**4.3 的範圍仍在**:未捕捉例外一律轉 `INTERNAL`、確保不外洩路徑與堆疊、`RequestValidationError` 的契約形狀映射、資源歸還驗證。
+- 4.2:`main.py` 作為 composition root **直接持有 `PositionRepository`** 取題目資訊與出處(未改 `game.py`)。design 的 Boundary Map 與 Components 表已補上 `Routes → PositionRepository`。
+- 4.2:**`MIN_THREADPOOL_CAPACITY = 40` 恰好等於 anyio 的預設 `total_tokens`**。首輪 review 因此發現:小池的 threadpool 測試只是在驗證 anyio 免費給的值,刪掉整行容量賦值測試照樣全過。已補參數化至 `pool_size=11`(容量 44),**任務 2.3 調整池大小時這組測試才真正有保護作用**。
+- 4.2:`EnginePool` 的 `startup_timeout` 沿用進程層預設值,`Settings` 無此欄位,design 的「請求的時間預算」也不涵蓋啟動握手。日後可考慮納入設定。

@@ -151,6 +151,7 @@ graph TB
     Routes --> Models
     Routes --> ErrorHandler
     Routes --> GameService
+    Routes --> PositionRepo
     GameService --> PositionRepo
     GameService --> Pool
     Pool --> Process
@@ -333,7 +334,7 @@ stateDiagram-v2
 | EnginePool | Engine | 引擎資源池:借還、併發閘門、崩潰重建 | 3.1–3.4, 4.1–4.4 | EngineProcess (P0) | Service, State |
 | GameService | Service | 對局推進判定:輪方、終局、信號分類 | 1.1–1.5, 2.1–2.4, 5.3 | EnginePool (P0), PositionRepository (P0) | Service |
 | PositionRepository | Service | 題庫索引與依 id 讀取 | 6.1–6.3 | positions 目錄 (P0) | Service, State |
-| HTTP Routes | HTTP | 端點、結構驗證、錯誤映射 | 全部 | GameService (P0) | API |
+| HTTP Routes | HTTP | 端點、結構驗證、錯誤映射 | 全部 | GameService (P0), PositionRepository (P1) | API |
 
 ### Engine 層
 
