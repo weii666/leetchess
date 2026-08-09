@@ -2,13 +2,15 @@
 
 ## Problem
 
-有了 200 題和一個能玩的對局 runtime,使用者仍然只能玩「寫死的那一題」—— POC 的 `/api/start` 直接讀 `positions/0001.json`,沒有任何選題途徑。這是產品從「一個能下棋的 demo」變成「leetcode 式解題網站」的關鍵一塊:題庫要能瀏覽、能篩選,使用者要能記錄自己練到哪。
+對局介面已經能用了,但**開啟服務直接就是棋盤** —— 沒有任何選題途徑,要換題目只能手動改網址的 `?id=`。這是產品從「一個能下棋的 demo」變成「leetcode 式解題網站」的關鍵一塊:題庫要能瀏覽、能篩選,使用者要能記錄自己練到哪。
+
+參照形態是 grind75 與 leetcode 的 problemset:**先看到題庫列表,點某一題才進到棋盤。**
 
 ## Current State
 
-- `poc/server.py` 的 `POSITION_FILE` 硬編為 `positions/0001.json`。
-- `poc/index.html` 側欄只有題目來源文字與「重來」按鈕,無題目列表、無進度。
-- position-corpus 將提供 `id`、`title`、`difficulty`、`tags` 等列表所需欄位,出處以資料夾表達 —— 這些正是列表要消費的資料,目前無人使用。
+- `service/main.py` 把 `web/` 掛在根路徑,所以 `/` 目前直接是棋盤(`web/index.html`),題號由 `?id=` 帶入、預設 1。
+- `web/` 已有完整的單題對局介面(八個模組,608 個測試)。它的 Out of Boundary 明列「**不決定要載入哪一題**」—— 選題本來就留給本 spec。
+- 題目 metadata 已有列表所需的全部欄位:`id`、`title`、`description`、`difficulty`、`tags`,出處由資料夾表達(`positions/<書名>/<id>.json`)。目前只有 1 題,`position-corpus` 尚未收錄《適情雅趣》前 200 局。
 - 無任何進度儲存機制。
 
 ## Desired Outcome
