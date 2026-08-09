@@ -144,14 +144,21 @@ const SIGNAL_WINNERS = Object.freeze({ red_winning: 'red', black_winning: 'black
 const NO_SIGNAL_YET = '尚未取得';
 
 /**
- * 信號區的前綴與註記,合起來讓使用者辨識它是**參考資訊而非勝負判決**
- * (requirements 4.4)。
+ * 信號區的註記,讓使用者辨識它是**參考資訊而非勝負判決**(requirements 4.4)。
  *
  * 沒有這層框定的話,「即將取勝」看起來就是系統宣告勝負,而對局其實還在繼續 ——
  * 終局只由後端的結束旗標決定,信號連碰都碰不到它(requirements 3.3、4.3)。
+ *
+ * 原本這裡還有一個 `參考信號:` 前綴,以及一句「僅供參考,不是勝負判決;對局只在
+ * 真終局結束。」**兩者都已縮到只剩「僅供參考」**(使用者看過實際畫面後的決定):
+ * 前綴每一次重畫都把同一個名目再說一遍,而後半句「對局只在真終局結束」講的是系統
+ * 內部的規則,不是使用者此刻要做的判斷 —— 側欄因此被一句比讀數本身還長的話佔著。
+ *
+ * 4.4 仍由這四個字承擔,而且不只靠文案:`#signal` 標為 `role="note"` 而非
+ * `role="status"`(見 `play.html`),`.signal-note` 的字級與顏色也刻意低於讀數 ——
+ * 「參考而非判決」在語意樹、視覺層級與文案上各有一份,少了長句仍然站得住。
  */
-const SIGNAL_PREFIX = '參考信號';
-const SIGNAL_NOTE = '僅供參考,不是勝負判決;對局只在真終局結束。';
+const SIGNAL_NOTE = '僅供參考';
 
 /** 等待中要說的話 —— 載入題目與等應手是兩件事,不能都說成「引擎思考中」。 */
 const WAITING_TEXTS = Object.freeze({
@@ -270,16 +277,22 @@ function renderPuzzleInfo(state) {
  *
  * 勝方**一律照後端回報** —— `userWon` 也是狀態機依後端的勝方推導的,這裡不自己
  * 判斷誰贏。
+ *
+ * **「標籤:值」的形態已整條拿掉**(使用者看過實際畫面後的決定):這一格永遠只放
+ * 這一件事,`輪方:` 與 `對局結束:` 兩個名目每次重畫都把同一句廢話再說一遍,而
+ * 「輪到你」「黑方走棋」「你獲勝」本身就已經是完整的句子。8.4 要的是輪方**可辨識**
+ * 而不是有個名目在旁邊:少了前綴反而更短、更快讀得出來。形態取自 `poc/index.html`
+ * 的 signal 區塊 —— 那裡直接寫「勝負難料」,沒有任何前綴。
  */
 function turnText(state) {
-  if (!state.position) return `輪方:${BLANK}`;
+  if (!state.position) return BLANK;
   if (state.over) {
     if (!state.winner) return '對局結束';
-    const winner = `對局結束:${SIDE_NAMES[state.winner] ?? state.winner}勝`;
-    return state.userWon ? `${winner}(你獲勝)` : winner;
+    if (state.userWon) return '你獲勝';
+    return `${SIDE_NAMES[state.winner] ?? state.winner}勝`;
   }
-  const side = SIDE_NAMES[state.turn] ?? state.turn;
-  return state.turn === state.userSide ? `輪方:${side}(你)` : `輪方:${side}`;
+  if (state.turn === state.userSide) return '輪到你';
+  return `${SIDE_NAMES[state.turn] ?? state.turn}走棋`;
 }
 
 /**
@@ -291,6 +304,10 @@ function turnText(state) {
  *
  * 倒數寫成「約 N 步」而非確數:後端在 250k 節點下可能高估 1 步,寫成確數等於把一個
  * 刻意接受的誤差說成精確值。
+ *
+ * 倒數與讀數之間以**全形空格**分隔而非括號(形態取自 `poc/index.html` 的
+ * `renderSignal`,那裡寫的是「紅勝　N 回殺」)。括號在中文裡讀起來像補述,而倒數
+ * 是這一行最要看的數字;拿掉括號之後這一行少兩個字,數字也站得更前面。
  */
 function signalReading(entry, userSide) {
   if (!entry) return NO_SIGNAL_YET;
@@ -301,7 +318,7 @@ function signalReading(entry, userSide) {
       : winner === userSide
         ? SIGNAL_LABELS.winning
         : SIGNAL_LABELS.losing;
-  return entry.mateIn != null ? `${label}(約 ${entry.mateIn} 步)` : label;
+  return entry.mateIn != null ? `${label}　約 ${entry.mateIn} 步` : label;
 }
 
 /**
@@ -318,7 +335,7 @@ function renderSignal(state) {
 
   const reading = document.createElement('p');
   reading.className = 'signal-reading';
-  reading.textContent = `${SIGNAL_PREFIX}:${signalReading(entry, state.userSide)}`;
+  reading.textContent = signalReading(entry, state.userSide);
 
   const note = document.createElement('p');
   note.className = 'signal-note';

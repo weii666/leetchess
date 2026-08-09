@@ -177,7 +177,7 @@
 - 4.3:題號自 `?id=` 帶入(預設 1)。design 與 requirements 都沒規定參數名 —— problem-browser 日後產生連結時需與此一致。
 - 4.4:**「數半手」的等待規則對最後一手不夠**(修正 4.3 的 note)。`game.play()` 在第一個 `await` 之前就同步把使用者的半手推進序列並 `notify()`,所以 `click()` 回來時計數已經是 1;而 `move: null` 時計數**永遠不再變**。正確的沉澱信號是**等 `#waiting` 轉隱藏** —— `waiting` 在點擊派發內同步翻成 true,無競態。
 - 4.4:`#error` 是**單一節點單一寫入路徑**(全 `web/` 樹只有兩行寫它),載入失敗與走子失敗共用,不會互相殘留。錯誤碼只影響文案不影響版面;復原只分「可重試」與「須重來」兩類。
-- 4.4:`#signal` 呈現為 `參考信號:<讀數>` 加一行常駐說明「僅供參考,不是勝負判決;對局只在真終局結束。」讀數依 `state.userSide` 換算而非依顏色。殺著倒數為 `約 N 步`,以 `!= null` 判斷 —— **實測 `mate_in: 0` 確實顯示「約 0 步」**。
+- 4.4:`#signal` 呈現為 `參考信號:<讀數>` 加一行常駐說明「僅供參考,不是勝負判決;對局只在真終局結束。」讀數依 `state.userSide` 換算而非依顏色。殺著倒數為 `約 N 步`,以 `!= null` 判斷 —— **實測 `mate_in: 0` 確實顯示「約 0 步」**。(**文案已於側欄精簡一輪中改寫,見本節末的「側欄文案精簡」**;`userSide` 換算與 `!= null` 判斷兩項不變。)
 - 4.4:**⚠ 給 5.1**:`#signal` 現在含兩個 `<p>`(`.signal-reading` 與 `.signal-note`),說明那行要做成從屬樣式,讓「參考而非判決」在視覺上也讀得出來。`#signal` 骨架裡的靜態文字「勝負難料」已被取代,`#waiting` 的文字每次 render 都會被覆寫。錯誤區塊是單一 `<p>` 無分類 class —— 若要讓可重試與須重來有不同樣式,得先在 `app.js` 加 class hook。
 - 4.4:三處非阻斷的測試敏感度缺口(程式正確,缺護欄):使用者方信號換算未被測到(所有 fixture 都是紅先,硬編 `winner === 'red'` 會存活);載入中與思考中的等待文案只斷言非空;`wait_for_reply` 與 `wait_settled` 是兩檔重複的相同輔助函式。
 - 5.1:版面為**單一 flex 容器加 `flex-wrap`,無媒體查詢** —— 寬度連續,不存在「剛好卡在斷點上」的尺寸。行動裝置適配真正靠的是 `#board svg { width: 100%; height: auto }`(蓋掉 `board.js` 寫在元素上的 width/height 屬性,長寬比由 viewBox 保持)。
@@ -191,3 +191,18 @@
 - 5.2:**引擎殘留斷言抓不到「拿掉 lifespan 的 `pool.shutdown()`」** —— 父進程一死,Pikafish 讀到 stdin EOF 就自行結束。該斷言只證明「本測試沒留垃圾」。真正涵蓋關閉掛鉤的是 `tests/test_main.py::test_shutdown_leaves_no_engine_subprocess_behind`(它在 live pytest 父進程下用替身引擎,不適用 EOF 逃生門)。
 - 5.2:**⚠ 待補的守衛測試**:刪掉 `game.js` 的 `acceptsMoves` 中的 `!over`,**608 條測試全數存活**。原因是紅勝的終局是奇數半手,`turn !== userSide` 已擋住輸入,`!over` 在該情境下冗餘。要隔離它需要一個「已結束但仍輪到使用者」的終局(使用者落敗),而 3.2 的紅勝情境結構上產生不出來。建議在 `tests/test_web_game.py` 補一條攔截式守衛測試。
 - 5.2:**訂正兩處註解**(`tests/test_web_pure.py`、`web/notation.js`):原本聲稱「第 21 局全程沒有同名子共線」,實測推翻 —— 起始 FEN 的 d1/d3 就是一對黑卒共線。
+
+### 側欄文案精簡(使用者看過實際畫面後的決定,不屬任何編號任務)
+
+接續 problem-browser 4.5 拆掉重複那三行的同一輪:側欄剩下的「**標籤:值**」形態一併拿掉,只留值本身。形態照 `poc/index.html` —— POC 的 signal 區塊直接寫「勝負難料」,沒有「參考信號:」。
+
+- **`#turn`(8.4、3.2)**:`輪方:紅方(你)` → `輪到你`;`輪方:黑方` → `黑方走棋`;`對局結束:紅方勝(你獲勝)` → `你獲勝`;`對局結束:黑方勝` → `黑方勝`;有結束但後端沒給勝方時仍是 `對局結束`;無題目時 `輪方:—` → `—`(`play.html` 的靜態預設值一併改)。那一格永遠只放這一件事,名目每次重畫都把同一句廢話再說一遍;而「可辨識」改由**該不該我動**承擔,比自己執的顏色叫什麼更直接。
+- **`#signal`(4.1、4.2、4.4)**:`參考信號:` 前綴整條移除;倒數由 `(約 N 步)` 改為全形空格分隔的 `即將取勝　約 N 步`(取自 POC 的 `renderSignal`「紅勝　N 回殺」)—— 括號在中文裡讀起來像補述,而倒數正是這一行最要看的數字。註記「僅供參考,不是勝負判決;對局只在真終局結束。」縮成 **`僅供參考`**。
+- **4.4 為什麼縮得下來**:原本那句話比讀數本身還長,而後半句「對局只在真終局結束」講的是系統內部規則,不是使用者此刻要做的判斷。4.4 現在由三份合起來承擔 —— 文案(`僅供參考`)、語意(`#signal` 的 `role="note"`,**不得改為 `status`**)、視覺(`.signal-note` 字級與顏色低於 `.signal-reading`)。三份各自都有測試釘住,見下。
+- **測試調整**(既有 729 / 730 條零退化):
+  - `tests/test_web_play.py::test_the_current_turn_is_shown` —— 原本找「紅」字,新文案沒有顏色,改為釘死整句 `輪到你`。
+  - `…::test_the_winner_is_shown_when_the_game_ends`、`…::test_losing_is_reported_as_the_backend_says` —— 原本等 `#turn` 出現「結束」二字,新文案是 `你獲勝` / `黑方勝`。改等「勝」字(對局中的兩種說法都沒有它),再釘死整句。
+  - `…::test_the_mate_countdown_is_shown_as_an_approximation` —— 原本只驗 `"4" in` 與 `"約" in`,前綴跑回來察覺不到。改為釘死 `.signal-reading` 整句 `即將取勝　約 4 步`。
+  - `…::test_the_signal_is_presented_as_advisory_not_a_verdict` —— 原本只驗 `"參考" in #signal`。改為逐項驗三份保障:`.signal-note == "僅供參考"`、`#signal` 的 `role == "note"`、`#turn == "輪到你"`(順帶把原本那條 `"結束" not in #turn` 的弱斷言換成強的)。**`role` 那一條是新增的** —— 在此之前全樹沒有任何測試釘住它,改成 `status` 是靜默通過的。
+  - `tests/test_web_e2e.py` —— 四個常數改值,兩個一併改名(`TURN_RED` → `TURN_YOURS`、`GAME_OVER_RED_WON` → `GAME_OVER_YOU_WON`,值裡已不再有顏色);`WINNING_SIGNAL` 正規式改為 `^即將取勝　約 (\d+) 步$`,頭尾錨定使前綴跑回來就對不上。
+- **突變驗證**(五項,逐一施加後確認轉紅且失敗訊息是自己寫的斷言,非 `TypeError`、非逾時):前綴跑回 `#turn`、前綴跑回 `.signal-reading`、倒數整段拿掉、`僅供參考` 改成空字串、`role="note"` 改成 `role="status"`。

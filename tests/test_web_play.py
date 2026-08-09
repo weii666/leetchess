@@ -404,11 +404,16 @@ def test_reset_after_a_failed_load_retries_the_load(play_page) -> None:
 
 
 def test_the_current_turn_is_shown(play_page) -> None:
-    """當前輪方對使用者可辨識(8.4)。"""
+    """當前輪方對使用者可辨識(8.4)。
+
+    使用者執紅,故輪到自己時說的是「輪到你」而不是「紅方」—— 對使用者而言可辨識
+    的是**該不該我動**,而不是自己執的顏色叫什麼。故此處不再找「紅」字,改為釘死
+    整句;「黑」仍不得出現,那是下一條測的狀態。
+    """
     open_game(play_page)
 
     turn = text_of(play_page, "#turn")
-    assert "紅" in turn
+    assert turn == "輪到你", f"輪到自己時側欄說的是:{turn}"
     assert "黑" not in turn
 
 
@@ -509,12 +514,13 @@ def test_the_winner_is_shown_when_the_game_ends(play_page) -> None:
     click_square(play_page, "d8")
     click_square(play_page, "d9")
     wait_for_moves(play_page, 1)
+    # 對局中的兩種說法(「輪到你」「黑方走棋」)都沒有「勝」字,故它就是終局的信號。
     play_page.wait_for_function(
-        "() => document.getElementById('turn').textContent.includes('結束')"
+        "() => document.getElementById('turn').textContent.includes('勝')"
     )
 
     turn = text_of(play_page, "#turn")
-    assert "紅" in turn and "勝" in turn
+    assert turn == "你獲勝", f"使用者獲勝時側欄說的是:{turn}"
 
 
 def test_a_finished_game_offers_no_more_destinations(play_page) -> None:
@@ -537,11 +543,11 @@ def test_losing_is_reported_as_the_backend_says(play_page) -> None:
     click_square(play_page, "d8")
     click_square(play_page, "d9")
     play_page.wait_for_function(
-        "() => document.getElementById('turn').textContent.includes('結束')"
+        "() => document.getElementById('turn').textContent.includes('勝')"
     )
 
     turn = text_of(play_page, "#turn")
-    assert "黑" in turn and "勝" in turn
+    assert turn == "黑方勝", f"後端說黑方勝,側欄說的卻是:{turn}"
     assert "獲勝" not in turn
 
 
@@ -653,6 +659,10 @@ def test_the_mate_countdown_is_shown_as_an_approximation(play_page) -> None:
     """殺著倒數以**近似值**形式呈現(4.2)。
 
     後端在 250k 節點下可能高估 1 步,寫成確數等於把一個刻意接受的誤差說成精確值。
+
+    讀數整句一併釘死:倒數與標籤之間是**全形空格**(形態取自 POC 的 `renderSignal`),
+    而且讀數前面**沒有任何名目** —— 「參考信號:」那個前綴已在使用者看過畫面後移除,
+    只驗子字串的話它跑回來也不會有人發現。
     """
     open_game(play_page, [black_reply(signal="red_winning", mate_in=4)])
 
@@ -660,9 +670,8 @@ def test_the_mate_countdown_is_shown_as_an_approximation(play_page) -> None:
     click_square(play_page, "d9")
     wait_for_moves(play_page, 2)
 
-    signal = text_of(play_page, "#signal")
-    assert "4" in signal
-    assert "約" in signal, "倒數必須是近似值的說法,不能寫成確數"
+    reading = text_of(play_page, ".signal-reading")
+    assert reading == "即將取勝　約 4 步", f"信號讀數是:{reading}"
 
 
 def test_a_mate_countdown_of_zero_is_still_shown(play_page) -> None:
@@ -711,8 +720,16 @@ def test_a_reply_without_an_opponent_move_still_shows_its_signal(play_page) -> N
 def test_the_signal_is_presented_as_advisory_not_a_verdict(play_page) -> None:
     """信號的呈現須讓使用者辨識它是**參考資訊而非勝負判決**(4.4)。
 
-    同一份畫面上還必須看得出對局沒有結束 —— 信號說即將取勝,但對局未終,盤面
-    仍然可走(3.3 在呈現層的體現)。
+    4.4 原本靠一句長註記(「僅供參考,不是勝負判決;對局只在真終局結束。」)承擔,
+    使用者看過實際畫面後把它縮成「僅供參考」。因此這裡改為**逐項釘死剩下的三份
+    保障**,而不是只找一個「參考」字:
+
+    1. 註記那一行確實還在,而且說的就是「僅供參考」——「參考」二字若只是碰巧出現
+       在讀數裡(例如日後某個標籤帶到這兩個字),鬆散的 `in` 判斷是察覺不到的;
+    2. `#signal` 標為 `role="note"` 而非 `status` —— 這是 4.4 在語意樹上的那一份,
+       改成 `status` 會讓輔助技術把信號讀成系統狀態播報,也就是判決;
+    3. 同一份畫面上看得出對局沒有結束 —— 信號說即將取勝,但輪方仍是使用者,盤面
+       仍然可走(3.3 在呈現層的體現)。
     """
     open_game(play_page, [black_reply(signal="red_winning", mate_in=2, legal_moves=["f8f9"])])
 
@@ -720,8 +737,12 @@ def test_the_signal_is_presented_as_advisory_not_a_verdict(play_page) -> None:
     click_square(play_page, "d9")
     wait_for_moves(play_page, 2)
 
-    assert "參考" in text_of(play_page, "#signal")
-    assert "結束" not in text_of(play_page, "#turn")
+    assert text_of(play_page, ".signal-note") == "僅供參考", (
+        f"信號少了「參考資訊而非判決」的框定:{text_of(play_page, '#signal')}"
+    )
+    role = play_page.locator("#signal").get_attribute("role")
+    assert role == "note", f"#signal 的 role 是 {role!r},不是 note —— 信號被說成了判決"
+    assert text_of(play_page, "#turn") == "輪到你", "信號為即將取勝不得讓對局提早結束"
     click_square(play_page, "f8")
     assert marked_squares(play_page) != set(), "信號為即將取勝不得讓盤面停下來"
 

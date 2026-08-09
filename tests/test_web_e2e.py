@@ -133,13 +133,18 @@ CELL = 62
 MARGIN = 40
 
 #: `app.js` 的固定文案。
-TURN_RED = "輪方:紅方(你)"
-GAME_OVER_RED_WON = "對局結束:紅方勝(你獲勝)"
-FINAL_SIGNAL = "參考信號:即將取勝(約 0 步)"
-SIGNAL_NOTE = "僅供參考,不是勝負判決;對局只在真終局結束。"
+#:
+#: 「標籤:值」的形態已整條移除(使用者看過實際畫面後的決定)—— 側欄的每一格都只
+#: 放一件事,名目每次重畫都把同一句廢話再說一遍。常數名因此也不再提顏色:輪方那一
+#: 格說的是「該不該我動」,不是使用者執的顏色叫什麼。
+TURN_YOURS = "輪到你"
+GAME_OVER_YOU_WON = "你獲勝"
+FINAL_SIGNAL = "即將取勝　約 0 步"
+SIGNAL_NOTE = "僅供參考"
 
-#: 信號讀數的形狀:`參考信號:即將取勝(約 N 步)`。
-WINNING_SIGNAL = re.compile(r"^參考信號:即將取勝\(約 (\d+) 步\)$")
+#: 信號讀數的形狀:`即將取勝　約 N 步`,分隔用**全形空格**(形態取自 POC 的
+#: `renderSignal`)。錨定在頭尾,前綴跑回來就對不上。
+WINNING_SIGNAL = re.compile(r"^即將取勝　約 (\d+) 步$")
 
 #: 入口、列表與對局介面的路徑。入口靠 `StaticFiles(html=True)` 解析到 `index.html`,
 #: 而對局頁那條返回連結指的是 `./index.html` —— 兩者是同一頁的兩個位址。
@@ -426,8 +431,8 @@ def test_the_whole_puzzle_is_played_to_a_red_win_against_the_real_service(
 
     for _ in range(MAX_PLIES):
         # 中途局面必須仍在進行中 —— 信號早就說「即將取勝」了(3.3)。
-        assert text_of(page, "#turn") == TURN_RED, (
-            f"走了 {len(moves)} 手之後輪方不是紅方:{text_of(page, '#turn')}"
+        assert text_of(page, "#turn") == TURN_YOURS, (
+            f"走了 {len(moves)} 手之後輪方不是使用者:{text_of(page, '#turn')}"
         )
         assert page.locator("#error").is_hidden(), "中途出現錯誤告知"
         assert pieces(page) == board, f"走了 {len(moves)} 手之後盤面與實際走法對不上"
@@ -475,7 +480,7 @@ def test_the_whole_puzzle_is_played_to_a_red_win_against_the_real_service(
     # 真實引擎在黑方已被將死時仍輸出 `score mate 0` —— 倒數為 0 不是「沒有倒數」。
     assert reply["mate_in"] == 0, f"終局那一手的殺著倒數是 {reply['mate_in']},不是 0"
 
-    assert text_of(page, "#turn") == GAME_OVER_RED_WON
+    assert text_of(page, "#turn") == GAME_OVER_YOU_WON
     assert text_of(page, ".signal-reading") == FINAL_SIGNAL, (
         "倒數為 0 的那一手沒有正常顯示 —— 這正是 JS 的 falsy 陷阱該出現的地方"
     )
@@ -508,7 +513,7 @@ def test_the_whole_puzzle_is_played_to_a_red_win_against_the_real_service(
     assert page.locator("#board svg .piece.selected").count() == 0, "終局後仍選得到子"
     assert page.locator("#board svg .dot").count() == 0, "終局後仍標出落點"
     assert len(black_move_requests) == requests_before, "終局後仍送出了走子請求"
-    assert text_of(page, "#turn") == GAME_OVER_RED_WON
+    assert text_of(page, "#turn") == GAME_OVER_YOU_WON
 
 
 # =======================================================================
