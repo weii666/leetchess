@@ -23,9 +23,11 @@
  * - **落點標示的 `pointer-events`。** `board.js` 在吃子的空心圈上寫了
  *   `pointer-events: all`,因為 `fill="none"` 的圈只有筆畫吃得到點擊,圈內會穿透
  *   到底下那枚被吃的子。任何覆寫都會讓那一手點不出去。
- * - **`#waiting` 與 `#error` 的 `hidden`。** 兩者的顯示由 `app.js` 以 `hidden`
- *   屬性控制;給它們 `display` 會蓋掉 `hidden` 的預設值,畫面將永遠停在「引擎
- *   思考中」。故本檔在最上方補一條 `[hidden] { display: none }` 作為保險。
+ * - **`#error` 與 `#next-position` 的 `hidden`。** 兩者的顯示由 `app.js` 以 `hidden`
+ *   屬性控制;給它們 `display` 會蓋掉 `hidden` 的預設值,錯誤提示與「下一題」將
+ *   永遠掛在畫面上。故本檔在最上方補一條 `[hidden] { display: none }` 作為保險。
+ *   (這條保險原本是為 `#waiting` 與 `#error` 兩者寫的;`#waiting` 已整條移除,
+ *   理由見 `play.html` 該處的註解 —— 它會推動底下的歷史著法。)
  *
  * ## 版面
  *
@@ -237,20 +239,16 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* --- 等待與錯誤 ------------------------------------------------------- */
+/* --- 錯誤 ------------------------------------------------------------- */
 
 /*
- * 兩者都只在 `hidden` 為假時才會排出來,故此處不寫 `display` —— 上方的
+ * 這裡原本還有一條 `#waiting` 的規則(同樣的藍色方塊形態)。**已隨那個元素一併
+ * 移除** —— 一個在版面流裡來去的區塊會把底下的歷史著法上下推動,理由見
+ * `play.html` 該處的註解。等待呈現改由 `#turn` 承擔,而它位置固定、只換字。
+ *
+ * 只在 `hidden` 為假時才會排出來,故此處不寫 `display` —— 上方的
  * `[hidden] { display: none !important }` 是保險,規則本身不去挑戰它。
  */
-#waiting {
-  margin: 0 0 12px;
-  padding: 10px 14px;
-  border-radius: var(--radius);
-  background: #2c4a63;
-  color: #cfe6ff;
-  font-size: 14px;
-}
 
 /* 全部的失敗共用這一個區塊(design 的 Error Handling),不為每種錯誤各做一套。 */
 #error {

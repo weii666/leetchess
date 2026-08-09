@@ -28,6 +28,7 @@ import pytest
 
 from test_web_play import (  # noqa: F401 — `play_page` 以夾具身分被 pytest 取用
     ORIGIN,
+    SETTLED,
     black_reply,
     click_square,
     marked_squares,
@@ -82,12 +83,16 @@ def play_a_move(page) -> None:
 
 
 def wait_settled(page) -> None:
-    """等到這一手真的有了結果 —— 等待態解除就是「請求已經落地」的唯一信號。
+    """等到這一手真的有了結果 —— 沉澱信號的完整說明見 `test_web_play.SETTLED`。
 
     以「錯誤區塊出現」當結束條件在連續失敗時不管用:上一次的訊息還在畫面上,
     條件立刻成立,下一次點擊就落在請求仍在途、盤面不接受走子的那段空窗裡。
+
+    信號本身已自「`#waiting` 轉隱藏」換成「`#turn` 不再說『(某方)走棋』」——
+    那個等待區塊已整條移除(它會推動底下的歷史著法)。對這一檔而言兩者等價:
+    失敗會把走法序列整份退回,輪方因此翻回使用者。
     """
-    page.wait_for_function("() => document.getElementById('waiting').hidden")
+    page.wait_for_function(SETTLED)
 
 
 def failing_move(page, responses: list[tuple[int, Any]]) -> dict[str, int]:
@@ -132,14 +137,18 @@ def test_a_client_side_timeout_is_reported_and_clears_the_waiting_state(play_pag
     open_game(play_page)
     play_page.route(f"{ORIGIN}/api/black-move", lambda route: None)
     play_a_move(play_page)
-    play_page.wait_for_selector("#waiting:not([hidden])")
+    # 前置條件:請求真的在途。等應手期間輪方那一行說的是對手在走(6.1 修訂後由
+    # 它承擔等待呈現),而它在點擊派發內就同步變好,不必等。
+    assert text_of(play_page, "#turn") == "黑方走棋", "這一手根本沒送出去,逾時無從發生"
 
     play_page.wait_for_selector("#error:not([hidden])", timeout=20000)
 
     assert "逾時" in text_of(play_page, "#error")
-    assert play_page.locator("#waiting").is_hidden(), "失敗之後不得停在等待中"
+    # 「等待態必解除」的判準是**盤面重新走得動**,不是某個區塊有沒有收起來
+    # (那個 `#waiting` 區塊已整條移除,理由見 `web/play.html`)。下面兩行本來
+    # 就在驗這件事,現在它們是 6.4 在這一條測試裡唯一的守門人。
     click_square(play_page, "d8")
-    assert marked_squares(play_page) == {"d9"}, "逾時之後盤面仍要可操作"
+    assert marked_squares(play_page) == {"d9"}, "逾時之後盤面仍走不動,等於還停在等待中"
 
 
 def test_an_internal_error_is_reported_without_backend_text(play_page) -> None:

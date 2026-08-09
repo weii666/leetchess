@@ -36,7 +36,11 @@ import pathlib
 import pytest
 
 from test_web_play import (  # noqa: F401 — `play_page` 以夾具身分被 pytest 取用
+    ORIGIN,
+    SETTLED,
     black_reply,
+    click_square,
+    hang_black_move,
     open_game,
     play_page,
     route_black_move,
@@ -274,7 +278,7 @@ def test_pieces_and_destinations_stay_clickable_when_the_board_is_scaled(
     assert page.locator("#board svg .dot").count() > 0, "選中之後沒有標出落點"
 
     click("d9")
-    page.wait_for_function("() => document.getElementById('waiting').hidden")
+    page.wait_for_function(SETTLED)  # 沉澱信號的說明見 `test_web_play.SETTLED`
 
     assert page.locator("#moves li").count() == 1, "點落點沒有走出那一手"
 
@@ -328,13 +332,78 @@ def test_the_stylesheet_is_served_and_applied(play_page) -> None:
 
 
 def test_hidden_regions_stay_hidden_under_the_stylesheet(play_page) -> None:
-    """`hidden` 的等待與錯誤區塊不得被版面規則變回可見。
+    """`hidden` 的錯誤區塊與「下一題」不得被版面規則變回可見。
 
-    `#waiting` 與 `#error` 的顯示由 `app.js` 以 `hidden` 屬性控制(requirements
-    6.1、6.4、7.1)。任何給它們 `display` 的規則都會蓋掉 `hidden` 的預設值,
-    使畫面永遠停在「引擎思考中」。
+    兩者的顯示由 `app.js` 以 `hidden` 屬性控制(requirements 7.1,以及
+    problem-browser 的跨題導航)。任何給它們 `display` 的規則都會蓋掉 `hidden`
+    的預設值,錯誤提示與一條指向 `undefined` 的「下一題」將永遠掛在畫面上。
+
+    這一條原本還驗 `#waiting`。**那個元素已整條移除** —— 它在版面流裡來去,顯示
+    與隱藏都把底下的歷史著法上下推動,而等待資訊 `#turn` 本來就在說了。
     """
     page = open_at(play_page, DESKTOP)
 
-    assert page.locator("#waiting").is_hidden(), "等待區塊被樣式變回可見"
+    assert page.locator("#waiting").count() == 0, "「引擎思考中」那個會推動版面的區塊又回來了"
     assert page.locator("#error").is_hidden(), "錯誤區塊被樣式變回可見"
+    assert page.locator("#next-position").is_hidden(), "「下一題」被樣式變回可見"
+
+
+# --- 走一手不得讓側欄抖動 -----------------------------------------------
+
+
+def test_the_move_history_does_not_move_while_the_engine_answers(play_page) -> None:
+    """**等應手期間「歷史著法」不得位移** —— 這正是使用者抱怨的抖動。
+
+    原本側欄裡有一個 `<p id="waiting">引擎思考中…</p>`,它在版面流之中:送出一手
+    它就撐開,應手回來它又收掉,底下的「歷史著法」因此每走一手上下彈一次 —— 而
+    那正是使用者當下最想看的那一區。該元素已整條移除,等待呈現改由 `#turn` 承擔
+    (它位置固定、只換字不換高度)。
+
+    斷言以**像素**釘住,而不是問「`#waiting` 還在不在」:任何日後在側欄流裡新增的
+    等待/提示區塊都會讓這一條轉紅,不管它叫什麼名字。三個時點量的是同一個東西:
+
+    1. 尚未走子(靜止);
+    2. 送出一手、應手還沒回來(等待中);
+    3. 應手回來、歷史著法多了一整列(等待結束)。
+    """
+    page = open_at(play_page, DESKTOP)
+
+    def heading_top() -> float:
+        return box_of(page, "#moves-panel h2")["top"]
+
+    at_rest = heading_top()
+
+    # --- 等待中 -----------------------------------------------------
+    #
+    # 後註冊的路由優先,所以這會蓋掉夾具那條 —— 應手永遠不回來,等待中的畫面
+    # 因此是可以從容量測的靜止狀態,不是一個要搶時間的瞬間。
+    hang_black_move(page)
+    click_square(page, "d8")
+    click_square(page, "d9")
+    assert page.locator("#turn").inner_text().strip() == "黑方走棋", (
+        "前置條件:此刻應該正在等應手"
+    )
+    while_waiting = heading_top()
+
+    assert while_waiting == at_rest, (
+        f"等應手期間「歷史著法」自 {at_rest}px 位移到 {while_waiting}px —— "
+        f"側欄裡有東西在等待中被撐開了"
+    )
+
+    # --- 等待結束 ---------------------------------------------------
+    #
+    # 重來會把在途的請求作廢(`game.js` 的代次),等待態就地解除;接著換一條真的
+    # 會回話的路由,把同一手走完,讓歷史著法真的多出一整列。
+    page.locator("#reset").click()
+    page.unroute(f"{ORIGIN}/api/black-move")
+    route_black_move(page, [black_reply(move="e9d9")])
+    click_square(page, "d8")
+    click_square(page, "d9")
+    page.wait_for_function(SETTLED)
+    assert page.locator("#moves li").count() == 1, "前置條件:這一手沒有走成"
+
+    after_reply = heading_top()
+
+    assert after_reply == at_rest, (
+        f"應手回來之後「歷史著法」自 {at_rest}px 位移到 {after_reply}px"
+    )

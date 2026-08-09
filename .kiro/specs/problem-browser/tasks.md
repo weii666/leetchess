@@ -151,7 +151,7 @@
 ## Implementation Notes
 
 - 沿用既有的前端測試手法:Playwright 的 Python 綁定、`page.route()` 合成 origin 供**真實交付檔**、純資料層以 `page.evaluate()` 驗證。
-- **測試的沉澱信號是等 `#waiting` 轉隱藏**,不要數 `#moves li`(web-play-runtime 4.4 的教訓)。
+- **測試的沉澱信號是等 `#turn` 不再說「(某方)走棋」**,不要數 `#moves li`(web-play-runtime 4.4 的教訓)。判準與可靠性論證寫在 `tests/test_web_play.py` 的 `SETTLED`。**信號原本是「`#waiting` 轉隱藏」**,該元素已整條移除 —— 它在版面流裡來去會推動底下的歷史著法,等待呈現改由 `#turn` 承擔(web-play-runtime 的 requirement 6.1 已隨之降級改寫)。
 - **點擊座標要依實際 bounding box 縮放**,不可直接用 viewBox 使用者座標(web-play-runtime 5.1 的教訓)。
 - 1.1:`GET /api/catalog` 回 `{"positions": [...]}`,欄位為 `id`、`title`、`description`、`difficulty`、`tags`、`source`、`solvable`。**刻意不含 `fen` 與 `state`** —— 那兩樣需要引擎,加回來就會悄悄破壞 5.2。
 - 1.1:**端點不注入 `GameService`,只依賴 `Repository`** —— 借引擎的程式碼根本不存在。review 以「啟動後立刻關閉引擎池」的真實服務驗證:catalog 回 200 三題完整,同一服務的 `/api/positions/1` 回 503。
@@ -211,7 +211,7 @@
 - 5.2:**測試不把「題庫只有一題」寫進斷言** —— 列數、總題數、局名全部由當下真實的 `/api/catalog` 導出,只有 `PUZZLE_ID = 1` 是寫死的。review 以 `LEETCHESS_POSITIONS_DIR` 指向一份 **200 題(含 2 題 `solvable: false`)的臨時題庫**實測仍通過,過濾、逐題局名比對、計數與返回後的全列狀態比對全部正確。**這條測試會活得比目前的題庫久。**
 - 5.2:**「標記還在」跨越真正的頁面導覽** —— `loadCompleted` 恆回空集合的突變**只在返回之後那一條轉紅**,前面的即時標記與計數斷言照樣通過,證明往返那一段確實是載重的。review 另補一個更貼近真實退化的突變:`list.js` 把索引快取進 `sessionStorage` 跳過第二次請求,由「返回列表之後沒有重新取索引」抓到。
 - 5.2:**端到端測試的失敗診斷要自己設計。** 原本「點返回 → `wait_for_selector` → 斷言 URL」的順序,在返回連結指錯時會等滿 30 秒才以「在等某個選擇器」收場,真正說得出原因的那句斷言永遠跑不到。改成先 `wait_for_url` 再等列、**兩個等待都給 5 秒上限並各自包 `pytest.fail`** 之後,同一個突變 6.5 秒就失敗且直接說出停在哪個網址。
-- 5.2:**⚠ 一個假的等待**:`wait_for_function("#waiting hidden")` 在執行當下**已經為真**(review 以探針實測)。`#waiting` 確實走過 `[True, False, True]`,但 `expect_response` 返回時它已翻回隱藏。真正的同步來自 `expect_response`,真正的載重斷言是後面的盤面比對。失效模式是假紅不是假綠,但「沉澱信號是 `#waiting` 轉隱藏」這句註解對這個呼叫點過於樂觀 —— 上半場既有測試有同樣性質。
+- 5.2:**⚠ 一個假的等待**:`wait_for_function("#waiting hidden")` 在執行當下**已經為真**(review 以探針實測)。`#waiting` 確實走過 `[True, False, True]`,但 `expect_response` 返回時它已翻回隱藏。真正的同步來自 `expect_response`,真正的載重斷言是後面的盤面比對。失效模式是假紅不是假綠,但「沉澱信號是 `#waiting` 轉隱藏」這句註解對這個呼叫點過於樂觀 —— 上半場既有測試有同樣性質。**此問題已隨 `#waiting` 的移除一併修掉**:信號改掛 `#turn`,而它要等 `render()` 跑完才會變,`expect_response` 返回時未必已經翻好,這個呼叫點於是真的在等一件事。
 
 ### 呈現層修訂(使用者看過實際畫面後)
 

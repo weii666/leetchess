@@ -1,5 +1,5 @@
 """介面組裝層的互動驗證(tasks 4.3、4.4;requirements 1.2、1.3、1.4、3.2、4.1、4.2、
-4.4、5.1、6.1、6.4、8.1、8.4)。
+4.4、5.1、6.1、6.2、6.4、8.1、8.4)。
 
 `web/app.js` 是唯一把三個模組接起來的地方 —— 它沒有自己的邏輯可言,價值全在
 「接得對不對」。因此本檔一律**以真實點擊驅動真實頁面**:載入 `web/play.html`
@@ -23,7 +23,7 @@ Chromium 不允許自 `file://`(origin 為 `null`)匯入 ES module。與那兩�
 `style.css` 尚屬 tasks 5.1、此刻不存在,靜態路由會回 404 —— 那不影響任何斷言:
 盤面的呈現屬性直接寫在 SVG 元素上(tasks 3.1),沒有 CSS 也畫得出來。
 
-三態信號(4.1、4.2、4.4)與等待狀態(6.1、6.4)屬 tasks 4.4,由本檔最後兩節驗證 ——
+三態信號(4.1、4.2、4.4)與等待狀態(6.1、6.2、6.4)屬 tasks 4.4,由本檔最後兩節驗證 ——
 它們是**成功路徑上的呈現**,與這裡既有的走子流程共用同一組夾具。走子途中的失敗
 呈現(7.1、7.2、7.3)另立 `test_web_failures.py`(design 的 File Structure Plan)。
 """
@@ -285,14 +285,34 @@ def wait_for_moves(page, count: int) -> None:
     )
 
 
-def wait_for_reply(page) -> None:
-    """等到剛送出的那一手真的有了結果。
+#: **「這一次請求已經落地」的沉澱信號** —— `#turn` 不再說「(某方)走棋」。
+#:
+#: 舊的信號是「`#waiting` 轉隱藏」。那個元素已整條移除(它在版面流裡來去,會把
+#: 底下的歷史著法上下推動),信號因此改掛在 `#turn` 上。
+#:
+#: 為什麼它與舊信號一樣可靠 —— 兩個方向都要成立:
+#:
+#: 1. **等待期間必為真的「走棋」。** `game.js` 的 `play()` 在第一個 `await` 之前
+#:    就同步把使用者那半手推進序列並 `notify()`,輪方隨即翻成對手。所以 Playwright
+#:    的 `click()` 一回來,`#turn` **已經**是「黑方走棋」,和 `waiting` 翻真是同一
+#:    個同步時點,沒有競態。
+#: 2. **落地之後必不再是「走棋」。** 三條出路都離開這個字串:成功且未終局 ->
+#:    「輪到你」(應手進序列,輪方翻回自己);失敗 -> 「輪到你」(序列整份退回);
+#:    終局 -> 「你獲勝」/「黑方勝」/「對局結束」。**終局那一手正是舊註解點名的
+#:    邊界**,而它在這裡不必特判 —— 它不會變回「輪到你」,但它也絕不留在「走棋」。
+#:
+#: 寫成 `endsWith('走棋')` 而不是寫死「黑方走棋」,是為了執黑的題目:那時等待中
+#: 說的是「紅方走棋」。判準是「輪不到我」,與顏色無關。
+#:
+#: 這個信號**不能**換成數 `#moves li`:使用者自己的半手在點擊當下就同步進了序列,
+#: 而最後一手 `move` 為 `null`,列數在應手回來前後完全一樣(web-play-runtime 4.4
+#: 的教訓)。
+SETTLED = "() => !document.getElementById('turn').textContent.trim().endsWith('走棋')"
 
-    **數手數在這裡不管用**:排局的最後一手黑方沒有應手,手數在應手回來前後都是
-    同一個數字,以它為條件的斷言會在回應還在路上時就跑起來。等待態解除才是「這
-    次請求已經落地」的唯一信號,而它在點擊當下就已同步變為真。
-    """
-    page.wait_for_function("() => document.getElementById('waiting').hidden")
+
+def wait_for_reply(page) -> None:
+    """等到剛送出的那一手真的有了結果(沉澱信號見 `SETTLED`)。"""
+    page.wait_for_function(SETTLED)
 
 
 # --- 題目資訊(1.2、1.3)-------------------------------------------------
@@ -783,43 +803,106 @@ def test_the_signal_goes_back_to_no_reading_after_a_reset(play_page) -> None:
     assert not re.search(r"\d", signal)
 
 
-# --- 等待狀態(6.1、6.4)-----------------------------------------------
+# --- 等待狀態(6.1、6.2、6.4)------------------------------------------
+#
+# 這一節原本靠**一個 `#waiting` 區塊的可見性**驗全部四條斷言。那個區塊已整條移除
+# (它在版面流裡來去,顯示與隱藏都把底下的歷史著法上下推動),因此本節改成問那條
+# 需求各自真正的內容:
+#
+# - 6.1(呈現等待)-> 等應手看 `#turn`,載入題目看 `#puzzle-title` 與盤面的佔位句。
+# - 6.2(等待中不接受走子)-> 盤面整片不可選。這一條**過去在 DOM 層完全沒有測試**
+#   (只有 `test_web_game.py` 在狀態機層驗),而拿掉可見的等待區塊之後,它就是
+#   使用者唯一還看得出「系統正在忙」的行為,補上去。
+# - 6.4(等待態必解除)-> **盤面重新接受走子**。這比「區塊有沒有收起來」更貼近
+#   6.4 的字面(「不留在等待中無法操作」),而且它擋得住「`waiting` 忘了翻回假」
+#   這個真正的缺陷 —— 那種缺陷下畫面看起來一切正常,只是再也走不動。
 
 
-def test_the_waiting_state_is_shown_while_the_engine_answers(play_page) -> None:
-    """等待後端回應期間呈現等待中的狀態(6.1)。"""
+def test_the_turn_line_says_the_opponent_is_moving_while_the_engine_answers(
+    play_page,
+) -> None:
+    """等應手期間由 `#turn` 呈現等待(6.1 修訂後)。
+
+    「黑方走棋」本身就是「現在不是你動」—— 這正是原本那個「引擎思考中」方塊講的
+    同一件事。斷言釘整句而不是「非空」:非空在 `#turn` 上永遠成立(它任何時候都
+    有字),那樣的斷言驗不到任何東西。
+    """
     open_game(play_page)
     hang_black_move(play_page)
 
     click_square(play_page, "d8")
     click_square(play_page, "d9")
-    play_page.wait_for_selector("#waiting:not([hidden])")
 
-    assert text_of(play_page, "#waiting") != ""
+    assert text_of(play_page, "#turn") == "黑方走棋", (
+        f"等應手期間輪方那一行沒有說對手在走:{text_of(play_page, '#turn')!r}"
+    )
 
 
-def test_the_waiting_state_is_shown_while_the_puzzle_loads(play_page) -> None:
-    """載入題目也是在等後端回應,同樣要有狀態(6.1)。"""
+def test_no_move_is_accepted_while_the_engine_answers(play_page) -> None:
+    """等待後端回應期間不接受新的走子(6.2),而且在盤面上看得出來。
+
+    `game.js` 的 `acceptsMoves` 為假時 `legalMoves` 是空集合,`board.js` 的
+    「可選取」定義就是「該格有著法可出發」,於是整面盤子都選不起來。
+
+    **斷言「一個子都不可選」而不是「某一格點不動」。** 等待中的 `currentState`
+    還是走子**之前**那一份,它的 `legal_moves` 是舊局面的著法 —— 拿剛落子的那一格
+    去試,舊清單裡本來就沒有它,守衛失效也照樣點不動(實測:那樣寫的版本擋不住
+    「`legalMoves` 不套 `acceptsMoves`」這個突變)。`.selectable` 的總數則對整面盤
+    負責,舊清單裡任何一格活過來都會被抓到。
+    """
+    open_game(play_page)
+    hang_black_move(play_page)
+
+    assert play_page.locator("#board svg .piece.selectable").count() > 0, (
+        "前置條件:走子之前盤面本來就該有子可選"
+    )
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    assert text_of(play_page, "#turn") == "黑方走棋", "前置條件:此刻應該正在等應手"
+
+    assert play_page.locator("#board svg .piece.selectable").count() == 0, (
+        "等應手期間盤面上仍有子可選 —— 等待中不得接受新的走子"
+    )
+
+    click_square(play_page, "f8")  # 起始局面的 `f8f9` 在等待中不得還能出發
+    assert play_page.locator("#board svg .piece.selected").count() == 0, (
+        "等應手期間仍選得起子"
+    )
+    assert marked_squares(play_page) == set(), "等應手期間盤面仍標出落點"
+
+
+def test_the_puzzle_load_is_announced_by_the_title_and_the_board(play_page) -> None:
+    """載入題目也是在等後端回應,同樣要有狀態(6.1)。
+
+    這一種由**兩個本來就在的位置**承擔:頂上標題說「載入中…」,盤面的位置放一句
+    「正在載入題目…」。兩者都不是新增的元素 —— `app.js` 的 `noPuzzleTitle` 與
+    `boardPlaceholderText` 在移除 `#waiting` 之前就已經這樣寫了。
+    """
     hang_position(play_page)
     visit(play_page)
 
-    play_page.wait_for_selector("#waiting:not([hidden])")
-    assert text_of(play_page, "#waiting") != ""
+    play_page.wait_for_function(
+        "() => document.getElementById('puzzle-title').textContent.includes('載入中')"
+    )
+    assert "正在載入題目" in text_of(play_page, "#board"), (
+        f"載入期間盤面的位置沒有說明狀態:{text_of(play_page, '#board')!r}"
+    )
 
 
-def test_the_waiting_state_is_cleared_after_the_reply(play_page) -> None:
-    """回應之後等待狀態解除(6.4)。"""
+def test_the_board_accepts_moves_again_after_the_reply(play_page) -> None:
+    """回應之後等待狀態解除(6.4)—— 判準是**盤面重新走得動**。"""
     open_game(play_page, [black_reply(move="e9d9")])
-    assert play_page.locator("#waiting").is_hidden(), "前置條件:載入完成後就不該還在等"
 
     click_square(play_page, "d8")
     click_square(play_page, "d9")
     wait_for_moves(play_page, 2)
 
-    assert play_page.locator("#waiting").is_hidden()
+    click_square(play_page, "d9")  # `black_reply` 的預設 `legal_moves` 含 d9d8
+    assert marked_squares(play_page) == {"d8"}, "回應之後盤面仍走不動,等於還停在等待中"
 
 
-def test_the_waiting_state_is_cleared_after_a_failure(play_page) -> None:
+def test_the_board_accepts_moves_again_after_a_failure(play_page) -> None:
     """**失敗之後等待狀態也要解除**(6.4)—— 不得留在等待中無法操作。"""
     open_game(play_page)
     play_page.route(f"{ORIGIN}/api/black-move", lambda route: route.abort("failed"))
@@ -828,7 +911,9 @@ def test_the_waiting_state_is_cleared_after_a_failure(play_page) -> None:
     click_square(play_page, "d9")
     play_page.wait_for_selector("#error:not([hidden])")
 
-    assert play_page.locator("#waiting").is_hidden()
+    # 失敗會把走法序列整份退回,盤面因此回到起始局面 —— 可走的仍是 `START_LEGAL`。
+    click_square(play_page, "d8")
+    assert marked_squares(play_page) == {"d9"}, "失敗之後盤面仍走不動,等於還停在等待中"
 
 
 # --- 依賴方向 -----------------------------------------------------------

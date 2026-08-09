@@ -44,10 +44,25 @@ Playwright 的 `position`,目前成立只因為 `--board-max-width: 576px` 剛�
 寬度。本檔改依 `#board svg` 排版後的邊界盒縮放(手法同 `test_web_layout.py`),
 盤面尺寸再怎麼變,點的都還是同一格。
 
-## 等待的沉澱信號是 `#waiting` 轉隱藏
+## 等待的沉澱信號是 `#turn` 不再說「(某方)走棋」
 
-不能數 `#moves li`:使用者自己的半手在點擊當下就同步進了序列,而最後一手
+**不能數 `#moves li`**:使用者自己的半手在點擊當下就同步進了序列,而最後一手
 `move` 為 `null`,列數在應手回來前後完全一樣。
+
+這個信號原本是「`#waiting` 轉隱藏」。那個等待區塊已整條移除 —— 它在版面流裡來去,
+顯示與隱藏都把底下的「歷史著法」上下推動,而等待資訊 `#turn` 本來就在說了(等應手
+期間它顯示「黑方走棋」)。信號因此改掛在 `#turn` 上,判準完整寫在
+`test_web_play.SETTLED` 的說明裡。兩個方向都成立:輪方**在點擊當下就同步**翻成對手
+(`game.play()` 在第一個 `await` 之前就推進序列並 `notify()`),而落地之後三條出路
+—— 成功、失敗、終局 —— 沒有一種留在「走棋」上。
+
+**終局那一手不必特判**:它不會變回「輪到你」,但它會變成「你獲勝」,同樣離開了
+「走棋」。這正是本檔走得到而攔截測試走不到的那一手。
+
+順帶修掉 problem-browser 的 tasks 5.2 記下的一個問題:那裡的
+`wait_for_function("#waiting hidden")` 接在 `expect_response` 之後,而 review 實測它
+**執行當下已經為真**,等於一個假的等待。換成 `#turn` 之後這個呼叫點才真的在等一件事
+—— `expect_response` 只保證回應到了瀏覽器,`#turn` 要等 `render()` 跑完才會變。
 
 ## problem-browser 的 tasks 5.2 為什麼也放這裡
 
@@ -81,7 +96,7 @@ from service.engine.pool import EnginePool
 # `page.route()` 全部掛在它自己的夾具裡,匯入不會執行到。第三份儲存鍵的字面值遲早
 # 會與 `web/progress.js` 漂移,共用同一份才不會出現「兩邊各改一半」。
 from test_web_list import STORAGE_KEY
-from test_web_play import marked_squares, move_rows, pieces, text_of
+from test_web_play import SETTLED, marked_squares, move_rows, pieces, text_of
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 REAL_ENGINE = PROJECT_ROOT / "engine" / "pikafish"
@@ -404,7 +419,7 @@ def test_the_whole_puzzle_is_played_to_a_red_win_against_the_real_service(
     """自起始局面走完《適情雅趣》第 21 局到紅勝(3.2、3.3、3.4、4.2、8.1)。
 
     每一輪都是:本地引擎給紅方一手殺著 -> 在瀏覽器裡選子、確認落點標示、點落點
-    -> 等 `#waiting` 轉隱藏 -> 讀真實服務回的那一手應手。中途的每一個局面都必須
+    -> 等 `#turn` 不再說「黑方走棋」-> 讀真實服務回的那一手應手。中途的每一個局面都必須
     仍然可以繼續走子,直到黑方真的無著可走為止。
     """
     page = browser_page
@@ -460,7 +475,7 @@ def test_the_whole_puzzle_is_played_to_a_red_win_against_the_real_service(
             lambda response: "/api/black-move" in response.url
         ) as captured:
             click_square(page, red_move[2:])
-        page.wait_for_function("() => document.getElementById('waiting').hidden")
+        page.wait_for_function(SETTLED)  # 沉澱信號的說明見 `test_web_play.SETTLED`
         apply_move(board, red_move)
         moves.append(red_move)
 
@@ -490,7 +505,6 @@ def test_the_whole_puzzle_is_played_to_a_red_win_against_the_real_service(
     assert text_of(page, ".signal-reading") == FINAL_SIGNAL, (
         "倒數為 0 的那一手沒有正常顯示 —— 這正是 JS 的 falsy 陷阱該出現的地方"
     )
-    assert page.locator("#waiting").is_hidden(), "終局後仍停在等待中"
     assert page.locator("#error").is_hidden()
     assert pieces(page) == board, "終局盤面與實際走法對不上"
 
@@ -560,7 +574,7 @@ def test_the_whole_puzzle_is_played_to_a_red_win_against_the_real_service(
 # ## 走一手是唯一會真的碰到引擎的環節
 #
 # 紅方那一手當場向本地引擎要(理由同上半場),而黑方的應手來自服務那一個引擎。
-# 只點一下不算走成:落點標示、`#waiting` 轉隱藏、回應裡真的有一手黑棋、盤面上兩個
+# 只點一下不算走成:落點標示、`#turn` 不再說「黑方走棋」、回應裡真的有一手黑棋、盤面上兩個
 # 子都換了位置、歷史著法多出一整列 —— 五層都要對得上。
 #
 # ## 標記與對局是兩件獨立的事
@@ -717,9 +731,10 @@ def test_a_position_is_picked_from_the_list_played_and_returned_from(
         lambda response: "/api/black-move" in response.url
     ) as captured:
         click_square(page, red_move[2:])
-    # 沉澱信號是 `#waiting` 轉隱藏,不是數 `#moves li` —— 自己那半手在點擊當下就
-    # 同步進了序列(web-play-runtime 4.4 的教訓)。
-    page.wait_for_function("() => document.getElementById('waiting').hidden")
+    # 沉澱信號是 `#turn` 不再說「黑方走棋」,不是數 `#moves li` —— 自己那半手在
+    # 點擊當下就同步進了序列(web-play-runtime 4.4 的教訓)。完整說明見
+    # `test_web_play.SETTLED`。
+    page.wait_for_function(SETTLED)
 
     reply = captured.value.json()
     assert reply["move"] is not None, "真實引擎沒有給出應手,這一手等於沒走成"

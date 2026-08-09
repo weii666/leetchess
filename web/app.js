@@ -180,11 +180,21 @@ const NO_SIGNAL_YET = '尚未取得';
  * 像判決,與文字寫得多清楚無關。依據已改掛 requirement 4.1。
  */
 
-/** 等待中要說的話 —— 載入題目與等應手是兩件事,不能都說成「引擎思考中」。 */
-const WAITING_TEXTS = Object.freeze({
-  load: '正在載入題目…',
-  play: '引擎思考中…',
-});
+/*
+ * 這裡曾有一組 `WAITING_TEXTS`(`載入中` 與 `引擎思考中…`),寫進一個專用的
+ * `#waiting` 區塊。**兩者都已移除**(使用者看過實際畫面後的決定)。
+ *
+ * 那個區塊在版面流裡來去,顯示與隱藏都把底下的「歷史著法」上下推動 —— 每走一手
+ * 就抖一次。等待的兩種情境現在各由**已經存在、位置固定**的元素承擔:
+ *
+ * - **等應手** -> `#turn` 顯示「黑方走棋」(`turnText`)。它只換字不換高度。
+ * - **載入題目** -> `#puzzle-title` 顯示「載入中…」(`noPuzzleTitle`),盤面位置
+ *   放「正在載入題目…」(`boardPlaceholderText`)。這兩處在改動之前就已經這樣做了。
+ *
+ * 誠實記錄代價:等應手期間的回饋**從一個專用區塊降級成輪方那一行的文字**。
+ * requirement 6.1 已隨之修訂;6.2 與 6.4 不受影響 —— 它們是行為約束,由
+ * `game.js` 的 `acceptsMoves` 與快照的 `waiting` 承擔,與畫不畫這個區塊無關。
+ */
 
 const elements = {
   board: document.getElementById('board'),
@@ -193,7 +203,6 @@ const elements = {
   source: document.getElementById('puzzle-source'),
   turn: document.getElementById('turn'),
   signal: document.getElementById('signal'),
-  waiting: document.getElementById('waiting'),
   error: document.getElementById('error'),
   moves: document.getElementById('moves'),
   controls: document.getElementById('controls'),
@@ -406,6 +415,20 @@ function renderNextPosition(state) {
  * 「輪到你」「黑方走棋」「你獲勝」本身就已經是完整的句子。8.4 要的是輪方**可辨識**
  * 而不是有個名目在旁邊:少了前綴反而更短、更快讀得出來。形態取自 `poc/index.html`
  * 的 signal 區塊 —— 那裡直接寫「勝負難料」,沒有任何前綴。
+ *
+ * ## 這一行同時承擔等待中的呈現(requirements 6.1 修訂後)
+ *
+ * 等應手的期間走法序列裡已經有使用者那半手(`game.js` 的 `play()` 在第一個 `await`
+ * 之前就同步推進並 `notify()`),輪方因此**在點擊當下就同步**翻成對手,這裡於是說
+ * 「黑方走棋」—— 那句話本身就是「現在不是你動」。原本那個 `#waiting` 區塊講的是
+ * 同一件事,而它在版面流裡來去會推動底下的歷史著法,故整條移除。
+ *
+ * 一併記下這一行對測試的意義:**「不是『(某方)走棋』」就是「這次請求已經落地」**。
+ * 成功、失敗、終局三條路徑的結果分別是「輪到你」、「輪到你」(序列整份退回)與
+ * 「你獲勝」/「黑方勝」/「對局結束」,沒有一種留在「走棋」上。反過來,只要
+ * `waiting` 為真就必然不是使用者的回合 —— `waiting` 只在 `play()`(序列已含使用者
+ * 那半手,輪方已翻成對手)與 `load()`(此時根本還沒有題目,這裡顯示佔位符號)
+ * 之中為真。
  */
 function turnText(state) {
   if (!state.position) return BLANK;
@@ -463,17 +486,16 @@ function renderSignal(state) {
   elements.signal.replaceChildren(reading);
 }
 
-/**
- * 等待狀態(requirements 6.1、6.4)。
+/*
+ * 這裡曾有一個 `renderWaiting()`,把 `state.waiting` 畫成 `#waiting` 的 `hidden`。
+ * **已移除**,理由與那個元素本身相同(見本檔上方的說明)。
  *
- * 「解除」在此**只是快照的 `waiting` 為假**,沒有第二個地方記著它 —— 成功、失敗、
- * 重來三條路徑因此不必各自記得要收起這一區,requirements 6.4 也就不會依賴任何一條
- * 路徑有沒有寫全。
+ * 「等待態必解除」(requirements 6.4)沒有因此失去依據:**「解除」從頭到尾就只是
+ * 快照的 `waiting` 為假**,沒有第二個地方記著它。成功、失敗、重來三條路徑不必各自
+ * 記得要收起什麼,而 `waiting` 為假的後果現在直接就是**盤面重新接受走子** ——
+ * `game.js` 的 `acceptsMoves` 一翻真,`legalMoves` 就不再是空集合。那才是 6.4 真正
+ * 要保護的東西(「不留在等待中無法操作」),比一個區塊收沒收起來更貼近它的字面。
  */
-function renderWaiting(state) {
-  elements.waiting.textContent = state.position ? WAITING_TEXTS.play : WAITING_TEXTS.load;
-  elements.waiting.hidden = !state.waiting;
-}
 
 /**
  * 失敗的說法。載入失敗與走子途中的失敗共用同一個區塊,但說的不是同一件事。
@@ -586,7 +608,6 @@ function render() {
   renderPuzzleInfo(state);
   elements.turn.textContent = turnText(state);
   renderSignal(state);
-  renderWaiting(state);
   renderFailure(state);
   renderMoves(state);
   renderNextPosition(state);
