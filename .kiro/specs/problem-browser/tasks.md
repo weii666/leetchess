@@ -14,7 +14,7 @@
 
 ## 2. 純資料層
 
-- [ ] 2.1 (P) 實作題目索引的取得與篩選
+- [x] 2.1 (P) 實作題目索引的取得與篩選
   - `web/catalog.js`:取得索引一次,之後的篩選全在記憶體中進行,**不因篩選再次取得資料**
   - 依難度、標籤、出處篩選;多條件為 AND
   - **過濾掉可解標記為 false 的題目**;**可解標記為空值時視為可上架** —— corpus-verification 尚未回填,若把空值當不可解會讓整個題庫消失
@@ -115,3 +115,8 @@
 - 1.1:**parent 授權的邊界擴張**:`PositionRepository` 新增 `all()`(純新增、唯讀、依題號遞增)。原因是它原本沒有列舉 API,而以 `get()` 從 1 逐一探測**會在題號有缺口時靜默截斷** —— review 以突變證實:題庫 1/2/201 會掉成 1/2,直接違反 5.3。
 - 1.1:端點**不過濾** `solvable === false`,依 design 把 1.4 的過濾留給 `catalog.js`。**空值與 false 在前端語意不同**:空值視為可上架,否則 corpus-verification 跑完之前整個題庫是空的。
 - 1.1:`CatalogEntry` / `CatalogResponse` 定義在 `main.py` 而非 `models.py`,是 boundary 所致。日後若放寬可一併搬遷。
+- 2.1:`web/catalog.js` 匯出 `loadCatalog()`(取索引一次,回傳凍結的 `{positions, filter}`)、`filterPositions()`、`isListable()`。**`isListable` 就是 `position?.solvable !== false`** —— 只有明確的 `false` 排除,`null` 與欄位不存在都留著。寫反會讓 corpus-verification 跑完前整個題庫空掉。
+- 2.1:**認不得的回應形狀一律失敗,不降級成空陣列** —— 「題庫真的沒題目」(1.5 的空狀態)與「索引壞掉」(錯誤提示與重試)在呈現上是兩件事,合併會讓後者看起來像前者。
+- 2.1:難度條件經 `Number()` 轉換以吸收下拉選單的字串值;認不得的值轉成 `NaN` 而**篩不到任何題目**,不默默當成未選。`difficulty: 0` 正確仍可篩(無 falsy 錯誤)。
+- 2.1:逾時與「不洩漏後端原文」的手法與 `web/api.js` **重複一份**(design 把 `catalog.js` 的依賴列為「無」)。日後若抽共用層,這是兩處會一起改的地方。
+- 2.1:**待改進**(非阻斷):逾時測試以「掛住」而非乾淨失敗偵測退化 —— `page.evaluate()` 在 Playwright 同步 API 下無預設逾時。加 `page.set_default_timeout()` 可讓退化轉紅而非卡住。
