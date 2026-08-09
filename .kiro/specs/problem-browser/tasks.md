@@ -35,7 +35,7 @@
 
 ## 3. 列表頁
 
-- [ ] 3.1 建立列表頁骨架並讓出入口
+- [x] 3.1 建立列表頁骨架並讓出入口
   - **將既有的 `web/index.html`(對局頁)改名為 `web/play.html`**。**內容一字不動** —— 題號本來就由 `?id=` 從外部傳入
   - **新建的列表頁就叫 `web/index.html`**,不叫 `list.html`
   - 骨架含:題目列表容器、完成計數、空狀態與錯誤提示區
@@ -136,3 +136,10 @@
 - 2.2:**「解析失敗」的範圍比字面廣得多** —— 取用 `localStorage` 這個動作本身就可能拋(隱私模式、儲存被擋)、API 根本不存在、`getItem`/`setItem` 各自拋錯、配額爆掉。測試以 `Object.defineProperty` 在 **import 之前**造出四種真實情境,不是把例外塞進 try 就算數。
 - 2.2:陣列混雜物**逐項丟棄**而非整份退回(`[1, "oops", 6]` → `{1, 6}`)。3.6 的後件是失敗時的退路,不是「有機會就清空」的授權;整份丟棄會因一筆髒資料抹掉使用者其餘標記。
 - 2.2:**review 抓到的洞值得記著** —— 37 個測試裡沒有一條讓集合真的歸零(原本那條取消標記的測試刻意留了第二個題號)。在 `writeIds` 開頭加一行 `if (completed.size === 0) return;` 這種常見的「空集合就不寫」最佳化,37 條全過,而使用者取消唯一標記後重開**標記會復活**。補測試後該突變只讓新測試轉紅。**測試數量從來不是覆蓋的證據。**
+- 3.1:對局頁改名為 `web/play.html`(git 記為 `R100`,`shasum` 前後皆 `ac278cd6…`,內容一字未動),新的 `web/index.html` 為列表頁骨架。容器:`#positions`、`#progress`(內含 `#completed-count` / `#total-count`)、`#empty`、`#error`(內含 `#retry`)。**`service/` 零改動** —— 這正是沿用 `index.html` 之名的全部目的。
+- 3.1:**`#retry` 按鈕是 design 授權的前瞻,不是實作者自創** —— design 的 Error Handling 明列「索引取不到 → 重試」。它落在預設 `hidden` 的 `#error` 內、無事件處理器,3.2 之前使用者看不到死控制項。(實作者原本的理由「3.2 回頭改不到 index.html」**不成立**,`list.js` 大可動態建出按鈕;結論對而理由錯,記正確的那個。)
+- 3.1:**改名的連帶影響靠逐一判讀,不可全域取代**。10 個提到 `index.html` 的測試檔分三類:真測對局頁的三個(`test_web_page` / `test_web_play` / `test_web_e2e`)改路由;六個只改註解 —— 它們的 `/index.html` 是 `route.fulfill(body=...)` 的**行內字串空殼**,在 `WEB_DIR` 查找之前就攔下,真實檔案根本碰不到;純資料層兩個(`test_web_catalog` / `test_web_progress`)一字未改。review 以在四個模組各注入 `throw new Error` 反證那些測試確實還在測東西(分別 25/25/37/22 條轉紅)。
+- 3.1:`test_web_play.py` 保留 `("index.html" if path == "/" ...)` 那一行 —— 它就是 `StaticFiles(html=True)` 的行為,合成來源照著它走才不會與真實服務漂移。
+- 3.1:**待 3.2 補**(非阻斷):`#error` 的 `role="alert"` **無測試覆蓋** —— 拿掉它 41 條測試全過。可及性語意屬 3.2 的呈現範疇,屆時補一條 `get_attribute("role") == "alert"`。
+- 3.1:**3.2 要注意**:`test_the_list_page_ships_no_filter_controls` 以 `"<input" not in text` 釘住「不放篩選區」,讀的是**靜態檔字串**。完成標記若用 `<input type="checkbox">` 且由 `list.js` 動態產生,不受影響、**不必改那條測試**。
+- 3.1:改名被另一條平行工作的 docs commit(`f5400f2`)一併掃入,`git log --follow` 追改名史時會落在一個 `docs(...)` 訊息底下。

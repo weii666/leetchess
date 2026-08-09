@@ -453,7 +453,10 @@ def _is_api_path(scope: Scope) -> bool:
 def _mount_web(app: FastAPI) -> None:
     """把 `web/` 掛在根路徑上。
 
-    `html=True` 使目錄請求落到該目錄的 `index.html`,根路徑因此直接就是對局頁面。
+    `html=True` 使目錄請求落到該目錄的 `index.html`,根路徑因此直接就是**題庫列表頁**;
+    對局頁是 `/play.html?id=<題號>`。這個對應關係完全由檔名決定,本檔不含任何頁面路由 ——
+    列表頁刻意沿用 `index.html` 之名正是為了如此(problem-browser 3.1)。**把列表頁改名
+    就會讓 `/` 直接 404**,屆時才需要在此加一條根路由。
     目錄不存在時 `StaticFiles` 會在此當場拋出而不是靜默略過 —— `web/` 是進版本庫的
     交付物,缺了它服務就沒有前端可提供,晚一點才以 404 現形只會更難查。
     """

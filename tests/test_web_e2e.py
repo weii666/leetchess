@@ -374,7 +374,7 @@ def test_the_whole_puzzle_is_played_to_a_red_win_against_the_real_service(
         else None,
     )
 
-    page.goto(f"{live_service}/index.html?id={PUZZLE_ID}")
+    page.goto(f"{live_service}/play.html?id={PUZZLE_ID}")
     page.wait_for_selector("#board svg .piece")
 
     # 題目資訊來自真實題庫,不是夾具寫的常數。

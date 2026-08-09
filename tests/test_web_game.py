@@ -115,7 +115,7 @@ def game_page(browser_page) -> Iterator:
             route.fulfill(
                 status=200,
                 content_type="text/html; charset=utf-8",
-                # 不用 web/index.html:它會去載 app.js(tasks 4.3),
+                # 不用 web/play.html:它會去載 app.js(tasks 4.3),
                 # 而本檔要驗證的是 game.js 能單獨運作 —— 它不需要任何 DOM。
                 body='<!DOCTYPE html><html lang="zh-Hant"><meta charset="utf-8">'
                 "<title>對局狀態機驗證</title>",

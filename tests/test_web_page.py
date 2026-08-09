@@ -2,7 +2,7 @@
 
 本檔問兩件事,而且只問這兩件:
 
-1. **根路徑拿得到頁面骨架**,骨架裡備妥 4.x 會填入內容的每一個容器,且使用者可見
+1. **對局頁拿得到頁面骨架**,骨架裡備妥 4.x 會填入內容的每一個容器,且使用者可見
    文字為繁體中文(8.3)。
 2. **掛載沒有動到既有的三個端點**。靜態檔掛在根路徑上,任何路徑都落在它的範圍內 ——
    `/api/...` 若被它接走,端點會安靜地變成「找不到檔案」,而不是明確的失敗。
@@ -15,6 +15,12 @@
 就足以證明:靜態檔給不出 `code` 欄位。
 
 三個端點的正常回應由 `test_main.py` 負責,此處不重複。
+
+## 對局頁的位址
+
+對局頁原本掛在根路徑上,problem-browser 的 tasks 3.1 把入口讓給了題庫列表,它因此
+退居 `/play.html`(design 的「路由:列表接管入口」)。**本檔問的仍是同一個骨架** ——
+換的只有位址。`/` 現在給出什麼由 `test_web_list.py` 負責。
 """
 
 from __future__ import annotations
@@ -28,10 +34,13 @@ from fastapi.testclient import TestClient
 from service.main import create_app
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
-INDEX_HTML = PROJECT_ROOT / "web" / "index.html"
+PLAY_HTML = PROJECT_ROOT / "web" / "play.html"
+
+#: 對局頁的位址。入口已讓給題庫列表,本頁退居於此。
+PLAY_PATH = "/play.html"
 
 #: 骨架必須備妥的容器。後續任務的 boundary 只有 `web/app.js` 與 `web/style.css`,
-#: **沒有一個能回頭改 `index.html`** —— 少一個容器,那個任務就無處可寫。
+#: **沒有一個能回頭改 `play.html`** —— 少一個容器,那個任務就無處可寫。
 REQUIRED_ELEMENT_IDS = [
     "board",  # 盤面(3.1、3.2)
     "puzzle-title",  # 局名(4.3)
@@ -58,12 +67,12 @@ def page_client() -> Iterator[TestClient]:
     yield TestClient(create_app(), raise_server_exceptions=False)
 
 
-# --- 根路徑給得出頁面骨架 -----------------------------------------------
+# --- 對局頁的位址給得出頁面骨架 -----------------------------------------
 
 
-def test_root_path_serves_the_page(page_client: TestClient) -> None:
-    """掛載之後,根路徑回的是前端頁面本身,而不是 404。"""
-    response = page_client.get("/")
+def test_the_play_path_serves_the_page(page_client: TestClient) -> None:
+    """掛載之後,對局頁的位址回的是前端頁面本身,而不是 404。"""
+    response = page_client.get(PLAY_PATH)
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
@@ -71,28 +80,28 @@ def test_root_path_serves_the_page(page_client: TestClient) -> None:
 
 
 def test_served_page_is_the_file_in_the_web_directory(page_client: TestClient) -> None:
-    """根路徑給的就是 `web/index.html`,不是別處產生的內容。"""
-    assert INDEX_HTML.is_file(), f"{INDEX_HTML} 必須存在"
+    """`/play.html` 給的就是 `web/play.html`,不是別處產生的內容。"""
+    assert PLAY_HTML.is_file(), f"{PLAY_HTML} 必須存在"
 
-    assert page_client.get("/").text == INDEX_HTML.read_text(encoding="utf-8")
+    assert page_client.get(PLAY_PATH).text == PLAY_HTML.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("element_id", REQUIRED_ELEMENT_IDS)
 def test_page_provides_every_container_the_later_tasks_need(
     page_client: TestClient, element_id: str
 ) -> None:
-    """骨架備妥全部容器 —— 後續任務改不到 `index.html`,少一個就沒地方寫。"""
-    assert f'id="{element_id}"' in page_client.get("/").text
+    """骨架備妥全部容器 —— 後續任務改不到 `play.html`,少一個就沒地方寫。"""
+    assert f'id="{element_id}"' in page_client.get(PLAY_PATH).text
 
 
 def test_page_declares_traditional_chinese(page_client: TestClient) -> None:
     """8.3:頁面自我宣告為繁體中文,瀏覽器的字型選擇才會正確。"""
-    assert 'lang="zh-Hant"' in page_client.get("/").text
+    assert 'lang="zh-Hant"' in page_client.get(PLAY_PATH).text
 
 
 def test_page_text_contains_no_simplified_characters(page_client: TestClient) -> None:
     """8.3:所有使用者可見文字為繁體中文。"""
-    text = page_client.get("/").text
+    text = page_client.get(PLAY_PATH).text
     found = sorted({char for char in SIMPLIFIED_ONLY_CHARACTERS if char in text})
 
     assert not found, f"頁面出現簡體字:{''.join(found)}"
@@ -156,7 +165,7 @@ def test_skeleton_renders_its_containers_in_a_real_browser(browser_page) -> None
     TestClient 看到的是位元組;容器是否真的成為 DOM 節點,只有瀏覽器答得出來 ——
     標籤沒閉合之類的錯誤在字串比對下完全看不出來。
     """
-    browser_page.goto(INDEX_HTML.as_uri())
+    browser_page.goto(PLAY_HTML.as_uri())
 
     missing = [
         element_id
@@ -170,7 +179,7 @@ def test_reset_control_is_a_button_labelled_in_traditional_chinese(
     browser_page,
 ) -> None:
     """重來是可按的控制項而非純文字,標籤為繁體中文(8.3)。"""
-    browser_page.goto(INDEX_HTML.as_uri())
+    browser_page.goto(PLAY_HTML.as_uri())
 
     reset = browser_page.locator("#reset")
     assert reset.evaluate("element => element.tagName") == "BUTTON"

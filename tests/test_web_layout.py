@@ -3,7 +3,7 @@
 requirements 8.2 說的是「在行動裝置的直向畫面上完整呈現盤面與對局資訊,**不需
 橫向捲動**」。這句話唯一能被驗證的地方是真實瀏覽器的排版結果 —— CSS 規則本身
 讀起來對不對不算證據,只有 `getBoundingClientRect()` 與 `scrollWidth` 算。因此本
-檔一律以指定尺寸的視窗載入 `web/index.html` 本身,再問瀏覽器排出來多大。
+檔一律以指定尺寸的視窗載入 `web/play.html` 本身,再問瀏覽器排出來多大。
 
 ## 三件事,缺一不可
 
@@ -334,7 +334,7 @@ def test_pieces_and_destinations_stay_clickable_when_the_board_is_scaled(
 
 
 def test_the_stylesheet_is_served_and_applied(play_page) -> None:
-    """`index.html` 連的 `./style.css` 真的存在且被套用。
+    """`play.html` 連的 `./style.css` 真的存在且被套用。
 
     tasks 1.2 刻意先把 `<link>` 接好;本任務之前那個請求一直是 404,頁面拿到的是
     瀏覽器預設樣式。以「body 不再是預設的無邊距/預設字體」當探針,證明這一份

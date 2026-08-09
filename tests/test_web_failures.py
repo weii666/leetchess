@@ -14,7 +14,7 @@ design 的 File Structure Plan 把失敗路徑獨立成一檔,理由在這裡看
 
 ## 夾具沿用 `test_web_play.py`
 
-`play_page` 與座標輔助函式已在該檔備妥,那裡供的是 `web/index.html` 本身。失敗
+`play_page` 與座標輔助函式已在該檔備妥,那裡供的是 `web/play.html` 本身。失敗
 路徑要問的是同一個頁面在另一種回應下的樣子,重開一份夾具只會讓兩邊漂移。
 pytest 以檔名為模組名匯入 `tests/` 下的測試檔,故此處直接以模組名匯入。
 """

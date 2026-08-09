@@ -114,7 +114,7 @@ def api_page(browser_page) -> Iterator:
             route.fulfill(
                 status=200,
                 content_type="text/html; charset=utf-8",
-                # 不用 web/index.html:它會去載 app.js(tasks 4.3),
+                # 不用 web/play.html:它會去載 app.js(tasks 4.3),
                 # 而本檔要驗證的是 api.js 能單獨運作。
                 body='<!DOCTYPE html><html lang="zh-Hant"><meta charset="utf-8">'
                 "<title>後端 client 驗證</title>",

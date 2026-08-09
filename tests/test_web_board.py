@@ -5,7 +5,7 @@
 
 夾具沿用 `test_web_pure.py` 的手法 —— 以 `page.route()` 就地供 `web/` 底下的**真實
 交付檔**,合成一個 http(s) 來源。理由同樣是 Chromium 不允許自 `file://`(origin 為
-`null`)匯入 ES module。此處不用 `web/index.html`:它會去載 `app.js`(tasks 4.3),
+`null`)匯入 ES module。此處不用 `web/play.html`:它會去載 `app.js`(tasks 4.3),
 而本檔要驗證的是 `board.js` 能單獨運作;頁面只需要一個與骨架同 id 的盤面容器。
 """
 
@@ -62,7 +62,7 @@ def board_page(browser_page) -> Iterator:
             route.fulfill(
                 status=200,
                 content_type="text/html; charset=utf-8",
-                # 容器的 id 與 `web/index.html` 的骨架一致,測到的介面才是真的那個。
+                # 容器的 id 與 `web/play.html` 的骨架一致,測到的介面才是真的那個。
                 body='<!DOCTYPE html><html lang="zh-Hant"><meta charset="utf-8">'
                 "<title>棋盤繪製驗證</title>"
                 '<main id="board" aria-label="棋盤"></main>',

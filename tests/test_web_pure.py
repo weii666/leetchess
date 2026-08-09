@@ -71,7 +71,7 @@ def module_page(browser_page) -> Iterator:
             route.fulfill(
                 status=200,
                 content_type="text/html; charset=utf-8",
-                # 刻意不用 web/index.html:它會去載 app.js,而本檔要驗證的是
+                # 刻意不用 web/play.html:它會去載 app.js,而本檔要驗證的是
                 # fen.js 能單獨運作。
                 body='<!DOCTYPE html><html lang="zh-Hant"><meta charset="utf-8">'
                 "<title>純函式驗證</title>",

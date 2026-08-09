@@ -2,7 +2,7 @@
 4.4、5.1、6.1、6.4、8.1、8.4)。
 
 `web/app.js` 是唯一把三個模組接起來的地方 —— 它沒有自己的邏輯可言,價值全在
-「接得對不對」。因此本檔一律**以真實點擊驅動真實頁面**:載入 `web/index.html`
+「接得對不對」。因此本檔一律**以真實點擊驅動真實頁面**:載入 `web/play.html`
 本身、載入 `web/app.js` 本身,點在棋盤的實際座標上,再看 DOM 變成什麼樣子。
 沒有任何一條測試是直接呼叫函式的 —— 那樣測不出事件有沒有綁上去。
 
@@ -14,7 +14,11 @@
 
 夾具沿用 `test_web_board.py` / `test_web_game.py` 的手法合成一個 http(s) 來源 ——
 Chromium 不允許自 `file://`(origin 為 `null`)匯入 ES module。與那兩檔不同的是,
-**這裡供的是 `web/index.html` 本身**,骨架的每一個容器 id 因此都是真的那一個。
+**這裡供的是 `web/play.html` 本身**,骨架的每一個容器 id 因此都是真的那一個。
+
+對局頁的位址是 `/play.html` —— 入口已讓給題庫列表(problem-browser 的 tasks 3.1)。
+下面的靜態路由仍把 `/` 對應到 `index.html`,那不是殘留:它就是 `StaticFiles(html=True)`
+的行為,合成來源照著它走,才不會與真實服務漂移。
 
 `style.css` 尚屬 tasks 5.1、此刻不存在,靜態路由會回 404 —— 那不影響任何斷言:
 盤面的呈現屬性直接寫在 SVG 元素上(tasks 3.1),沒有 CSS 也畫得出來。
@@ -181,7 +185,7 @@ def hang_position(page) -> None:
 
 def visit(page, position_id: Any = 1) -> None:
     """開啟頁面。**題號自網址帶入** —— 要載入哪一題由外部決定(brief 的邊界)。"""
-    page.goto(f"{ORIGIN}/index.html?id={position_id}")
+    page.goto(f"{ORIGIN}/play.html?id={position_id}")
 
 
 def open_game(page, bodies: list[Any] | None = None) -> None:

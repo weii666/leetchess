@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>象棋排局題庫</title>
+<link rel="stylesheet" href="./list.css">
+</head>
+<body>
+<!--
+  列表頁的骨架。這個檔名是刻意的:`service/main.py` 以 `StaticFiles(html=True)` 把
+  `web/` 掛在 `/`,入口是靠**目錄下的 `index.html`** 解析的 —— 沿用這個名字,`/` 自動
+  就是列表頁,掛載邏輯一個字都不用動。對局頁因此讓位到 `play.html`。
+
+  本檔只有容器,沒有互動邏輯也沒有樣式:內容由 list.js 填入、版面由 list.css 決定
+  (兩者皆屬 tasks 3.2)。那個任務的 boundary 只有那兩個檔案,回頭改不到本檔,
+  因此每一個容器都必須在此一次備齊 —— 與 play.html 當初的理由相同。
+
+  刻意沒有篩選區:篩選互動已移入 Backlog(tasks.md 的範圍說明)。先擺一組按不動的
+  下拉選單,使用者會以為產品壞了,比沒有更糟。
+-->
+<header>
+  <h1>象棋排局題庫</h1>
+
+  <!-- 完成題數與總題數須對使用者可見(3.5),由 list.js 填入。 -->
+  <p id="progress">已完成 <span id="completed-count">—</span> / <span id="total-count">—</span> 題</p>
+</header>
+
+<main>
+  <!-- 每一題一列(1.2、1.3)。內容由 list.js 產生,骨架不夾帶任何寫死的題目。 -->
+  <ul id="positions"></ul>
+
+  <!-- 題庫沒有任何可列出的題目時告知使用者,而非留下一片空白(1.5)。 -->
+  <p id="empty" hidden>題庫目前沒有題目。</p>
+
+  <!--
+    索引取不到時的提示(design 的 Error Handling)。與對局頁一樣只用單一通用區塊,
+    不為每種失敗各做一套 UI;重試按鈕是那一格「可做什麼」的落點。
+  -->
+  <section id="error" role="alert" hidden>
+    <p>題庫載入失敗。</p>
+    <button id="retry" type="button">重試</button>
+  </section>
+</main>
+
+<script type="module" src="./list.js"></script>
+</body>
+</html>

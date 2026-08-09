@@ -115,7 +115,7 @@
 
 ```
 web/
-├── list.html        # 列表頁骨架(成為新的 /)
+├── index.html       # 列表頁骨架(沿用此名,StaticFiles(html=True) 使 / 自動解析到它)
 ├── list.css         # 列表版面(與 style.css 共用視覺語言)
 ├── catalog.js       # 題目索引的取得與篩選(純資料,不碰 DOM)
 ├── progress.js      # 完成狀態的讀寫與版本處理(純函式 + localStorage)
@@ -148,7 +148,7 @@ progress / catalog  →  list
 
 | Requirement | Summary | Components |
 |---|---|---|
-| 1.1 | 入口是列表不是棋盤 | list.html, service/main.py |
+| 1.1 | 入口是列表不是棋盤 | index.html |
 | 1.2, 1.3 | 每列的題號局名難度標籤 | list.js, catalog.js |
 | 1.4 | 不可解的題目不列入 | catalog.js |
 | 1.5 | 題庫為空時的告知 | list.js |
@@ -168,7 +168,7 @@ progress / catalog  →  list
 | 5.1, 5.2 | 單一索引、不打引擎服務 | catalog.js |
 | 5.3, 5.4 | 新增題目自動涵蓋、可擴充至 500 題 | 索引產出 |
 | 6.1 | 行動裝置列表版面 | list.css |
-| 6.2 | 繁體中文 | list.html, list.js |
+| 6.2 | 繁體中文 | index.html, list.js |
 | 6.3 | 已完成與未完成可區分 | list.css, list.js |
 
 ## Components and Interfaces
