@@ -1,9 +1,9 @@
-"""應用組裝與三個端點的測試(tasks 4.2、requirements 1.1、1.4、6.1)。
+"""應用組裝與四個端點的測試(tasks 4.2、requirements 1.1、1.4、6.1)。
 
 本檔釘死的是**組裝**而非判定邏輯 —— 對局判定已由 `test_game_service.py` 覆蓋,
 此處只問四件事:
 
-1. **三個端點都答得出來**,且回應形狀就是 `models.py` 的契約(1.1、1.4、6.1)。
+1. **四個端點都答得出來**,且回應形狀就是 `models.py` 的契約(1.1、1.4、6.1)。
 2. **啟動掛鉤建起題庫索引與引擎池,關閉掛鉤把引擎進程全部收掉** —— 殘留的引擎
    進程每個常駐一份 51MB NNUE,關不掉等於每次重啟都漏一批記憶體。此處以作業系統
    層級的子進程清單斷言,而非問池自己「關好了嗎」。
@@ -212,6 +212,203 @@ def test_position_endpoint_does_not_borrow_an_engine_for_an_unknown_id(
 
     assert response.status_code == 404
     assert response.json()["code"] == "POSITION_NOT_FOUND"
+
+
+# --- 題目索引端點(problem-browser 5.1、5.2、5.3、5.4)------------------
+
+
+#: 索引端點的測試題庫:兩本書、三題,刻意涵蓋可解標記的三種取值。
+#: 題號不連續(1、2、201)是重點 —— 唯一性由人工保證、無機制強制,索引不得預設
+#: 題號是 1..N 的連續整數。
+CATALOG_CORPUS: list[dict[str, Any]] = [
+    {
+        "source": "適情雅趣",
+        "id": 1,
+        "title": "盡善克終",
+        "description": "適情雅趣 第一局 盡善克終",
+        "difficulty": 3,
+        "tags": ["雙馬", "連將殺"],
+        "max_dtm": 16,
+        "solvable": True,
+    },
+    {
+        "source": "適情雅趣",
+        "id": 2,
+        "title": "野馬操田",
+        "description": "適情雅趣 第二局 野馬操田",
+        "difficulty": 5,
+        "tags": ["單車"],
+        "max_dtm": 8,
+        "solvable": False,
+    },
+    {
+        # 可解標記尚未回填(corpus-verification 未跑),欄位整個不存在。
+        "source": "橘中秘",
+        "id": 201,
+        "title": "七星聚會",
+        "description": "橘中秘 第二〇一局 七星聚會",
+        "difficulty": 9,
+        "tags": [],
+    },
+]
+
+
+def _write_catalog_position(root: pathlib.Path, entry: dict[str, Any]) -> None:
+    """依 `CATALOG_CORPUS` 的一筆資料寫出題目檔。出處由資料夾表達,不是題目欄位。"""
+    payload = {key: value for key, value in entry.items() if key != "source"}
+    payload["fen"] = RED_FEN
+    payload["side_to_move"] = Side.RED.value
+    folder = root / entry["source"]
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{entry['id']:04d}.json").write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+@pytest.fixture
+def catalog_corpus(tmp_path: pathlib.Path) -> pathlib.Path:
+    """寫出 `CATALOG_CORPUS` 的題庫目錄,回傳其根目錄。"""
+    root = tmp_path / "catalog_corpus"
+    for entry in CATALOG_CORPUS:
+        _write_catalog_position(root, entry)
+    return root
+
+
+@pytest.fixture
+def make_catalog_client(catalog_corpus: pathlib.Path, fake_engine):
+    """回傳工廠:對 `catalog_corpus` 起一個服務。可重複呼叫以模擬「重啟服務」。"""
+    clients: list[TestClient] = []
+    engine = fake_engine("normal")
+
+    def make() -> TestClient:
+        app = create_app(_settings(engine.path, catalog_corpus, 1))
+        client = TestClient(app)
+        client.__enter__()
+        clients.append(client)
+        return client
+
+    yield make
+
+    for client in clients:
+        client.__exit__(None, None, None)
+
+
+def test_catalog_endpoint_lists_every_position_with_the_fields_the_list_needs(
+    make_catalog_client,
+) -> None:
+    """5.1:列表所需的全部資料來自這一份索引 —— 題庫中每一題、欄位齊備。
+
+    欄位就是列表要畫的那幾樣:題號、局名、描述、難度、標籤、出處、可解標記。
+    出處由題目所在的書目資料夾表達,不是題目欄位,端點必須自題庫另取。
+    """
+    response = make_catalog_client().get("/api/catalog")
+
+    assert response.status_code == 200
+    payload = response.json()
+    # 題號遞增是刻意的:索引是列表的唯一資料來源,順序不該取決於檔案系統的走訪次序。
+    assert [entry["id"] for entry in payload["positions"]] == [1, 2, 201]
+    assert payload["positions"][0] == {
+        "id": 1,
+        "title": "盡善克終",
+        "description": "適情雅趣 第一局 盡善克終",
+        "difficulty": 3,
+        "tags": ["雙馬", "連將殺"],
+        "source": "適情雅趣",
+        "solvable": True,
+    }
+    assert payload["positions"][2] == {
+        "id": 201,
+        "title": "七星聚會",
+        "description": "橘中秘 第二〇一局 七星聚會",
+        "difficulty": 9,
+        "tags": [],
+        "source": "橘中秘",
+        "solvable": None,
+    }
+
+
+def test_catalog_endpoint_answers_with_the_engine_pool_shut_down(
+    make_catalog_client,
+) -> None:
+    """5.2:呈現列表不得佔用任何引擎資源 —— 池關掉之後索引仍須完整回得出來。
+
+    池關掉是「引擎資源一格都不剩」的最強形式:端點只要碰過池就會失敗,因此這個
+    斷言直接證明它沒碰。它同時涵蓋池滿的情形 —— 池滿時借用會等到逾時後回 503。
+    """
+    client = make_catalog_client()
+    client.app.state.pool.shutdown()
+
+    response = client.get("/api/catalog")
+
+    assert response.status_code == 200
+    assert len(response.json()["positions"]) == len(CATALOG_CORPUS)
+
+
+def test_catalog_endpoint_does_not_report_legal_moves_or_the_starting_position(
+    make_catalog_client,
+) -> None:
+    """索引不含起始局面與合法著法 —— 那兩樣都得問引擎,而列表不需要它們。
+
+    釘死欄位集合,日後有人「順手」把 `fen` 或 `state` 加進來時,5.2 的保證會在這裡
+    先斷掉,而不是等到引擎池滿的線上時刻才現形。
+    """
+    payload = make_catalog_client().get("/api/catalog").json()
+
+    for entry in payload["positions"]:
+        assert set(entry) == {
+            "id",
+            "title",
+            "description",
+            "difficulty",
+            "tags",
+            "source",
+            "solvable",
+        }
+
+
+def test_catalog_endpoint_keeps_an_unfilled_solvable_flag_empty(
+    make_catalog_client,
+) -> None:
+    """可解標記可為空,**不得視為必填**,也不得擅自補一個預設值。
+
+    corpus-verification 尚未回填,把空值當成 false 會讓整個題庫從列表上消失;
+    當成 true 則是替驗證工具作了它還沒作的結論。空值一律照實傳出去。
+    """
+    payload = make_catalog_client().get("/api/catalog").json()
+    by_id = {entry["id"]: entry for entry in payload["positions"]}
+
+    assert by_id[201]["solvable"] is None
+    # 標為不可解的題目仍在索引裡 —— 過不過濾是列表的事(1.4),索引只據實回報。
+    assert by_id[2]["solvable"] is False
+
+
+def test_catalog_endpoint_covers_a_new_position_after_a_restart(
+    make_catalog_client, catalog_corpus: pathlib.Path
+) -> None:
+    """5.3:題庫新增題目後,索引在**不修改程式**的情況下涵蓋該題。
+
+    新題直接寫進題庫目錄,服務重啟一次即出現 —— 這正是端點勝過靜態索引檔的地方:
+    沒有「忘記重跑產出工具」這個失效模式。
+    """
+    before = make_catalog_client().get("/api/catalog").json()
+    assert 302 not in {entry["id"] for entry in before["positions"]}
+
+    _write_catalog_position(
+        catalog_corpus,
+        {
+            "source": "百局象棋譜",
+            "id": 302,
+            "title": "小征東",
+            "description": "百局象棋譜 第三〇二局 小征東",
+            "difficulty": 4,
+            "tags": ["馬炮"],
+        },
+    )
+
+    after = make_catalog_client().get("/api/catalog").json()
+
+    assert [entry["id"] for entry in after["positions"]] == [1, 2, 201, 302]
+    assert after["positions"][3]["source"] == "百局象棋譜"
 
 
 # --- 局面查詢端點(1.1) ------------------------------------------------

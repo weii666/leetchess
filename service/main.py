@@ -1,4 +1,4 @@
-"""FastAPI 應用的組裝:三個端點、前端靜態檔的掛載、啟動與關閉掛鉤、`ServiceError`
+"""FastAPI 應用的組裝:四個端點、前端靜態檔的掛載、啟動與關閉掛鉤、`ServiceError`
 的錯誤映射。
 
 依賴方向為 `types / errors -> config -> positions / engine -> game -> models -> main`,
@@ -55,6 +55,17 @@
 503 與 504 一樣管用:`ErrorResponse.from_error` 取的是 `ServiceError.message`,不是
 `str(exc)`,引擎吐了什麼都到不了使用者眼前。
 
+## 題目索引不碰引擎池
+
+`GET /api/catalog` 是唯一一個**完全不經過引擎池**的端點。題庫索引在啟動掛鉤裡就
+建好了,列表要的欄位(題號、局名、描述、難度、標籤、出處、可解標記)全在裡面 ——
+沒有一樣需要問引擎。因此引擎池滿、乃至整池關閉時,題庫列表照樣打得開
+(problem-browser 5.2)。
+
+對照 `GET /api/positions/{position_id}`:它**會**借引擎,因為它回傳的是起始局面
+**與該局面的合法著法**,而合法著法只有引擎答得出來。兩個端點讀同一份題庫,差別
+只在要不要合法著法 —— 那正是「進不進得了對局」與「瀏不瀏覽得了題庫」的分界。
+
 ### 結構性驗證失敗用哪個類別碼
 
 設計的錯誤類別表沒有 422 這一列,API Contract 也只允許 400/404/409/503/504 —— 因此
@@ -75,6 +86,7 @@ from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 from starlette.responses import Response
 from starlette.routing import Match, Mount
 from starlette.types import Scope
@@ -96,6 +108,7 @@ from service.models import (
     PositionResponse,
 )
 from service.positions import PositionRepository
+from service.types import Position
 
 __all__ = [
     "MIN_THREADPOOL_CAPACITY",
@@ -103,6 +116,8 @@ __all__ = [
     "MALFORMED_REQUEST_MESSAGE",
     "API_PREFIX",
     "WEB_DIR",
+    "CatalogEntry",
+    "CatalogResponse",
     "threadpool_capacity",
     "create_app",
     "app",
@@ -148,14 +163,114 @@ def _repository(request: Request) -> PositionRepository:
 Service = Annotated[GameService, Depends(_service)]
 Repository = Annotated[PositionRepository, Depends(_repository)]
 
-#: 三個端點共用的路徑前綴。前端靜態檔掛在根路徑上,因此這個前綴同時也是
+#: 四個端點共用的路徑前綴。前端靜態檔掛在根路徑上,因此這個前綴同時也是
 #: 「靜態檔看不見的範圍」,見 `_WebFiles`。
 API_PREFIX = "/api"
 
 router = APIRouter(prefix=API_PREFIX)
 
 
+# --- 題目索引的回應形狀 -------------------------------------------------
+
+
+class CatalogEntry(BaseModel):
+    """題庫列表中的一題。**沒有起始局面,也沒有合法著法。**
+
+    欄位就是列表要畫的那幾樣(problem-browser 1.2):題號、局名、描述、難度、
+    標籤、出處、可解標記。刻意**不含** `fen` 與 `state` —— 起始局面的合法著法只有
+    引擎答得出來,而少了它們,這個端點才可能在引擎池滿時照樣答得出來(5.2)。
+
+    模型定義在此而非 `models.py`,是因為本任務的 boundary 是 `service/main.py`。
+    """
+
+    id: int = Field(description="題號,全域唯一,跨書連續。列表與對局以它交接。")
+    title: str = Field(description="局名,列表顯示用,單行精簡。")
+    description: str = Field(description="完整描述,涵蓋書名、局號、局名。")
+    difficulty: int = Field(description="難度分級,列表的篩選條件之一。")
+    tags: list[str] = Field(description="題目標籤,可多個,列表的篩選條件之一。")
+    source: str = Field(
+        description=(
+            "出處書名,列表的篩選條件之一。由題目所在資料夾表達而非題目欄位,"
+            "故不在題目 schema 內;取自 `PositionRepository.source_of()`。"
+            "與 `PositionResponse.source` 不同,此處**恆有值** —— 索引裡的每一題都"
+            "躺在某個書目資料夾底下,直接躺在題庫根目錄的題目在啟動掃描時就被擋下。"
+        )
+    )
+    solvable: bool | None = Field(
+        default=None,
+        description=(
+            "是否確認紅先必勝。由 corpus-verification 日後回填,現階段可為空,"
+            "**不得視為必填**。索引據實回報而不代為過濾:哪些題目該列出來是列表的"
+            "決定(1.4),而在那裡「空值」與「false」並不同義 —— 尚未回填的題目"
+            "視為可上架,否則驗證工具跑完之前整個題庫都是空的。"
+        ),
+    )
+
+    @classmethod
+    def from_domain(cls, position: Position, source: str) -> CatalogEntry:
+        """由題目與其出處建出索引中的一列。
+
+        `source` 另外傳入而非取自 `position`:出處由資料夾表達,`Position` 裡沒有
+        這個欄位(見 `positions.py` 的「佈局與出處」)。
+        """
+        return cls(
+            id=position.id,
+            title=position.title,
+            description=position.description,
+            difficulty=position.difficulty,
+            tags=list(position.tags),
+            source=source,
+            solvable=position.solvable,
+        )
+
+
+class CatalogResponse(BaseModel):
+    """題庫索引:列表所需資料的**單一來源**(problem-browser 5.1)。
+
+    包成物件而不是裸陣列,與其餘三個端點的回應形狀一致;日後要在索引旁邊帶上
+    別的東西(例如題庫版本)時,也不必改變 client 既有的解析方式。
+    """
+
+    positions: list[CatalogEntry] = Field(
+        description=(
+            "題庫中的每一題,**依題號遞增**。順序刻意固定,不取決於檔案系統的"
+            "走訪次序 —— 列表只取這一份索引,順序漂移會讓畫面在重啟後莫名重排。"
+        )
+    )
+
+
+def _catalog_entries(repository: PositionRepository) -> list[CatalogEntry]:
+    """把啟動時已建好的題庫索引攤平成列表所需的欄位,依題號遞增。
+
+    題目由 `PositionRepository.all()` 一次取得,而非以 `get()` 從 1 逐一探測 ——
+    題號的唯一性由人工保證、連續性沒有任何機制保證(見 `positions.py`),遇到第一個
+    缺口就會靜默截斷索引,5.3 的「新增題目自動涵蓋」隨之落空。
+    """
+    return [
+        CatalogEntry.from_domain(position, repository.source_of(position.id))
+        for position in repository.all()
+    ]
+
+
 # --- 端點 ---------------------------------------------------------------
+
+
+@router.get("/catalog")
+def read_catalog(repository: Repository) -> CatalogResponse:
+    """題庫全部題目的列表所需欄位(problem-browser 5.1、5.2、5.3、5.4)。
+
+    **這個端點不借引擎、不觸發搜尋。** 它只讀啟動掛鉤已經建好的題庫索引,因此
+    引擎池滿、乃至整池關閉時,題庫列表仍然打得開(5.2)。簽章裡沒有 `Service`
+    正是這件事的保證:借引擎的那行程式碼不存在,就沒有人能不小心加回來。
+
+    索引直接由題庫產生,所以題庫新增題目後**重啟服務即出現,不需修改程式**
+    (5.3)。這也是它勝過預先產出的靜態索引檔的地方 —— 靜態檔有「忘記重跑產出
+    工具」這個失效模式,而過期的列表會讓使用者點進一個不存在的題目。
+
+    500 題的規模一次回完沒有壓力(5.4):每題只有幾個短欄位,沒有 FEN 也沒有著法
+    清單,整份索引約 150KB,而列表**只取一次**,之後的篩選全在前端記憶體中進行。
+    """
+    return CatalogResponse(positions=_catalog_entries(repository))
 
 
 @router.get("/positions/{position_id}")

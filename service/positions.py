@@ -122,6 +122,18 @@ class PositionRepository:
         """索引中的題目數。"""
         return len(self._loaded_index())
 
+    def all(self) -> list[Position]:
+        """索引中的每一題,**依題號遞增**。
+
+        題庫列表需要一次取得全部題目,而以 `get()` 從 1 逐一探測是錯的 —— 題號的
+        唯一性由人工保證、連續性沒有任何機制保證(見「佈局與出處」),遇到第一個
+        缺口就會靜默截斷索引。
+
+        順序固定為題號遞增而非檔案系統的走訪次序,否則列表會在每次重啟後莫名重排。
+        """
+        index = self._loaded_index()
+        return [index[position_id] for position_id in sorted(index)]
+
     # --- 內部 -----------------------------------------------------------
 
     def _loaded_index(self) -> dict[int, Position]:

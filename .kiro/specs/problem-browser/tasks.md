@@ -4,7 +4,7 @@
 
 ## 1. 索引:讓列表有資料可讀
 
-- [ ] 1.1 新增題目索引端點
+- [x] 1.1 新增題目索引端點
   - 在 `service/main.py` 新增 `GET /api/catalog`,回傳題庫全部題目的列表所需欄位(題號、局名、描述、難度、標籤、出處、可解標記)
   - **不得借引擎、不得觸發搜尋** —— 它只讀啟動時已建好的題庫索引。引擎池滿時此端點仍須正常回應
   - 新增題目後重啟服務即出現在回應中,不需修改程式
@@ -110,3 +110,8 @@
 - 沿用既有的前端測試手法:Playwright 的 Python 綁定、`page.route()` 合成 origin 供**真實交付檔**、純資料層以 `page.evaluate()` 驗證。
 - **測試的沉澱信號是等 `#waiting` 轉隱藏**,不要數 `#moves li`(web-play-runtime 4.4 的教訓)。
 - **點擊座標要依實際 bounding box 縮放**,不可直接用 viewBox 使用者座標(web-play-runtime 5.1 的教訓)。
+- 1.1:`GET /api/catalog` 回 `{"positions": [...]}`,欄位為 `id`、`title`、`description`、`difficulty`、`tags`、`source`、`solvable`。**刻意不含 `fen` 與 `state`** —— 那兩樣需要引擎,加回來就會悄悄破壞 5.2。
+- 1.1:**端點不注入 `GameService`,只依賴 `Repository`** —— 借引擎的程式碼根本不存在。review 以「啟動後立刻關閉引擎池」的真實服務驗證:catalog 回 200 三題完整,同一服務的 `/api/positions/1` 回 503。
+- 1.1:**parent 授權的邊界擴張**:`PositionRepository` 新增 `all()`(純新增、唯讀、依題號遞增)。原因是它原本沒有列舉 API,而以 `get()` 從 1 逐一探測**會在題號有缺口時靜默截斷** —— review 以突變證實:題庫 1/2/201 會掉成 1/2,直接違反 5.3。
+- 1.1:端點**不過濾** `solvable === false`,依 design 把 1.4 的過濾留給 `catalog.js`。**空值與 false 在前端語意不同**:空值視為可上架,否則 corpus-verification 跑完之前整個題庫是空的。
+- 1.1:`CatalogEntry` / `CatalogResponse` 定義在 `main.py` 而非 `models.py`,是 boundary 所致。日後若放寬可一併搬遷。
