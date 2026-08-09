@@ -45,12 +45,13 @@ REQUIRED_ELEMENT_IDS = [
     "board",  # 盤面(3.1、3.2)
     "puzzle-title",  # 局名(4.3)
     "puzzle-source",  # 出處(4.3)
-    "puzzle-max-dtm",  # 最長殺著距離(4.3)
+    # `puzzle-max-dtm` **已移除**:最長殺著距離對使用者是劇透,見 requirements 1.3。
     "turn",  # 當前輪方,8.4 要求可辨識(4.3)
     "signal",  # 三態諮詢信號(4.4)
     "waiting",  # 引擎思考中的等待狀態(4.4)
     "error",  # 錯誤提示區,單一通用區塊(4.4)
     "moves",  # 中文記譜的歷史著法(4.3)
+    "controls",  # 對局控制項的容器:重來,以及獲勝後才出現的下一題
     "reset",  # 重來(4.3)
 ]
 

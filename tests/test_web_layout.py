@@ -61,7 +61,8 @@ DESKTOP = (1280, 800)
 SIDEBAR_SELECTORS = [
     "#puzzle-title",  # 局名
     "#puzzle-source",  # 出處
-    "#puzzle-max-dtm",  # 最長殺著距離
+    # `#puzzle-max-dtm` **已移除** —— 最長殺著距離對使用者是劇透(requirements 1.3
+    # 已推翻)。側欄少一區,這份清單就少一項。
     "#turn",  # 當前輪方
     "#signal",  # 三態諮詢信號
     "#moves-panel",  # 歷史著法
@@ -242,34 +243,6 @@ def test_the_sidebar_stacks_under_the_board_on_a_mobile_viewport(play_page, size
     sidebar = box_of(page, "#sidebar")
 
     assert sidebar["top"] >= board["bottom"] - 1, "側欄仍與盤面並排"
-
-
-# --- 信號的說明是從屬資訊(4.4)-----------------------------------------
-
-
-def test_the_signal_note_reads_as_subordinate_to_the_reading(play_page) -> None:
-    """4.4:信號要看得出是參考資訊而非勝負判決。
-
-    說明那行(`.signal-note`)在視覺上必須從屬於讀數(`.signal-reading`)—— 字級更
-    小、顏色更淡。兩行長得一樣重時,「參考而非判決」就只存在於文案裡。
-    """
-    page = open_at(play_page, DESKTOP)
-
-    styles = page.evaluate(
-        """() => {
-          const read = (selector) => {
-            const style = getComputedStyle(document.querySelector(selector));
-            return { fontSize: parseFloat(style.fontSize), color: style.color };
-          };
-          return { reading: read('.signal-reading'), note: read('.signal-note') };
-        }"""
-    )
-
-    assert styles["note"]["fontSize"] < styles["reading"]["fontSize"], (
-        f"說明字級 {styles['note']['fontSize']}px 不小於讀數 "
-        f"{styles['reading']['fontSize']}px"
-    )
-    assert styles["note"]["color"] != styles["reading"]["color"], "說明與讀數同色"
 
 
 # --- 套上版面之後互動仍然可用 -------------------------------------------

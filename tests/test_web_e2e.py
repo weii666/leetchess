@@ -94,9 +94,11 @@ requires_real_engine = pytest.mark.skipif(
 PUZZLE_ID = 1
 PUZZLE_TITLE = "盡善克終"
 PUZZLE_SOURCE = "適情雅趣"
-#: 最長殺著那一格現在只放**值**:名目「最長殺著」寫在骨架的那一行 meta 裡,
-#: 單位「步」隨側欄精簡一併拿掉(problem-browser 4.5 修訂,形態取自
-#: `poc/index.html:69`)—— 那一行已經有「最長殺著」在說它是什麼。
+#: 這一題**真實的**最長殺著距離(`positions/適情雅趣/0001.json` 的 `max_dtm`)。
+#:
+#: 用途已經反過來了:它現在是「**不得**出現在側欄上」的那個字串。requirement 1.3
+#: 已被推翻 —— 那個數字對使用者是劇透,等於預告這題幾步殺得完。後端照樣回傳它
+#: (`service/models.py` 一個字沒改),所以這條斷言驗的是「拿得到卻沒畫」。
 PUZZLE_MAX_DTM_TEXT = "16"
 PUZZLE_FEN = "3ak4/3RaR3/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 w - - 0 1"
 
@@ -140,7 +142,6 @@ MARGIN = 40
 TURN_YOURS = "輪到你"
 GAME_OVER_YOU_WON = "你獲勝"
 FINAL_SIGNAL = "即將取勝　約 0 步"
-SIGNAL_NOTE = "僅供參考"
 
 #: 信號讀數的形狀:`即將取勝　約 N 步`,分隔用**全形空格**(形態取自 POC 的
 #: `renderSignal`)。錨定在頭尾,前綴跑回來就對不上。
@@ -421,7 +422,12 @@ def test_the_whole_puzzle_is_played_to_a_red_win_against_the_real_service(
     # 題目資訊來自真實題庫,不是夾具寫的常數。
     assert text_of(page, "#puzzle-title") == PUZZLE_TITLE
     assert text_of(page, "#puzzle-source") == PUZZLE_SOURCE
-    assert text_of(page, "#puzzle-max-dtm") == PUZZLE_MAX_DTM_TEXT
+    # 最長殺著距離**不得出現**(1.3 已推翻:那是劇透)。此刻 `#moves` 還是空的,
+    # 側欄上除了題目資訊沒有別的數字,「16」出現就只可能是它。
+    assert page.locator("#puzzle-max-dtm").count() == 0, "最長殺著那一格還在"
+    sidebar = text_of(page, "#sidebar")
+    assert "最長殺著" not in sidebar, f"側欄還留著「最長殺著」這個名目:{sidebar!r}"
+    assert PUZZLE_MAX_DTM_TEXT not in sidebar, f"真實題庫的最長殺著仍畫在側欄上:{sidebar!r}"
 
     board = pieces(page)
     moves: list[str] = []
@@ -484,10 +490,25 @@ def test_the_whole_puzzle_is_played_to_a_red_win_against_the_real_service(
     assert text_of(page, ".signal-reading") == FINAL_SIGNAL, (
         "倒數為 0 的那一手沒有正常顯示 —— 這正是 JS 的 falsy 陷阱該出現的地方"
     )
-    assert text_of(page, ".signal-note") == SIGNAL_NOTE
     assert page.locator("#waiting").is_hidden(), "終局後仍停在等待中"
     assert page.locator("#error").is_hidden()
     assert pieces(page) == board, "終局盤面與實際走法對不上"
+
+    # --- 「下一題」在真實題庫上的那條路徑 -------------------------------
+    #
+    # 題庫今天只有這一題,對真實服務而言**永遠沒有下一題** —— 這裡走到的正是
+    # 「已是最後一題」那條分支:按鈕不出現。三種情況的另外兩種(有下一題、索引
+    # 取不到)只有合成索引才驗得到,在 `tests/test_web_list.py`。
+    #
+    # 這一條的價值不在於「按鈕沒出現」本身,而在於它是**對真實 `/api/catalog`**
+    # 走的:索引真的被要了、真的解析了、真的算出沒有下一題,而終局畫面上方那幾條
+    # 斷言全部照常成立。
+    page.wait_for_timeout(500)  # 索引是終局之後才去要的,給它時間回來再看
+    assert page.locator("#next-position:not([hidden])").count() == 0, (
+        "題庫只有一題,卻冒出了一個「下一題」"
+    )
+    assert text_of(page, "#turn") == GAME_OVER_YOU_WON, "查索引影響到了終局畫面"
+    assert page.locator("#error").is_hidden(), "查索引把錯誤區弄出來了"
 
     # --- 中途的信號早就說即將取勝,對局卻沒有因此結束(3.3、4.2)-------
     winning = [reading for reading in readings if WINNING_SIGNAL.match(reading)]

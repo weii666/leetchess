@@ -306,31 +306,32 @@ def test_the_title_and_source_are_shown(play_page) -> None:
     assert "適情雅趣" in text_of(play_page, "#puzzle-source")
 
 
-def test_the_longest_mate_distance_is_shown(play_page) -> None:
-    """題目帶有最長殺著距離時顯示該資訊(1.3)。"""
-    open_game(play_page)
+def test_the_longest_mate_distance_is_never_shown(play_page) -> None:
+    """**最長殺著距離不得出現在對局介面上**(1.3 修訂後)。
 
-    assert "9" in text_of(play_page, "#puzzle-max-dtm")
+    這一條取代了原本三條「顯示最長殺著」的測試(有值、空值、值為 0)。1.3 原本是
+    「Where 題目帶有最長殺著距離, the 對局介面 shall 顯示該資訊」,使用者看過實際
+    畫面後推翻:**那個數字是劇透** —— 它等於預告這題幾步殺得完,而排局練習的價值
+    正在於自己找出殺法。
 
+    斷言分三層,因為「不顯示」有三種漏法:
 
-def test_a_puzzle_without_a_mate_distance_shows_no_bogus_number(play_page) -> None:
-    """1.3 是條件式的 —— 沒有這項資訊時不得憑空生一個數字出來。"""
-    route_position(play_page, {**POSITION_RESPONSE, "max_dtm": None})
-    open_game(play_page)
+    1. 容器還在(只是沒填值)—— 直接查 `#puzzle-max-dtm` 的存在;
+    2. 名目還在(「最長殺著 —」這種半殘的一行)—— 查那四個字;
+    3. 值以別的形態畫到別處 —— 查整個側欄的可見文字裡沒有那個數字。
 
-    assert not re.search(r"\d", text_of(play_page, "#puzzle-max-dtm"))
-
-
-def test_a_mate_distance_of_zero_is_still_a_number(play_page) -> None:
-    """`max_dtm` 為 0 時仍是一個要呈現的數字(1.3)。
-
-    0 是 falsy —— 以真假值判斷會把它和「沒有這項資訊」混為一談,而那正是 `mate_in`
-    已經踩過的同一個坑。此處鎖住的是「有值就呈現」,不是「非零才呈現」。
+    夾具刻意把 `max_dtm` 換成 `97`:題目資訊裡的其他數字(「第 21 局」)不會誤觸,
+    而**後端照樣回這個欄位** —— 這一條同時證明它到得了前端卻沒有被畫出來,而不是
+    後端不給了。`service/models.py` 的 `PositionResponse` 一個字都沒改。
     """
-    route_position(play_page, {**POSITION_RESPONSE, "max_dtm": 0})
+    route_position(play_page, {**POSITION_RESPONSE, "max_dtm": 97})
     open_game(play_page)
 
-    assert "0" in text_of(play_page, "#puzzle-max-dtm")
+    assert play_page.locator("#puzzle-max-dtm").count() == 0, "最長殺著那一格還在"
+
+    sidebar = text_of(play_page, "#sidebar")
+    assert "最長殺著" not in sidebar, f"側欄還留著「最長殺著」這個名目:{sidebar!r}"
+    assert "97" not in sidebar, f"最長殺著距離仍畫在側欄上:{sidebar!r}"
 
 
 # --- 題目不存在(1.4)---------------------------------------------------
@@ -656,13 +657,19 @@ def test_an_unknown_signal_is_shown_after_a_reply(play_page) -> None:
 
 
 def test_the_mate_countdown_is_shown_as_an_approximation(play_page) -> None:
-    """殺著倒數以**近似值**形式呈現(4.2)。
+    """殺著倒數以**未然語氣與近似倒數**呈現(4.2)。
 
     後端在 250k 節點下可能高估 1 步,寫成確數等於把一個刻意接受的誤差說成精確值。
 
     讀數整句一併釘死:倒數與標籤之間是**全形空格**(形態取自 POC 的 `renderSignal`),
     而且讀數前面**沒有任何名目** —— 「參考信號:」那個前綴已在使用者看過畫面後移除,
     只驗子字串的話它跑回來也不會有人發現。
+
+    **這一條現在也承擔已刪的 4.4。** 舊的 4.4 要求「使使用者能辨識信號是參考資訊
+    而非勝負判決」,原本靠一句常駐註記承擔;它被刪除的理由是**讀數本身就說完了**
+    ——「即將」是未然語氣、「約」明說了不精確、「N 步」講明還要走多久。但那個性質
+    是載重的,不是修辭:把這一句改成「紅勝 4」就真的變成判決,而那正是 POC 用的說法。
+    比對整句(而非子字串)是唯一擋得住那種退化的寫法。
     """
     open_game(play_page, [black_reply(signal="red_winning", mate_in=4)])
 
@@ -691,7 +698,12 @@ def test_a_mate_countdown_of_zero_is_still_shown(play_page) -> None:
 
 
 def test_a_signal_without_a_countdown_shows_no_bogus_number(play_page) -> None:
-    """沒有殺著倒數時不得憑空生一個數字 —— 與 `max_dtm` 的條件式呈現同理。"""
+    """沒有殺著倒數時不得憑空生一個數字。
+
+    (原本這裡寫的是「與 `max_dtm` 的條件式呈現同理」。最長殺著距離已整組移除
+    ——1.3 被推翻,見 `test_the_longest_mate_distance_is_never_shown` —— 那個類比
+    因此沒有對象了,但這一條本身與它無關,照舊。)
+    """
     open_game(play_page, [black_reply(signal="red_winning", mate_in=None)])
 
     click_square(play_page, "d8")
@@ -718,18 +730,25 @@ def test_a_reply_without_an_opponent_move_still_shows_its_signal(play_page) -> N
 
 
 def test_the_signal_is_presented_as_advisory_not_a_verdict(play_page) -> None:
-    """信號的呈現須讓使用者辨識它是**參考資訊而非勝負判決**(4.4)。
+    """信號在語意樹上標為註記,而且不讓對局停下(4.1、3.3)。
 
-    4.4 原本靠一句長註記(「僅供參考,不是勝負判決;對局只在真終局結束。」)承擔,
-    使用者看過實際畫面後把它縮成「僅供參考」。因此這裡改為**逐項釘死剩下的三份
-    保障**,而不是只找一個「參考」字:
+    **舊的 requirement 4.4 已刪除**(「使信號的呈現讓使用者能辨識它是參考資訊而非
+    勝負判決」),其約束併入 4.2 —— 讀數本身就已經滿足它:「即將」是未然語氣、
+    「約」明說了不精確、「N 步」講明還要走多久。曾經承擔它的常駐註記(「僅供參考,
+    不是勝負判決;對局只在真終局結束。」,後縮為「僅供參考」)因此整行移除,這條
+    測試不再驗任何註記文字。
 
-    1. 註記那一行確實還在,而且說的就是「僅供參考」——「參考」二字若只是碰巧出現
-       在讀數裡(例如日後某個標籤帶到這兩個字),鬆散的 `in` 判斷是察覺不到的;
-    2. `#signal` 標為 `role="note"` 而非 `status` —— 這是 4.4 在語意樹上的那一份,
-       改成 `status` 會讓輔助技術把信號讀成系統狀態播報,也就是判決;
-    3. 同一份畫面上看得出對局沒有結束 —— 信號說即將取勝,但輪方仍是使用者,盤面
-       仍然可走(3.3 在呈現層的體現)。
+    **但 `role` 那一份留著,而且依據改掛 4.1。** 它與已刪的 4.4 是分開的價值:
+    `role="status"` 會讓螢幕閱讀器把信號當系統狀態**主動播報**,那在聽覺上像判決,
+    與讀數的文字寫得多清楚無關 —— 語氣救不了播報方式。
+
+    讀數的語氣改由 `test_the_mate_countdown_is_shown_as_an_approximation` 釘住
+    (它比對整句而非子字串,所以「紅勝 15」這種退化會轉紅)。
+
+    **註記已移除這件事本身也要有人守。** 那條測試只比對 `.signal-reading` 一整句,
+    註記若以第二個節點的形式跑回來,它一個字都不會變 —— 換句話說「僅供參考」重新
+    出現在畫面上是**沒有任何測試擋得下來**的退化。故此處反向釘住:信號區裡不得有
+    註記節點、也不得出現那四個字。
     """
     open_game(play_page, [black_reply(signal="red_winning", mate_in=2, legal_moves=["f8f9"])])
 
@@ -737,8 +756,9 @@ def test_the_signal_is_presented_as_advisory_not_a_verdict(play_page) -> None:
     click_square(play_page, "d9")
     wait_for_moves(play_page, 2)
 
-    assert text_of(play_page, ".signal-note") == "僅供參考", (
-        f"信號少了「參考資訊而非判決」的框定:{text_of(play_page, '#signal')}"
+    assert play_page.locator(".signal-note").count() == 0, "信號區又長出了註記節點"
+    assert "僅供參考" not in text_of(play_page, "#signal"), (
+        f"「僅供參考」又跑回信號區了:{text_of(play_page, '#signal')!r}"
     )
     role = play_page.locator("#signal").get_attribute("role")
     assert role == "note", f"#signal 的 role 是 {role!r},不是 note —— 信號被說成了判決"
@@ -748,7 +768,7 @@ def test_the_signal_is_presented_as_advisory_not_a_verdict(play_page) -> None:
 
 
 def test_the_signal_goes_back_to_no_reading_after_a_reset(play_page) -> None:
-    """重來後信號回到「尚未取得」—— 上一局的讀數不得留在畫面上(5.1、4.4)。"""
+    """重來後信號回到「尚未取得」—— 上一局的讀數不得留在畫面上(5.1、4.1)。"""
     open_game(play_page, [black_reply(signal="red_winning", mate_in=4)])
     click_square(play_page, "d8")
     click_square(play_page, "d9")
@@ -830,7 +850,16 @@ def test_app_module_is_imported_by_nobody(play_page) -> None:
 
 
 def test_app_module_imports_only_the_layers_below_it() -> None:
-    """`app.js` 只往左依賴 `game.js` / `board.js` / `notation.js` / `fen.js`。"""
+    """`app.js` 只往左依賴 `game.js` / `board.js` / `notation.js` / `fen.js` / `catalog.js`。
+
+    `catalog.js` 是 problem-browser 的跨題導航加進來的:紅方獲勝之後要查出下一題是
+    哪一題,而題目索引的唯一來源就是它(`loadCatalog()`,內含 `isListable()` 的
+    可上架判準)。方向仍然是往左 —— `catalog.js` 與 `fen.js`、`api.js` 同層,**不
+    依賴任何 web 模組、也不碰 DOM**,而且它連 `app.js` 的名字都不知道。
+
+    這份清單是白名單而不是黑名單:多依賴一個模組必須是有人想過的決定,而不是隨手
+    `import` 進來的結果。
+    """
     source = (WEB_DIR / "app.js").read_text(encoding="utf-8")
 
     imported = re.findall(r"^\s*import[^\n]*?from\s*'([^']+)'", source, flags=re.MULTILINE)
@@ -841,6 +870,7 @@ def test_app_module_imports_only_the_layers_below_it() -> None:
         "./board.js",
         "./notation.js",
         "./fen.js",
+        "./catalog.js",
     }, f"app.js 的依賴超出組裝層可見的範圍:{imported + dynamic}"
 
 

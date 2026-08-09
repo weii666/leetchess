@@ -50,7 +50,7 @@
 
 1. `web/index.html` → 改名或移位,使 `/` 讓給列表頁
 2. `service/main.py` 的掛載段 —— 若路由結構需要調整
-3. `web/app.js` → 加入返回列表的途徑(4.3)
+3. `web/app.js` → 加入返回列表的途徑(4.3),以及獲勝後前往下一題的途徑(4.6、4.7)
 
 **禁止**:引入任何 node 工具鏈、打包器、前端框架(`tech.md`);讓列表呼叫引擎服務。
 
@@ -132,7 +132,8 @@ tests/
 ### 修改檔案
 
 - `web/index.html` → **改名為 `web/play.html`**,使 `/` 讓給列表。內容不動
-- `web/app.js` → **僅加入返回列表的途徑**(4.3),其餘邏輯不動
+- `web/app.js` → 加入返回列表的途徑(4.3)與獲勝後前往下一題的途徑(4.6、4.7),其餘對局邏輯不動
+  - > **原文寫的是「僅加入返回列表的途徑」。已不成立** —— 4.6 / 4.7 讓 `app.js` 多依賴 `catalog.js`(往左的依賴,`catalog.js` 不依賴任何 web 模組也不碰 DOM)。留著原句會讓下一個人以為 `app.js` 只被動過一次
 - `service/main.py` → 僅在路由結構需要時調整掛載;能不動則不動
 - 索引產出的落點依「產出時機」的決定而定
 
@@ -140,9 +141,14 @@ tests/
 
 ```
 progress / catalog  →  list
+catalog             →  app        (4.6 / 4.7 新增)
 ```
 
-`catalog.js` 與 `progress.js` 是純資料層,不碰 DOM —— 與 `fen.js` / `notation.js` 同樣可用 `page.evaluate()` 單獨驗證。`list.js` 是唯一碰 DOM 的模組。
+`catalog.js` 與 `progress.js` 是純資料層,不碰 DOM —— 與 `fen.js` / `notation.js` 同樣可用 `page.evaluate()` 單獨驗證。`list.js` 是列表頁唯一碰 DOM 的模組。
+
+**`catalog.js` 有兩個消費者,不再只有 `list.js`。** 4.6(獲勝後前往下一題)要知道「題號大於當前題、且可上架的最小題號」,那是題庫索引才答得出來的問題 —— **不能用 `id + 1` 猜**,題號有缺口。`app.js` 因此改為直接用 `loadCatalog()`,而不是在對局頁重寫一套取索引與過濾的邏輯。
+
+這條邊仍然往左:`catalog.js` 不依賴任何 web 模組、不碰 DOM,對 `app.js` 與 `list.js` 都只是被依賴方,沒有循環。代價是 `catalog.js` 的改動現在會同時影響兩個頁面 —— `tests/test_web_play.py::test_app_module_imports_only_the_layers_below_it` 的白名單已一併放行,那是白名單不是黑名單,新增依賴一定要在該處明寫。
 
 ## Requirements Traceability
 
@@ -164,7 +170,8 @@ progress / catalog  →  list
 | 4.1, 4.2 | 選題進入對局並載入該題 | list.js, play.html |
 | 4.3 | 返回列表的途徑 | app.js |
 | 4.4 | 返回後保留條件與標記 | list.js, progress.js |
-| 4.5 | 對局介面顯示出處與描述 | app.js |
+| 4.5 | 對局介面顯示出處(描述與最長殺著皆不呈現) | app.js |
+| 4.6, 4.7 | 獲勝後前往下一題;無下一題或索引取不到時不呈現且不影響終局畫面 | app.js, catalog.js |
 | 5.1, 5.2 | 單一索引、不打引擎服務 | catalog.js |
 | 5.3, 5.4 | 新增題目自動涵蓋、可擴充至 500 題 | 索引產出 |
 | 6.1 | 行動裝置列表版面 | list.css |
@@ -178,6 +185,7 @@ progress / catalog  →  list
 | catalog.js | 取得索引、過濾不可解、依條件篩選 | 1.2, 1.3, 1.4, 2.1, 2.2, 2.3, 2.4, 5.1, 5.2 | 無(純資料) |
 | progress.js | 完成狀態的讀寫、版本、損毀復原 | 3.1, 3.2, 3.3, 3.4, 3.6, 3.7 | 無(純函式 + localStorage) |
 | list.js | 列表組裝、篩選互動、標記、導航 | 1.5, 2.5, 2.6, 3.5, 4.1, 4.4, 6.2, 6.3 | catalog.js, progress.js |
+| app.js(web-play-runtime 的檔) | 返回列表、獲勝後前往下一題 | 4.3, 4.5, 4.6, 4.7 | catalog.js |
 | list.css | 列表版面與完成狀態的視覺區分 | 6.1, 6.3 | 無 |
 
 ### catalog.js

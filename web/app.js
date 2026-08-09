@@ -38,6 +38,7 @@
  */
 
 import { renderBoard } from './board.js';
+import { loadCatalog } from './catalog.js';
 import { applyMove, parseFen } from './fen.js';
 import { createGame } from './game.js';
 import { uci2cn } from './notation.js';
@@ -124,6 +125,21 @@ const LIST_PAGE = './index.html';
 const BACK_TO_LIST_TEXT = '返回題庫列表';
 
 /**
+ * 對局介面自己的位址,「下一題」就指向它(problem-browser 的跨題導航)。
+ *
+ * **相對位址**,理由同 `LIST_PAGE`:服務今天掛在網域根目錄,`/play.html` 與
+ * `./play.html` 解析出來一模一樣,但部署到子路徑底下時絕對路徑會把使用者丟出
+ * 整個應用。`web/list.js` 的 `PLAY_PAGE` 是同一個字串、同一個理由。
+ */
+const PLAY_PAGE = './play.html';
+
+/** 通往某一題對局介面的位址。題號經 `?id=` 交接(problem-browser 3.1 定案的契約)。 */
+const playHref = (id) => `${PLAY_PAGE}?id=${encodeURIComponent(id)}`;
+
+/** 前進到下一題的文字。 */
+const NEXT_POSITION_TEXT = '下一題';
+
+/**
  * 三態諮詢信號的說法(requirements 4.1)。
  *
  * 三種狀態是**相對使用者**的,而後端給的 `red_winning` / `black_winning` 是相對
@@ -149,16 +165,20 @@ const NO_SIGNAL_YET = '尚未取得';
  * 沒有這層框定的話,「即將取勝」看起來就是系統宣告勝負,而對局其實還在繼續 ——
  * 終局只由後端的結束旗標決定,信號連碰都碰不到它(requirements 3.3、4.3)。
  *
- * 原本這裡還有一個 `參考信號:` 前綴,以及一句「僅供參考,不是勝負判決;對局只在
- * 真終局結束。」**兩者都已縮到只剩「僅供參考」**(使用者看過實際畫面後的決定):
- * 前綴每一次重畫都把同一個名目再說一遍,而後半句「對局只在真終局結束」講的是系統
- * 內部的規則,不是使用者此刻要做的判斷 —— 側欄因此被一句比讀數本身還長的話佔著。
+ * 這裡曾有一個 `參考信號:` 前綴,以及一句常駐註記(先是「僅供參考,不是勝負判決;
+ * 對局只在真終局結束。」,後縮為「僅供參考」)。**兩者都已移除** —— 舊的
+ * requirement 4.4「使信號的呈現讓使用者能辨識它是參考資訊而非勝負判決」已刪,
+ * 其約束併入 4.2,因為**讀數本身就已經滿足它**:「即將」是未然語氣、「約」明說了
+ * 不精確、「N 步」講明還要走多久。註記等於在一句自明的話後面再補一句註腳。
  *
- * 4.4 仍由這四個字承擔,而且不只靠文案:`#signal` 標為 `role="note"` 而非
- * `role="status"`(見 `play.html`),`.signal-note` 的字級與顏色也刻意低於讀數 ——
- * 「參考而非判決」在語意樹、視覺層級與文案上各有一份,少了長句仍然站得住。
+ * 但語氣是載重的,不是修辭:把「即將取勝　約 15 步」寫成「紅勝 15」就真的變成判決。
+ * 那條約束現在記在 requirement 4.2,並由 `test_the_mate_countdown_is_shown_as_an_approximation`
+ * 釘住整句讀數(而非只驗子字串)。
+ *
+ * `#signal` 的 `role="note"`(而非 `role="status"`)**仍然保留且不得更動**:它與已刪的
+ * 4.4 是分開的價值 —— `status` 會讓螢幕閱讀器把信號當系統狀態**主動播報**,那在聽覺上
+ * 像判決,與文字寫得多清楚無關。依據已改掛 requirement 4.1。
  */
-const SIGNAL_NOTE = '僅供參考';
 
 /** 等待中要說的話 —— 載入題目與等應手是兩件事,不能都說成「引擎思考中」。 */
 const WAITING_TEXTS = Object.freeze({
@@ -171,12 +191,12 @@ const elements = {
   sidebar: document.getElementById('sidebar'),
   title: document.getElementById('puzzle-title'),
   source: document.getElementById('puzzle-source'),
-  maxDtm: document.getElementById('puzzle-max-dtm'),
   turn: document.getElementById('turn'),
   signal: document.getElementById('signal'),
   waiting: document.getElementById('waiting'),
   error: document.getElementById('error'),
   moves: document.getElementById('moves'),
+  controls: document.getElementById('controls'),
   reset: document.getElementById('reset'),
 };
 
@@ -210,8 +230,43 @@ function mountBackLink() {
 // 拿掉,requirements 4.5 已隨之修訂。
 mountBackLink();
 
+/**
+ * 前往下一題的途徑,排在「重來」右邊(problem-browser 的跨題導航)。
+ *
+ * **與返回連結同樣是真的 `<a href>`**(problem-browser 4.1 已確立這個形態):中鍵
+ * 開新分頁、右鍵複製網址、Enter 鍵全部免費附帶,攔 click 再改 `location` 要一一
+ * 重做而通常不會做。
+ *
+ * 節點在**模組載入時**就建好但預設隱藏,不是等到獲勝才動態插入 —— 顯示與否因此
+ * 只是 `render()` 依快照決定的一個 `hidden`,與畫面上其他每一件事走同一條路徑
+ * (本檔開頭的「只有一條寫進畫面的路徑」)。
+ */
+function mountNextLink() {
+  const link = document.createElement('a');
+  link.id = 'next-position';
+  link.className = 'next-position';
+  link.textContent = NEXT_POSITION_TEXT;
+  link.hidden = true;
+  elements.controls.append(link);
+  return link;
+}
+
+const nextLink = mountNextLink();
+
 /** 選中的格,例如 `'d8'`;沒有選子時為 `null`。**唯一存在呈現層的狀態。** */
 let selected = null;
+
+/**
+ * 下一題的題號;還沒查、查不到、或這已經是最後一題時為 `null`。
+ *
+ * **`null` 一律代表「不顯示按鈕」**,三種來源共用同一個值是刻意的:對使用者而言
+ * 「已是最後一題」與「索引取不到」都是同一件事 —— 這裡沒有下一題可去。為索引失敗
+ * 另做一則提示,等於讓一個次要功能在終局畫面上喊自己壞了。
+ */
+let nextPositionId = null;
+
+/** 索引是否已經查過(不論成敗)。查一次就夠 —— 索引不會在一局之內變。 */
+let nextLookupDone = false;
 
 /**
  * 要載入哪一題**由外部決定** —— 跨題導航屬 problem-browser,本介面只認網址上的
@@ -246,30 +301,98 @@ function noPuzzleTitle(state) {
 }
 
 /**
- * 側欄的題目資訊(requirements 1.2、1.3)。
+ * 側欄的題目資訊(requirements 1.2)。**現在只有局名與出處。**
  *
- * 最長殺著距離是**條件式**的(1.3 的 Where):沒有這項資訊時留佔位符號,
- * 不得憑空生一個數字。以 `!= null` 判斷而非 falsy —— 這個欄位可能是 0。
+ * `state.position.max_dtm` 刻意**不取用**。它在回應裡照常存在(後端一個字沒改,
+ * `service/models.py` 的 `PositionResponse` 仍回傳它,corpus-verification 也還要
+ * 回填它),但**對使用者是劇透** —— 顯示「最長殺著 16」等於預告這題幾步殺得完,
+ * 而排局練習的價值正在於自己找出殺法。requirement 1.3 已隨之推翻。
  *
- * 兩者併成骨架裡的一行 meta(`#puzzle-meta`),名目寫在 span 之外,故這裡填的是
- * **純值** —— `maxDtm` 不再自帶「步」那個字:那一行已經有「最長殺著」在說它是什麼,
- * 單位再說一次就是同一件事講兩遍,而側欄的累贅正是本輪要拆的東西。
- *
- * `state.position.description` 刻意**不取用**。它在回應裡照常存在(後端一個字沒
- * 改),但真實題庫的描述是「出處 + 局號 + 局名」的串接,畫出來就是把上面兩行再說
- * 一次。
+ * `state.position.description` 同樣不取用,理由不同:真實題庫的描述是「出處 +
+ * 局號 + 局名」的串接,畫出來就是把上面兩行再說一次(problem-browser 4.5)。
  */
 function renderPuzzleInfo(state) {
   if (!state.position) {
     elements.title.textContent = noPuzzleTitle(state);
     elements.source.textContent = BLANK;
-    elements.maxDtm.textContent = BLANK;
     return;
   }
-  const { title, source, max_dtm: maxDtm } = state.position;
+  const { title, source } = state.position;
   elements.title.textContent = title || '(未命名)';
   elements.source.textContent = source || BLANK;
-  elements.maxDtm.textContent = maxDtm != null ? String(maxDtm) : BLANK;
+}
+
+/**
+ * 索引中**題號大於 `currentId` 且可上架的最小題號**;沒有這樣一題時為 `null`。
+ *
+ * **絕對不是 `currentId + 1`。** 本專案的題號有缺口 —— `solvable: false` 的題目
+ * 會被濾掉(收第二本書後更明顯),而 `PositionRepository.all()` 的存在正是因為
+ * 「從 1 逐一探測」會在缺口處靜默截斷。加一算出來的題號多半根本不存在,使用者按
+ * 下去只會看到「找不到這一題」。
+ *
+ * 「可上架」不在這裡判斷:傳進來的清單來自 `loadCatalog()`,它已經對每一題套過
+ * `catalog.js` 的 `isListable()`。在這裡再判一次等於在呈現層立第二個判準,而那
+ * 兩個判準遲早會漂移(`web/list.js` 為同一個理由寫了「不得再加任何一層過濾」)。
+ *
+ * 取最小值而不是取「陣列中的下一個」:索引今天依題號遞增,但那是後端的排序決定,
+ * 不是本檔該依賴的東西。
+ */
+function nextPositionAfter(positions, currentId) {
+  let best = null;
+  for (const position of positions) {
+    const id = position?.id;
+    if (typeof id !== 'number' || !Number.isFinite(id)) continue;
+    if (id <= currentId) continue;
+    if (best === null || id < best) best = id;
+  }
+  return best;
+}
+
+/**
+ * 查出下一題是哪一題 —— **只在使用者獲勝之後才跑,而且只跑一次**。
+ *
+ * 不在載入題目時就查:那會讓每一次開對局頁都多打一次 `/api/catalog`,而絕大多數
+ * 對局根本走不到獲勝。終局時才查是安全的 —— 索引端點不碰引擎池(problem-browser
+ * 的 1.1),此刻去要它不會跟任何人搶引擎。
+ *
+ * **失敗一律靜默**(`catch` 之後什麼都不做,`nextPositionId` 留在 `null`):跨題
+ * 導航是次要功能,它壞掉不該讓使用者連「你獲勝」都看不到。`catalog.js` 本來就只
+ * 給得出一個類別碼,這裡連那個碼都不需要 —— 三種失敗的後果都是同一個。
+ */
+async function lookUpNextPosition() {
+  if (nextLookupDone) return;
+  nextLookupDone = true;
+
+  let positions;
+  try {
+    ({ positions } = await loadCatalog());
+  } catch {
+    return; // 索引取不到:按鈕不出現,終局畫面的其餘部分一個字都不受影響。
+  }
+
+  const current = game.getState().position?.id;
+  if (typeof current !== 'number') return;
+  nextPositionId = nextPositionAfter(positions, current);
+  render();
+}
+
+/**
+ * 前往下一題的途徑(problem-browser 的跨題導航)。
+ *
+ * **三個條件缺一不可**:對局結束、獲勝的是使用者、而且真的查得到下一題。
+ *
+ * 走脫導致黑勝時不出現是刻意的 —— 那時使用者該做的是「重來」把這一題走對,而不是
+ * 跳過它。而查不到下一題(已是最後一題,或索引根本取不到)時同樣不出現:一顆按了
+ * 沒反應的按鈕比沒有按鈕更糟。
+ *
+ * 隱藏時把 `href` 一併拿掉,而不是只設 `hidden` —— 這樣它在任何狀態下都不會是一條
+ * 「指向 `undefined`」的連結。
+ */
+function renderNextPosition(state) {
+  const available = state.over === true && state.userWon === true && nextPositionId != null;
+  if (available) nextLink.href = playHref(nextPositionId);
+  else nextLink.removeAttribute('href');
+  nextLink.hidden = !available;
 }
 
 /**
@@ -337,11 +460,7 @@ function renderSignal(state) {
   reading.className = 'signal-reading';
   reading.textContent = signalReading(entry, state.userSide);
 
-  const note = document.createElement('p');
-  note.className = 'signal-note';
-  note.textContent = SIGNAL_NOTE;
-
-  elements.signal.replaceChildren(reading, note);
+  elements.signal.replaceChildren(reading);
 }
 
 /**
@@ -470,14 +589,21 @@ function render() {
   renderWaiting(state);
   renderFailure(state);
   renderMoves(state);
+  renderNextPosition(state);
   renderBoardArea(state);
 }
 
 // 對局狀態一變就整份重畫,並清掉選中的格 —— 走完一手之後,原本選中的那枚子已經
 // 不在原地;失敗復原與重來則是整份換掉走法序列,選取更是無從對應。
+//
+// **索引只在使用者獲勝的那一刻去要**(problem-browser 的跨題導航)。放在這裡而不是
+// `render()` 裡,是因為發請求是副作用而 `render()` 只該把快照翻成畫面 —— 而且
+// `render()` 連選子都會觸發,每選一枚子就打一次索引顯然不對。
 game.subscribe(() => {
   selected = null;
   render();
+  const state = game.getState();
+  if (state.over && state.userWon) lookUpNextPosition();
 });
 
 // 重來只是狀態機的一個操作(requirements 5.1);它不打後端,也不需要本檔清理任何

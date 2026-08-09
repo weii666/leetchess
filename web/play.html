@@ -19,16 +19,18 @@
   <section id="puzzle-info">
     <h1 id="puzzle-title">載入中…</h1>
     <!--
-      出處與最長殺著併成一行(problem-browser 4.5,使用者看過實際畫面後的決定)。
-      原本三行「出處:…／描述:…／最長殺著距離:…」裡,描述是「出處 + 局號 + 局名」
-      的串接,與上面的 h1 和出處完全重複,同樣的字讀三遍 —— 描述那一行因此整條移除。
-      形態沿用 `poc/index.html:69` 的單行 meta。
+      這一行 meta 現在**只剩出處**(使用者看過實際畫面後的決定)。
 
-      `#puzzle-source` 與 `#puzzle-max-dtm` 兩個 id **保留** —— web-play-runtime 的
-      `app.js` 與既有測試都依賴它們,併行只動外層排版。名目移到 span 之外,值那一格
-      才只剩值本身。
+      原本是三行「出處:…／描述:…／最長殺著距離:…」。描述是「出處 + 局號 + 局名」
+      的串接,與上面的 h1 和出處完全重複,先被整條移除(problem-browser 4.5);
+      最長殺著這一輪也整組拿掉 —— **它對使用者是劇透**:預告這題幾步殺得完,而排局
+      練習的價值正在於自己找出殺法。連帶移除的是 `#puzzle-max-dtm`、分隔點 `·`,
+      以及「最長殺著」四個字。web-play-runtime 的 requirement 1.3 已隨之推翻。
+
+      後端**沒有改**:`GET /api/positions/{id}` 照常回 `max_dtm`(那是資料契約,
+      corpus-verification 要回填它),只是前端不再顯示。
     -->
-    <p id="puzzle-meta"><span id="puzzle-source">—</span> <span class="puzzle-meta-sep" aria-hidden="true">·</span> 最長殺著 <span id="puzzle-max-dtm">—</span></p>
+    <p id="puzzle-meta"><span id="puzzle-source">—</span></p>
   </section>
 
   <!--
@@ -54,7 +56,15 @@
   -->
   <p id="error" role="alert" hidden></p>
 
-  <button id="reset" type="button">重來</button>
+  <!--
+    對局的控制項。「重來」永遠在;「下一題」由 `app.js` 動態接進來,而且**只在
+    使用者獲勝之後**出現(problem-browser 的跨題導航)。兩者並排,故需要一個
+    共同的容器 —— 沒有它的話,一個 `<button>` 與一個 `<a>` 靠行內排版對齊,
+    高度與基線都得各自湊。
+  -->
+  <div id="controls">
+    <button id="reset" type="button">重來</button>
+  </div>
 
   <section id="moves-panel">
     <h2>歷史著法</h2>

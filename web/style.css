@@ -193,23 +193,13 @@ body {
 }
 
 /*
- * 出處與最長殺著的那一行(problem-browser 4.5)。
+ * `#puzzle-meta` 那一行現在**只剩出處**,不再需要任何自己的規則 —— 上面兩條
+ * (`#puzzle-info p` 的字級與 `#puzzle-info span` 的亮色)就是它的全部樣式。
  *
- * 原本是三行「出處:…／描述:…／最長殺著距離:…」,而描述就是出處與局名的串接 ——
- * 局名在 h1、出處在下一行,同樣的字讀三遍。使用者看過實際畫面後決定併成一行,
- * 形態取自 `poc/index.html:69` 的單行 meta。
- *
- * 這一行**刻意不用 flex**:它就是一行會折行的文字,交給行內排版即可 —— 換成 flex
- * 之後「最長殺著」與它的數字會變成兩個獨立的 flex item,窄側欄裡折行時數字會被單獨
- * 甩到下一行。
- *
- * 分隔點標 `aria-hidden`:它是視覺分隔而非內容,讀出來只會變成「適情雅趣 點 最長
- * 殺著 十六」。選擇器帶上 `#puzzle-info` 是為了勝過上面那條 `#puzzle-info span`
- * 的亮色(1,0,1 對 1,1,0)—— 分隔點不是資訊,不該跟值一樣亮。
+ * 這裡原本還有 `.puzzle-meta-sep`(出處與最長殺著之間那個分隔點)。最長殺著整組
+ * 移除之後,分隔點與它的規則一起消失 —— **不是精簡版面,是它對使用者劇透**:
+ * 預告這題幾步殺得完,而排局練習的價值在於自己找出殺法。
  */
-#puzzle-info .puzzle-meta-sep {
-  color: var(--text-dim);
-}
 
 /* 當前輪方(requirements 8.4)—— 側欄裡最該一眼看到的一行。 */
 #turn {
@@ -247,14 +237,6 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-.signal-note {
-  margin: 4px 0 0;
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.5;
-  color: var(--text-dim);
-}
-
 /* --- 等待與錯誤 ------------------------------------------------------- */
 
 /*
@@ -280,8 +262,27 @@ body {
   font-size: 14px;
 }
 
-/* --- 重來 ------------------------------------------------------------- */
+/* --- 重來與下一題 ----------------------------------------------------- */
 
+/*
+ * 兩個控制項並排。用 flex 而不是靠行內排版:一個是 `<button>`、一個是 `<a>`,
+ * 行內排版下兩者的高度與基線各自由字型度量決定,對不齊得靠 `vertical-align`
+ * 之類的手法一一湊。flex 之下兩者都被 blockify,`align-items: center` 一條就夠。
+ *
+ * `flex-wrap` 是為了窄側欄:塞不下時第二個換行,而不是把兩顆都擠扁或撐出橫向捲軸
+ * (requirements 8.2)。
+ */
+#controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/*
+ * 「重來」是**重試**:走壞了回到起點,是這一題之內的操作。故用中性灰的實心底,
+ * 與側欄其餘面板同一個色系,存在但不搶眼。
+ */
 #reset {
   font: inherit;
   font-size: 14px;
@@ -298,6 +299,41 @@ body {
 }
 
 #reset:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/*
+ * 「下一題」是**前進**:這一題已經解完了,它是使用者接下來多半會做的那件事。
+ * 故它是這一組裡的主控制項 —— 實心的 `--accent` 底配深色字,在整個側欄裡是唯一
+ * 一塊填滿強調色的區域;「重來」則維持中性灰。主次因此不靠位置或大小分辨,而是
+ * 靠「填滿的強調色 vs. 中性灰」這個對比,一眼就分得出哪個是前進、哪個是退回。
+ *
+ * 內距、字級與圓角都與 `#reset` 相同:兩者是同一組控制項,不該一高一矮。
+ * `display: inline-flex` 讓它在 flex 容器之外(例如樣式表沒載到時)也還是一顆
+ * 有內距的東西,而不是一段帶底色的行內文字。
+ */
+.next-position {
+  display: inline-flex;
+  align-items: center;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--page-bg);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.next-position:hover {
+  background: #ffe0a0;
+  text-decoration: none;
+}
+
+.next-position:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

@@ -76,7 +76,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from service.main import create_app
 from test_web_page import SIMPLIFIED_ONLY_CHARACTERS
-from test_web_play import PUZZLE_FEN, START_LEGAL
+from test_web_play import PUZZLE_FEN, START_LEGAL, black_reply, click_square, text_of
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 WEB_DIR = PROJECT_ROOT / "web"
@@ -1697,24 +1697,42 @@ def play_response(entry: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def route_api(page, positions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """索引端點與題目端點由**同一個**處理器接手,並記下題目端點被要求的題號。
+def route_api(
+    page,
+    positions: list[dict[str, Any]] | None = None,
+    *,
+    black_move: dict[str, Any] | None = None,
+    catalog_body: Any = None,
+) -> dict[str, Any]:
+    """索引、題目與應手三個端點由**同一個**處理器接手,並記下各自被要了幾次。
 
     非合併不可:Playwright 後註冊的路由優先,`/api/**` 各註冊一條只有最後那條會
     生效,對局頁的題目請求會落回夾具的 404。
 
     回傳的 `positions` 是**對局頁實際要了哪幾題**,依序。這是「載入的確實是那一題」
     最直接的證據 —— 局名比對之外再加一層,連「畫面對了但要了別題」都排除掉。
+    `catalog` 則是索引被要了幾次:「下一題」那組測試靠它證明索引是**終局之後**才去
+    要的,而不是每次開對局頁都多打一次。
+
+    `black_move` 給了才接應手端點 —— 沒有它的測試根本不走子,而一條永遠回 200 的
+    應手路由會讓「這一手真的送出去了嗎」變得看不出來。`catalog_body` 則讓索引可以
+    單獨壞掉(題目端點照常活著),那是「索引取不到」那條路徑唯一的造法。
     """
     entries = CATALOG if positions is None else positions
     by_id = {str(entry["id"]): entry for entry in entries}
-    served: dict[str, Any] = {"catalog": 0, "positions": []}
+    served: dict[str, Any] = {"catalog": 0, "positions": [], "black_move": 0}
 
     def handler(route) -> None:
         path = urlsplit(route.request.url).path
         if path == CATALOG_PATH:
             served["catalog"] += 1
-            body: Any = catalog_of(entries)
+            body: Any = catalog_of(entries) if catalog_body is None else catalog_body
+        elif path == "/api/black-move":
+            if black_move is None:
+                route.fulfill(status=404, content_type="text/plain", body="not found")
+                return
+            served["black_move"] += 1
+            body = black_move
         elif path.startswith("/api/positions/"):
             requested = path.rsplit("/", 1)[-1]
             served["positions"].append(requested)
@@ -2215,40 +2233,394 @@ def test_the_source_moved_rather_than_multiplied(list_page) -> None:
     assert DESCRIPTIONS["1"] not in played
 
 
-def test_the_source_and_mate_distance_share_a_single_line(list_page) -> None:
-    """出處與最長殺著併成一行(使用者看過實際畫面後的意見)。
+def test_the_meta_line_is_nothing_but_the_source(list_page) -> None:
+    """那一行 meta **只剩出處**(使用者看過實際畫面後的第三輪意見)。
 
-    「精簡」在畫面上是有形的:兩者的基線相同,亦即它們排在同一行文字上,而不是各佔
-    一行 —— 只比對文字內容的話,拆回兩行照樣全綠。
+    這一條原本叫 `test_the_source_and_mate_distance_share_a_single_line`,驗的是
+    出處與最長殺著併在同一行上。**最長殺著整組移除之後那件事沒有對象了**,斷言因此
+    反過來:那一行從頭到尾就是出處本身,沒有分隔點、沒有「最長殺著」、也沒有任何
+    名目(web-play-runtime 的 requirement 1.3 已推翻)。
 
-    `#puzzle-source` 與 `#puzzle-max-dtm` 兩個 id **保留**:既有測試與
-    web-play-runtime 都依賴它們,併行只動外層排版。形態取自 `poc/index.html:69`
-    的單行 meta。
+    比對用 `==` 而非 `startswith` 是刻意的:後者對「適情雅趣 · 最長殺著 9」照樣
+    成立,而那正是要擋掉的形態。
     """
     open_list_that_can_be_played(list_page)
     open_position(list_page, 1)
     list_page.wait_for_selector("#board svg .piece")
 
     line = list_page.evaluate(
-        """() => {
-          const box = (id) => document.getElementById(id).getBoundingClientRect();
-          const source = box('puzzle-source');
-          const dtm = box('puzzle-max-dtm');
-          return {
-            sourceTop: source.top,
-            dtmTop: dtm.top,
-            sourceRight: source.right,
-            dtmLeft: dtm.left,
-            meta: document.getElementById('puzzle-meta')?.innerText.trim() ?? null,
-          };
-        }"""
+        """() => ({
+          meta: document.getElementById('puzzle-meta')?.innerText.trim() ?? null,
+          dtm: document.getElementById('puzzle-max-dtm') !== null,
+          source: document.getElementById('puzzle-source')?.innerText.trim() ?? null,
+        })"""
     )
 
-    assert abs(line["sourceTop"] - line["dtmTop"]) < 1, (
-        f"出處與最長殺著不在同一行上:{line}"
-    )
-    assert line["dtmLeft"] > line["sourceRight"], f"最長殺著沒有排在出處之後:{line}"
-    # 那一行讀起來就是「出處 · 最長殺著 N」,沒有「出處:」「距離:」這些名目。
     assert line["meta"] is not None, "側欄沒有那一行 meta"
-    assert line["meta"].startswith(SOURCES["1"]), f"那一行不是以出處開頭:{line}"
-    assert "出處" not in line["meta"], f"那一行還留著「出處」這個名目:{line}"
+    assert line["source"] == SOURCES["1"], f"那一行的出處不對:{line}"
+    assert line["meta"] == SOURCES["1"], f"那一行不只有出處:{line}"
+    assert not line["dtm"], "最長殺著那一格還在"
+
+
+# =======================================================================
+# 跨題導航:紅方獲勝之後的「下一題」
+# =======================================================================
+#
+# 這一節屬 problem-browser(跨題導航是本 spec 的事),但改的是 `web/app.js` ——
+# tasks 4.2 那句「這是本 spec 唯一改動 `web/app.js` 的地方」因此不再成立,已在
+# tasks.md 更正。
+#
+# **為什麼一定要合成索引才驗得到。** 真實題庫只有 1 題,對真實服務而言永遠沒有
+# 下一題 —— 「有下一題」那條路徑在真實服務上一次都走不到。合成多題索引是唯一的
+# 造法(改題庫不是選項:那會讓每一條依賴真實題庫的測試跟著漂)。真實服務那一側
+# 走到的是「已是最後一題」,由 `tests/test_web_e2e.py` 覆蓋。
+#
+# **題號有缺口是這一節的核心。** `CATALOG` 的第 4 題 `solvable: False`,因此可上架
+# 的題號是 1、2、3、5 —— 第 3 題的下一題是**第 5 題**,不是第 4 題。以 `id + 1` 取代
+# 查索引的寫法會在這裡直接撞牆,而在連號的夾具上完全看不出來。
+
+#: 「下一題」那個控制項的 id(`web/app.js` 的 `mountNextLink`)。與 `#back-to-list`
+#: 同性質:是 `app.js` 自己畫樣式與導航要用的結構契約,不是測試專用的鉤子。
+NEXT_LINK_ID = "next-position"
+
+#: 排局的最後一手:紅方這一手就將死黑方 —— 黑方無應手、對局結束、紅方勝。
+RED_WINS = black_reply(move=None, signal="red_winning", mate_in=0, over=True, winner="red")
+
+#: 走脫之後被將死:黑方有應手、對局結束、**黑方勝**。使用者這一局輸了。
+BLACK_WINS = black_reply(
+    move="e9d9", signal="black_winning", mate_in=0, over=True, winner="black"
+)
+
+#: 對局進行中的一手應手 —— 終局尚未到來,「下一題」在此不得出現。
+GAME_CONTINUES = black_reply(move="e9d9", signal="red_winning", mate_in=4)
+
+#: 終局之後 `#turn` 各自該說的話(`web/app.js` 的 `turnText`)。
+YOU_WON = "你獲勝"
+BLACK_WON = "黑方勝"
+
+
+def play_one_move(page, expected_turn: str) -> None:
+    """在對局頁走一手(`d8` -> `d9`),等到 `#turn` 說出 `expected_turn` 為止。
+
+    等的是**終局後的那句話**而不是「等待態解除」:後者在點擊當下就已經為真過一瞬,
+    拿它當沉澱信號會讓斷言在回應還在路上時就跑起來(problem-browser 5.2 的 review
+    在同一件事上留過一筆)。
+
+    **等不到時自己說出原因。** 「查索引把 `#turn` 弄壞了」這種退化會讓這個等待永遠
+    等不到,而 Playwright 只會說「wait_for_function 逾時」—— 真正說得出原因的那句話
+    永遠跑不到(problem-browser 5.2 的 review 記下的同一件事)。把當下的 `#turn`
+    與錯誤區印出來,診斷才落在退化本身而不是等待機制上。
+    """
+    page.wait_for_selector("#board svg .piece")
+    click_square(page, "d8")
+    click_square(page, "d9")
+    try:
+        page.wait_for_function(
+            "expected => document.getElementById('turn')?.textContent.trim() === expected",
+            arg=expected_turn,
+        )
+    except PlaywrightTimeoutError:
+        seen = page.evaluate(
+            """() => ({
+              turn: document.getElementById('turn')?.textContent.trim() ?? null,
+              error: document.getElementById('error')?.textContent.trim() ?? null,
+              moves: document.querySelectorAll('#moves li').length,
+            })"""
+        )
+        pytest.fail(f"走完一手後 #turn 沒有變成 {expected_turn!r},畫面上是:{seen}")
+
+
+def open_and_win(
+    page,
+    position_id: Any,
+    *,
+    positions: list[dict[str, Any]] | None = None,
+    reply: dict[str, Any] | None = None,
+    expected_turn: str = YOU_WON,
+    catalog_body: Any = None,
+) -> dict[str, Any]:
+    """直接開某一題的對局頁並走一手,讓後端回報這一手就結束對局。
+
+    不經列表:這一節要看的是**對局頁終局之後**的畫面,從列表點進來只是多繞一段
+    已經被 4.1 那一節驗過的路。
+    """
+    served = route_api(
+        page,
+        positions,
+        black_move=RED_WINS if reply is None else reply,
+        catalog_body=catalog_body,
+    )
+    page.goto(f"{ORIGIN}{PLAY_PATH}?id={position_id}")
+    play_one_move(page, expected_turn)
+    return served
+
+
+def wait_for_catalog(page, served: dict[str, Any]) -> None:
+    """等到索引真的被要過一次為止。"""
+    for _ in range(100):
+        if served["catalog"] >= 1:
+            return
+        page.wait_for_timeout(50)
+    raise AssertionError("終局之後從未去要索引")
+
+
+def next_link(page) -> dict[str, Any] | None:
+    """「下一題」此刻的樣子;沒有這個節點或它藏著時回 `None`。"""
+    return page.evaluate(
+        """(id) => {
+          const link = document.getElementById(id);
+          if (!link || link.hidden) return null;
+          return {
+            href: link.getAttribute('href'),
+            resolved: link.href,
+            text: link.textContent.trim(),
+            tag: link.tagName,
+            width: link.getBoundingClientRect().width,
+          };
+        }""",
+        NEXT_LINK_ID,
+    )
+
+
+# --- 有下一題 -----------------------------------------------------------
+
+
+def test_a_red_win_offers_the_next_position(list_page) -> None:
+    """使用者獲勝之後,「重來」旁邊多一個通往下一題的途徑。
+
+    合成索引是必要的:真實題庫只有 1 題,這條路徑在真實服務上永遠走不到。
+    """
+    open_and_win(list_page, 1)
+    list_page.wait_for_selector(f"#{NEXT_LINK_ID}:not([hidden])")
+
+    link = next_link(list_page)
+
+    assert link is not None, "紅方獲勝之後沒有「下一題」"
+    assert link["text"] == "下一題", f"「下一題」的說法不對:{link}"
+    assert link["width"] > 0, "「下一題」排不出可見的尺寸"
+    assert link["resolved"] == f"{ORIGIN}{PLAY_PATH}?id=2", (
+        f"「下一題」指向別處:{link}"
+    )
+
+
+def test_the_next_position_is_a_real_relative_link(list_page) -> None:
+    """它是**真的 `<a href>`** 而且位址是相對的。
+
+    兩件事各有理由,而且都被同一個夾具驗到:
+
+    - `<a href>` 而非 `<button>`(problem-browser 4.1 已確立的形態):中鍵開新分頁、
+      右鍵複製網址、Enter 鍵全部免費附帶,攔 click 再改 `location` 要一一重做;
+    - **相對位址**:服務今天掛在網域根目錄,`/play.html?id=2` 與 `./play.html?id=2`
+      解析出來一模一樣,所以「改用絕對路徑」這種退化只有比對**原樣** `href` 才看得
+      出來 —— 一旦部署到子路徑底下,絕對路徑會把使用者丟出整個應用。4.1 的 review
+      在列表那一側抓過同一個洞。
+    """
+    open_and_win(list_page, 1)
+    list_page.wait_for_selector(f"#{NEXT_LINK_ID}:not([hidden])")
+
+    link = next_link(list_page)
+
+    assert link["tag"] == "A", f"「下一題」不是連結而是 {link['tag']}"
+    assert link["href"] == f".{PLAY_PATH}?id=2", f"「下一題」不是相對位址:{link}"
+
+
+def test_the_next_position_skips_the_ones_that_are_not_listable(list_page) -> None:
+    """下一題是**題號大於當前題、且可上架的最小題號** —— 不是 `id + 1`。
+
+    夾具的第 4 題 `solvable: False`,因此第 3 題的下一題是**第 5 題**。`id + 1` 會
+    指到第 4 題,而那一題根本不該上架 —— 使用者按下去只會看到一個不存在的題目。
+
+    本專案的題號有缺口是實情而非假想:`solvable: false` 會被濾掉,收第二本書之後
+    更明顯,`PositionRepository.all()` 的存在正是為了這件事。
+    """
+    open_and_win(list_page, 3)
+    list_page.wait_for_selector(f"#{NEXT_LINK_ID}:not([hidden])")
+
+    link = next_link(list_page)
+
+    assert link["href"] == f".{PLAY_PATH}?id=5", (
+        f"下一題不是可上架的最小題號(第 4 題不可上架):{link}"
+    )
+
+
+def test_the_next_position_actually_opens_that_position(list_page) -> None:
+    """按下去真的到得了那一題,而不只是有條連結掛在那裡。"""
+    served = open_and_win(list_page, 1)
+    list_page.wait_for_selector(f"#{NEXT_LINK_ID}:not([hidden])")
+
+    list_page.locator(f"#{NEXT_LINK_ID}").click()
+    list_page.wait_for_selector("#board svg .piece")
+
+    assert urlsplit(list_page.url).path == PLAY_PATH
+    assert list_page.locator("#puzzle-title").inner_text().strip() == TITLES["2"]
+    assert served["positions"][-1] == "2", (
+        f"對局頁最後要的不是第 2 題:{served['positions']}"
+    )
+
+
+# --- 沒有下一題 ---------------------------------------------------------
+
+
+def test_the_last_position_offers_no_next(list_page) -> None:
+    """已是最後一題時**按鈕不出現** —— 不顯示一個按了沒反應的東西。
+
+    第 5 題是夾具裡可上架的最後一題(第 4 題不可上架,而它的題號還比 5 小)。
+    """
+    served = open_and_win(list_page, 5)
+    wait_for_catalog(list_page, served)
+    list_page.wait_for_timeout(300)
+
+    assert next_link(list_page) is None, "已是最後一題,卻仍冒出「下一題」"
+    assert text_of(list_page, "#turn") == YOU_WON, "終局畫面本身被影響到了"
+
+
+def test_a_black_win_offers_no_next_position(list_page) -> None:
+    """走脫導致黑勝時**不出現** —— 那時該做的是重來,不是跳下一題。
+
+    這一條同時釘住「索引根本不該被去要」:黑勝不是通關,連查都不必查。只驗按鈕
+    沒出現的話,「照樣查索引但畫面上藏起來」也是全綠的。
+    """
+    served = open_and_win(list_page, 1, reply=BLACK_WINS, expected_turn=BLACK_WON)
+    list_page.wait_for_timeout(300)
+
+    assert next_link(list_page) is None, "黑方獲勝卻冒出了「下一題」"
+    assert served["catalog"] == 0, "黑方獲勝時仍去要了索引"
+    assert list_page.locator("#reset").is_visible(), "黑方獲勝時該留下的是「重來」"
+
+
+def test_a_game_still_in_progress_offers_no_next_position(list_page) -> None:
+    """對局進行中不出現 —— 這一題都還沒解完。"""
+    served = route_api(list_page, black_move=GAME_CONTINUES)
+    list_page.goto(f"{ORIGIN}{PLAY_PATH}?id=1")
+    list_page.wait_for_selector("#board svg .piece")
+    click_square(list_page, "d8")
+    click_square(list_page, "d9")
+    list_page.wait_for_function(
+        "() => document.querySelectorAll('#moves li .mv-b')[0]?.textContent"
+    )
+
+    assert next_link(list_page) is None, "對局還沒結束就冒出了「下一題」"
+    assert served["catalog"] == 0, "對局進行中就去要了索引"
+
+
+def test_a_broken_catalog_leaves_the_win_screen_intact(list_page) -> None:
+    """索引取不到時**按鈕不出現,而且終局畫面的其餘部分一個字都不受影響**。
+
+    跨題導航是次要功能。它壞掉不該讓使用者連「你獲勝」都看不到 —— 這是本節唯一
+    一條在驗「壞得夠安靜」的測試,故斷言不只看按鈕:輪方、錯誤區、盤面、歷史著法
+    逐項都要照常。
+
+    索引**單獨**壞掉、題目端點照常活著,是刻意的:那才是真實的失敗形狀(索引端點
+    不借引擎,它掛掉與對局能不能打是兩件事)。
+    """
+    served = open_and_win(list_page, 1, catalog_body=BROKEN_INDEX)
+    wait_for_catalog(list_page, served)
+    list_page.wait_for_timeout(300)
+
+    assert next_link(list_page) is None, "索引取不到,卻仍冒出「下一題」"
+    assert text_of(list_page, "#turn") == YOU_WON, "索引壞掉把「你獲勝」弄不見了"
+    assert list_page.locator("#error").is_hidden(), "索引壞掉冒出了對局的錯誤告知"
+    assert list_page.locator("#waiting").is_hidden(), "索引壞掉讓畫面停在等待中"
+    assert list_page.locator("#board svg .piece").count() > 0, "索引壞掉把盤面弄不見了"
+    assert list_page.locator("#moves li").count() > 0, "索引壞掉把歷史著法弄不見了"
+    assert list_page.locator("#reset").is_visible(), "索引壞掉把「重來」弄不見了"
+
+
+# --- 何時去要索引 -------------------------------------------------------
+
+
+def test_the_catalog_is_only_fetched_after_the_win(list_page) -> None:
+    """索引是**紅勝之後**才去要的,不是載入題目時就要。
+
+    在載入時就要的話,每一次開對局頁都多打一次請求,而絕大多數對局根本走不到獲勝。
+    終局時才要是安全的:索引端點不碰引擎池(problem-browser 的 1.1)。
+    """
+    served = route_api(list_page, black_move=RED_WINS)
+    list_page.goto(f"{ORIGIN}{PLAY_PATH}?id=1")
+    list_page.wait_for_selector("#board svg .piece")
+    list_page.wait_for_timeout(300)
+
+    assert served["catalog"] == 0, "還沒獲勝就去要了索引"
+
+    play_one_move(list_page, YOU_WON)
+    wait_for_catalog(list_page, served)
+
+    assert served["catalog"] == 1, f"索引被要了 {served['catalog']} 次"
+
+
+# --- 版面:兩個控制項並排 -----------------------------------------------
+
+
+def test_the_next_position_sits_to_the_right_of_the_restart(list_page) -> None:
+    """「下一題」排在「重來」**右邊**,而且兩者在同一列上。
+
+    「同一組控制項」在畫面上是有形的:同一列、緊鄰、等高。只驗左右順序的話,
+    一個掉到下一段去也照樣成立。
+    """
+    open_and_win(list_page, 1)
+    list_page.wait_for_selector(f"#{NEXT_LINK_ID}:not([hidden])")
+
+    boxes = list_page.evaluate(
+        """(id) => {
+          const box = (selector) => {
+            const { left, top, right, bottom, height } =
+              document.querySelector(selector).getBoundingClientRect();
+            return { left, top, right, bottom, height };
+          };
+          return { reset: box('#reset'), next: box('#' + id) };
+        }""",
+        NEXT_LINK_ID,
+    )
+
+    assert boxes["next"]["left"] >= boxes["reset"]["right"], (
+        f"「下一題」沒有排在「重來」右邊:{boxes}"
+    )
+    assert abs(boxes["next"]["top"] - boxes["reset"]["top"]) < 2, (
+        f"兩個控制項不在同一列上:{boxes}"
+    )
+    assert abs(boxes["next"]["height"] - boxes["reset"]["height"]) < 2, (
+        f"兩個控制項不等高:{boxes}"
+    )
+    assert boxes["next"]["left"] - boxes["reset"]["right"] < 24, (
+        f"兩個控制項隔得太開,看不出是同一組:{boxes}"
+    )
+
+
+def test_the_next_position_reads_as_the_primary_of_the_pair(list_page) -> None:
+    """兩個控制項的主次分得出來:「下一題」是前進,「重來」是重試。
+
+    主次由**填滿的強調色 vs. 中性灰**承擔,不是由位置或大小承擔。斷言比對的是
+    「下一題的底色等於 `--accent`」而非某個色碼字面值 —— 調色盤日後改了,這條測試
+    該跟著改的對象是「用的是強調色」而不是「等於 #ffd479」。
+
+    另外驗兩者底色不同:少了這一層,「兩顆都是強調色」也會通過上一條。
+    """
+    open_and_win(list_page, 1)
+    list_page.wait_for_selector(f"#{NEXT_LINK_ID}:not([hidden])")
+
+    looks = list_page.evaluate(
+        """(id) => {
+          const paint = (selector) => {
+            const style = getComputedStyle(document.querySelector(selector));
+            return { background: style.backgroundColor, colour: style.color };
+          };
+          const root = getComputedStyle(document.documentElement);
+          const probe = document.createElement('span');
+          probe.style.color = 'var(--accent)';
+          document.body.append(probe);
+          const accent = getComputedStyle(probe).color;
+          probe.remove();
+          return { reset: paint('#reset'), next: paint('#' + id), accent };
+        }""",
+        NEXT_LINK_ID,
+    )
+
+    assert looks["next"]["background"] == looks["accent"], (
+        f"「下一題」沒有用強調色當底:{looks}"
+    )
+    assert looks["next"]["background"] != looks["reset"]["background"], (
+        f"兩個控制項同一個底色,主次分不出來:{looks}"
+    )
+    assert looks["next"]["colour"] != looks["reset"]["colour"], (
+        f"兩個控制項同一個字色:{looks}"
+    )
