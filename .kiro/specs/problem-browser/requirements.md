@@ -99,7 +99,9 @@ problem-browser 是產品的入口 —— 使用者開啟服務先看到題庫�
 2. When 對局介面開啟, the 對局介面 shall 載入使用者所選的那一題。
 3. The 對局介面 shall 提供返回列表的途徑。
 4. When 使用者自對局返回列表, the 題庫瀏覽介面 shall 保留返回前的篩選條件與完成標記。
-5. When 對局介面開啟, the 對局介面 shall 顯示該題的出處與描述 —— 這兩項已自列表移來(見 1.2)。描述本已由 web-play-runtime 呈現,**本輪新增的只有出處**。
+5. When 對局介面開啟, the 對局介面 shall 顯示該題的出處與描述 —— 這兩項已自列表移來(見 1.2)。**出處**本已由 web-play-runtime 呈現(其 requirement 1.2「顯示該題目的局名與出處」),**本輪新增的只有描述**。
+
+> **勘誤**:本條原先寫反了 —— 說「描述本已呈現、新增的只有出處」。實作時的 RED 階段直接證否:三條出處測試原封不動就通過,三條描述測試回 `None`;`grep -rn description web/` 在 `web/` 底下一個字都找不到。`#puzzle-source` 從 web-play-runtime 起就在 `play.html` 與 `app.js` 裡了。
 
 ### Requirement 5: 題目索引
 

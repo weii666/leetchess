@@ -1362,3 +1362,276 @@ def test_marking_a_position_complete_does_not_open_it(list_page) -> None:
         row_id: (True, True) if row_id == "2" else (False, False)
         for row_id in LISTED_IDS
     }
+
+
+# =======================================================================
+# tasks 4.2:自對局返回列表,並在對局介面顯示出處(requirements 4.3、4.4、4.5)
+# =======================================================================
+#
+# ## 為什麼這一節在列表的測試檔,而不是 `test_web_play.py`
+#
+# 1. **往返的兩端都要真的走過**(4.4)。完成標記存在 localStorage,而它是 per-origin
+#    的 —— 只有在同一個 origin 底下開列表、標記、進對局、再按返回,才驗得到「返回
+#    後標記仍在」。`test_web_play.py` 另有自己的 origin,在那裡只讀得到一次儲存區,
+#    證明不了往返;而「只讀一次儲存區」的測試連返回途徑根本不存在都抓不到。
+# 2. **出處與描述是自列表移過來的**(1.2 / 4.5)。同一份 `CATALOG` 夾具既是
+#    「不得出現在列表上」那批字串的來源(`NEVER_ON_THE_LIST`),也是「必須出現在
+#    對局介面上」的來源 —— 兩邊比對同一批字串,搬家有沒有搬到位一眼看得出來。
+#    分兩個檔各寫一份夾具,兩份遲早各自漂移。
+
+#: 列表頁的位址。返回的落點就是它。
+LIST_PATH = "/index.html"
+
+#: 對局介面上那條返回連結的 id。與 `data-id`、`#puzzle-source` 同性質:是
+#: `web/app.js` 自己畫樣式與導航要用的結構契約,不是測試專用的鉤子。
+BACK_LINK_ID = "back-to-list"
+
+#: 題號到出處的對照。夾具橫跨兩本書,「一律顯示某一本」的寫法因此躲不掉。
+SOURCES = {str(entry["id"]): entry["source"] for entry in CATALOG}
+
+#: 題號到描述的對照。每一題的描述與它的局名沒有共同字串,「把局名再印一次」
+#: 冒充不了描述。
+DESCRIPTIONS = {str(entry["id"]): entry["description"] for entry in CATALOG}
+
+
+def play_view(page) -> dict[str, Any]:
+    """對局介面畫出來之後的題目資訊與返回途徑。
+
+    `bodyText` 取的是 `innerText` 而非 `innerHTML`:4.5 要的是使用者**看得到**
+    出處與描述,而 `display: none` 的節點仍留在 DOM 裡 —— 讀 HTML 的話,一個看
+    不見的節點也算數。(tasks 3.2 在反方向踩過同一個坑。)
+    """
+    page.wait_for_selector("#board svg .piece")
+    return page.evaluate(
+        """(backId) => {
+          const text = (id) => document.getElementById(id)?.textContent.trim() ?? null;
+          const link = document.getElementById(backId);
+          return {
+            title: text('puzzle-title'),
+            source: text('puzzle-source'),
+            description: text('puzzle-description'),
+            back: link && {
+              href: link.getAttribute('href'),
+              resolved: link.href,
+              text: link.textContent.trim(),
+              width: link.getBoundingClientRect().width,
+            },
+            bodyText: document.body.innerText,
+          };
+        }""",
+        BACK_LINK_ID,
+    )
+
+
+def go_back(page) -> None:
+    """自對局介面按下返回 —— 真實點擊那個連結,不是改網址也不是按上一頁。"""
+    page.locator(f"#{BACK_LINK_ID}").click()
+    page.wait_for_selector("#positions > li")
+
+
+# --- 4.3:對局介面提供返回列表的途徑 ------------------------------------
+
+
+def test_the_play_page_offers_a_way_back_to_the_list(list_page) -> None:
+    """4.3:對局介面提供返回列表的途徑,而且是一個**真的連結**。
+
+    與列表那一側同樣的理由(4.1):`<a href>` 免費附帶中鍵開新分頁、右鍵複製
+    網址、Enter 鍵與瀏覽器的上一頁;攔 click 再改 `location` 的話這些要一一重做,
+    而通常不會做。
+    """
+    open_list_that_can_be_played(list_page)
+    open_position(list_page, 1)
+
+    back = play_view(list_page)["back"]
+
+    assert back is not None, "對局介面上沒有返回列表的途徑"
+    assert back["text"], "返回的連結沒有可讀的文字"
+    assert back["width"] > 0, "返回的連結排不出可見的尺寸"
+    assert back["resolved"] == f"{ORIGIN}{LIST_PATH}", (
+        f"返回的連結指向別處:{back['resolved']}"
+    )
+
+
+def test_the_way_back_is_dressed_in_the_pages_own_colours(list_page) -> None:
+    """返回的連結接上了對局頁的視覺語言,不是瀏覽器預設的藍紫底線。
+
+    這一條看似只是外觀,但沒上樣式的連結在這個橘色調介面裡是**唯一的藍紫**,
+    看起來就像功能沒接完 —— 而它恰恰是本 spec 在對局頁上唯一的新控制項。
+
+    比對的是解析後的實際顏色與側欄其餘說明文字相同,而不是斷言某個色碼字面值:
+    調色盤日後改了,這條測試該跟著改的對象是「一致」而不是「等於 #9e9eff」。
+    底線另外驗,因為 `color` 對了而底線還在的話,它看起來仍然不屬於這個側欄。
+    """
+    open_list_that_can_be_played(list_page)
+    open_position(list_page, 1)
+    # 導覽是非同步的:少了這個等待,`evaluate` 會在舊頁面或空白頁上跑,`getElementById`
+    # 回 null 而測試以 TypeError 收場 —— 那看起來像紅燈,其實什麼都沒驗到。
+    play_view(list_page)
+
+    looks = list_page.evaluate(
+        """(backId) => {
+          const link = document.getElementById(backId);
+          const reference = document.querySelector('#puzzle-info p');
+          const seen = getComputedStyle(link);
+          return {
+            colour: seen.color,
+            muted: getComputedStyle(reference).color,
+            underline: seen.textDecorationLine,
+          };
+        }""",
+        BACK_LINK_ID,
+    )
+
+    assert looks["colour"] == looks["muted"], (
+        f"返回的連結沒有接上側欄的顏色:{looks['colour']},側欄說明文字為 {looks['muted']}"
+    )
+    assert looks["underline"] == "none", (
+        f"返回的連結仍帶著瀏覽器預設的底線:{looks['underline']}"
+    )
+
+
+def test_the_way_back_is_a_relative_address(list_page) -> None:
+    """返回的位址是相對的,不是 `/index.html`。
+
+    服務今天掛在網域根目錄,`/index.html` 與 `./index.html` 解析出來一模一樣,
+    於是「改用絕對路徑」這種退化完全看不出來 —— 一旦部署到子路徑底下,絕對路徑
+    會把使用者丟出整個應用。4.1 的 review 在列表那一側抓到同一個洞並補了斷言,
+    這裡是它的另一半。
+    """
+    open_list_that_can_be_played(list_page)
+    open_position(list_page, 1)
+
+    href = play_view(list_page)["back"]["href"]
+
+    assert href == f".{LIST_PATH}", f"返回的連結不是相對位址:{href}"
+
+
+def test_going_back_lands_on_the_list(list_page) -> None:
+    """4.3:按下去真的回得到列表,而不只是有條連結掛在那裡。"""
+    open_list_that_can_be_played(list_page)
+    open_position(list_page, 1)
+    play_view(list_page)
+
+    go_back(list_page)
+
+    assert urlsplit(list_page.url).path == LIST_PATH
+    assert [row["id"] for row in rows(list_page)] == LISTED_IDS
+
+
+def test_the_way_back_survives_a_position_that_fails_to_load(list_page) -> None:
+    """4.3 沒有前提:題目載不起來時**更**需要一條回得去的路。
+
+    載入失敗的畫面上原本只有「重來」一顆按鈕,而它在沒有題目時做的是重試載入
+    (`web/app.js` 的既有行為)—— 題目根本不存在的話,使用者按到天亮也出不去,
+    正是 web-play-runtime 的 requirements 7.4 禁止的無法復原畫面。
+    """
+    route_api(list_page)
+    list_page.goto(f"{ORIGIN}{PLAY_PATH}?id=9999")
+    list_page.wait_for_selector("#error:not([hidden])")
+
+    link = list_page.locator(f"#{BACK_LINK_ID}")
+    assert link.count() == 1, "載入失敗的畫面上沒有返回列表的途徑"
+    assert link.get_attribute("href") == f".{LIST_PATH}", "返回的連結不是相對位址"
+
+    link.click()
+    list_page.wait_for_selector("#positions > li")
+
+
+# --- 4.4:返回之後完成標記仍在 ------------------------------------------
+
+
+def test_the_marks_survive_a_round_trip_through_a_game(list_page) -> None:
+    """4.4:自對局返回列表之後,先前的完成標記仍在。
+
+    **整趟都要真的走過** —— 在列表上按下標記、點進對局、等盤面畫出來、再按返回
+    那條連結。只讀一次儲存區證明不了任何事:同一個 origin 底下 localStorage 本來
+    就留著,那樣寫連「返回途徑根本不存在」都是全綠的。
+
+    三層一起驗:畫面上的勾選與呈現掛勾、兩個計數,以及儲存區裡的原始值。少了最後
+    一層的話,「返回後畫面對了但儲存區已被清掉」要到下一次重新載入才會浮現。
+    """
+    served = open_list_that_can_be_played(list_page)
+
+    toggle(list_page, 2)
+    toggle(list_page, 5)
+    before = counts(list_page)
+
+    open_position(list_page, 3)
+    assert play_view(list_page)["title"] == TITLES["3"], "沒有真的進到對局介面"
+
+    go_back(list_page)
+
+    marked = {"2", "5"}
+    state = {row["id"]: (row["checked"], row["marked"]) for row in rows(list_page)}
+    assert state == {
+        row_id: (row_id in marked, row_id in marked) for row_id in LISTED_IDS
+    }, f"返回列表之後標記不見了:{state}"
+    assert counts(list_page) == before == ["2", TOTAL]
+    assert json.loads(stored_completed(list_page)) == [2, 5]
+    assert served["positions"] == ["3"], f"中途載入的不是所選的那一題:{served}"
+
+
+# --- 4.5:對局介面顯示該題的出處與描述 ----------------------------------
+
+
+@pytest.mark.parametrize("position_id", ["1", "3", "5"])
+def test_the_play_page_shows_the_source_of_that_very_position(
+    list_page, position_id
+) -> None:
+    """4.5:對局介面顯示的出處是**那一題的**,不是寫死的一本書。
+
+    夾具橫跨兩本書(第 1 題《適情雅趣》,第 3、5 題《橘中秘》),因此「一律顯示
+    適情雅趣」這種寫法只在第一題全綠。這正是出處自列表移過來之後仍要顯示的理由:
+    題庫收第二本書之後,分不出眼前這局出自哪一本就沒有意義。
+
+    出處**取自 `GET /api/positions/{id}` 的回應**(`service/models.py` 的
+    `PositionResponse.source`),不另打 `/api/catalog` —— 為一個字串多一次往返之外,
+    兩個端點對同一題給出不同出處時,列表與對局頁會各說各話。
+    """
+    open_list_that_can_be_played(list_page)
+    open_position(list_page, position_id)
+
+    view = play_view(list_page)
+    expected = SOURCES[position_id]
+
+    assert view["source"] == expected, f"第 {position_id} 題的出處不對:{view['source']}"
+    assert expected in view["bodyText"], "出處在 DOM 裡,但使用者看不到"
+
+
+@pytest.mark.parametrize("position_id", ["1", "3", "5"])
+def test_the_play_page_shows_the_description_of_that_very_position(
+    list_page, position_id
+) -> None:
+    """4.5:描述同樣要看得見,而且是那一題的。
+
+    夾具裡每一題的描述與它的局名沒有任何共同字串(同一批字串正是
+    `NEVER_ON_THE_LIST` 的來源),因此「把局名再印一次」冒充不了描述,「一律顯示
+    第一題的描述」也躲不掉。
+    """
+    open_list_that_can_be_played(list_page)
+    open_position(list_page, position_id)
+
+    view = play_view(list_page)
+    expected = DESCRIPTIONS[position_id]
+
+    assert view["description"] == expected, (
+        f"第 {position_id} 題的描述不對:{view['description']}"
+    )
+    assert expected in view["bodyText"], "描述在 DOM 裡,但使用者看不到"
+
+
+def test_the_source_and_description_moved_rather_than_multiplied(list_page) -> None:
+    """出處與描述是**自列表移到對局介面**(1.2 / 4.5),不是兩邊都畫。
+
+    這一條與 `test_the_list_shows_neither_source_nor_description` 是同一件事的兩半:
+    那一條釘住「列表上找不到」,這一條釘住「對局介面上找得到」。只寫前者的話,
+    把兩個欄位一起弄丟也是全綠的。
+    """
+    open_list_that_can_be_played(list_page)
+    listed = list_page.evaluate("() => document.getElementById('positions').innerHTML")
+
+    open_position(list_page, 1)
+    played = play_view(list_page)["bodyText"]
+
+    assert SOURCES["1"] not in listed and DESCRIPTIONS["1"] not in listed
+    assert SOURCES["1"] in played and DESCRIPTIONS["1"] in played
