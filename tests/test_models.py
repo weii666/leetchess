@@ -400,7 +400,6 @@ def _position(**overrides: Any) -> Position:
         "difficulty": 3,
         "tags": ["連將殺", "馬後炮"],
         "max_dtm": 16,
-        "solvable": True,
     }
     values.update(overrides)
     return Position(**values)
@@ -423,7 +422,6 @@ def test_position_response_carries_the_start_position_and_puzzle_info() -> None:
         "difficulty": 3,
         "tags": ["連將殺", "馬後炮"],
         "max_dtm": 16,
-        "solvable": True,
         "source": "適情雅趣",
         "state": {
             "side_to_move": "red",
@@ -435,15 +433,14 @@ def test_position_response_carries_the_start_position_and_puzzle_info() -> None:
 
 
 def test_position_response_allows_unverified_puzzles() -> None:
-    """`max_dtm` 與 `solvable` 由 corpus-verification 日後回填,現階段可為空。"""
+    """`max_dtm` 由 corpus-verification 日後回填,現階段可為空。"""
     state = GameState(
         side_to_move=Side.RED, legal_moves=["g3g4"], over=False, winner=None
     )
     dumped = PositionResponse.from_domain(
-        _position(max_dtm=None, solvable=None), state
+        _position(max_dtm=None), state
     ).model_dump(mode="json")
     assert dumped["max_dtm"] is None
-    assert dumped["solvable"] is None
     assert dumped["source"] is None
 
 
@@ -453,10 +450,10 @@ def test_position_response_keeps_optional_fields_present() -> None:
         side_to_move=Side.RED, legal_moves=["g3g4"], over=False, winner=None
     )
     dumped = PositionResponse.from_domain(
-        _position(max_dtm=None, solvable=None), state
+        _position(max_dtm=None), state
     ).model_dump(mode="json")
     assert "max_dtm" in dumped
-    assert "solvable" in dumped
+    assert "source" in dumped
 
 
 # --- 錯誤回應 ---------------------------------------------------------------
@@ -512,17 +509,20 @@ def test_repository_position_flows_into_the_response(tmp_path: pathlib.Path) -> 
 
     folder = tmp_path / "適情雅趣"
     folder.mkdir(parents=True)
-    (folder / "0021.json").write_text(
+    # 題目檔的內容是陣列,起手方在 fen 裡而不是欄位 —— 兩者都是題庫那一端的形狀,
+    # 寫錯的話這個測試就不再是「實際用題庫讀出來的」。
+    (folder / "21-21.json").write_text(
         json.dumps(
-            {
-                "id": 21,
-                "title": "野馬操田",
-                "description": "《適情雅趣》第 21 局",
-                "fen": RED_FEN,
-                "side_to_move": "red",
-                "difficulty": 3,
-                "tags": ["連將殺"],
-            },
+            [
+                {
+                    "id": 21,
+                    "title": "野馬操田",
+                    "description": "《適情雅趣》第 21 局",
+                    "fen": RED_FEN,
+                    "difficulty": 3,
+                    "tags": ["連將殺"],
+                }
+            ],
             ensure_ascii=False,
         ),
         encoding="utf-8",

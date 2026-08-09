@@ -177,8 +177,13 @@ class CatalogEntry(BaseModel):
     """題庫列表中的一題。**沒有起始局面,也沒有合法著法。**
 
     欄位就是列表要畫的那幾樣(problem-browser 1.2):題號、局名、描述、難度、
-    標籤、出處、可解標記。刻意**不含** `fen` 與 `state` —— 起始局面的合法著法只有
-    引擎答得出來,而少了它們,這個端點才可能在引擎池滿時照樣答得出來(5.2)。
+    標籤、出處。刻意**不含** `fen` 與 `state` —— 起始局面的合法著法只有引擎答得
+    出來,而少了它們,這個端點才可能在引擎池滿時照樣答得出來(5.2)。
+
+    索引**據實列出題庫裡的每一題,不代為過濾**。原本有一個 `solvable` 欄位供列表
+    篩掉偽題,已隨題目 schema 一併移除:那個標記要等 corpus-verification 跑完才有
+    值,在那之前每一題都是空值,篩選因此從未真正起作用。日後真要標記偽題時,它是
+    驗證工具的產出而非人工欄位,屆時再談要不要回到這份索引上。
 
     模型定義在此而非 `models.py`,是因為本任務的 boundary 是 `service/main.py`。
     """
@@ -196,15 +201,6 @@ class CatalogEntry(BaseModel):
             "躺在某個書目資料夾底下,直接躺在題庫根目錄的題目在啟動掃描時就被擋下。"
         )
     )
-    solvable: bool | None = Field(
-        default=None,
-        description=(
-            "是否確認紅先必勝。由 corpus-verification 日後回填,現階段可為空,"
-            "**不得視為必填**。索引據實回報而不代為過濾:哪些題目該列出來是列表的"
-            "決定(1.4),而在那裡「空值」與「false」並不同義 —— 尚未回填的題目"
-            "視為可上架,否則驗證工具跑完之前整個題庫都是空的。"
-        ),
-    )
 
     @classmethod
     def from_domain(cls, position: Position, source: str) -> CatalogEntry:
@@ -220,7 +216,6 @@ class CatalogEntry(BaseModel):
             difficulty=position.difficulty,
             tags=list(position.tags),
             source=source,
-            solvable=position.solvable,
         )
 
 

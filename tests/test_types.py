@@ -26,9 +26,9 @@ def test_enum_values_are_the_frozen_wire_contract() -> None:
 
 
 def test_position_optional_fields_default_to_none() -> None:
-    """`max_dtm` 與 `solvable` 由 corpus-verification 日後回填,現階段必須可省略。
+    """`max_dtm` 由 corpus-verification 日後回填,現階段必須可省略。
 
-    把它們變成必填等於要求驗證工具先跑完才能載入題庫,整個題庫會在那之前無法啟動。
+    把它變成必填等於要求驗證工具先跑完才能載入題庫,整個題庫會在那之前無法啟動。
     """
     position = t.Position(
         id=21,
@@ -40,4 +40,3 @@ def test_position_optional_fields_default_to_none() -> None:
         tags=["殺法"],
     )
     assert position.max_dtm is None
-    assert position.solvable is None

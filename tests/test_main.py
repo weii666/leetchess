@@ -69,22 +69,25 @@ FAKE_NODES = 1_000
 
 
 def _write_position(root: pathlib.Path, side: Side, fen: str) -> None:
-    """在 `root/測試書/` 底下寫一題。出處由資料夾表達,題目 JSON 沒有出處欄位。"""
+    """在 `root/測試書/` 底下寫一題。
+
+    題目 JSON 既沒有出處欄位(出處由資料夾表達),也沒有 `side_to_move`(起手方在
+    `fen` 裡)。內容是陣列,即使只裝一題。`side` 只用來說明呼叫端的意圖,實際生效
+    的是 `fen` 的走子方那一欄 —— 兩者由呼叫端保持一致。
+    """
     payload: dict[str, Any] = {
         "id": PUZZLE_ID,
         "title": "盡善克終",
         "description": "測試書 第一局 盡善克終",
         "fen": fen,
-        "side_to_move": side.value,
         "difficulty": 3,
         "tags": ["雙馬", "連將殺"],
         "max_dtm": 16,
-        "solvable": True,
     }
     folder = root / PUZZLE_SOURCE
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / f"{PUZZLE_ID:04d}.json").write_text(
-        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    (folder / f"{PUZZLE_ID}-{PUZZLE_ID}.json").write_text(
+        json.dumps([payload], ensure_ascii=False), encoding="utf-8"
     )
 
 
@@ -181,7 +184,6 @@ def test_position_endpoint_returns_the_starting_position_and_puzzle_info(
     assert payload["difficulty"] == 3
     assert payload["tags"] == ["雙馬", "連將殺"]
     assert payload["max_dtm"] == 16
-    assert payload["solvable"] is True
     # 出處由題目所在的書目資料夾表達,不是題目欄位 —— 端點必須自題庫另取。
     assert payload["source"] == PUZZLE_SOURCE
     assert payload["state"] == {
@@ -217,9 +219,9 @@ def test_position_endpoint_does_not_borrow_an_engine_for_an_unknown_id(
 # --- 題目索引端點(problem-browser 5.1、5.2、5.3、5.4)------------------
 
 
-#: 索引端點的測試題庫:兩本書、三題,刻意涵蓋可解標記的三種取值。
+#: 索引端點的測試題庫:兩本書、三題。
 #: 題號不連續(1、2、201)是重點 —— 唯一性由人工保證、無機制強制,索引不得預設
-#: 題號是 1..N 的連續整數。
+#: 題號是 1..N 的連續整數。`max_dtm` 在第三題整個不存在,涵蓋「尚未回填」。
 CATALOG_CORPUS: list[dict[str, Any]] = [
     {
         "source": "適情雅趣",
@@ -229,7 +231,6 @@ CATALOG_CORPUS: list[dict[str, Any]] = [
         "difficulty": 3,
         "tags": ["雙馬", "連將殺"],
         "max_dtm": 16,
-        "solvable": True,
     },
     {
         "source": "適情雅趣",
@@ -239,10 +240,8 @@ CATALOG_CORPUS: list[dict[str, Any]] = [
         "difficulty": 5,
         "tags": ["單車"],
         "max_dtm": 8,
-        "solvable": False,
     },
     {
-        # 可解標記尚未回填(corpus-verification 未跑),欄位整個不存在。
         "source": "橘中秘",
         "id": 201,
         "title": "七星聚會",
@@ -254,14 +253,16 @@ CATALOG_CORPUS: list[dict[str, Any]] = [
 
 
 def _write_catalog_position(root: pathlib.Path, entry: dict[str, Any]) -> None:
-    """依 `CATALOG_CORPUS` 的一筆資料寫出題目檔。出處由資料夾表達,不是題目欄位。"""
+    """依 `CATALOG_CORPUS` 的一筆資料寫出題目檔。
+
+    出處由資料夾表達、起手方由 `fen` 表達,兩者都不是題目欄位。內容是陣列。
+    """
     payload = {key: value for key, value in entry.items() if key != "source"}
     payload["fen"] = RED_FEN
-    payload["side_to_move"] = Side.RED.value
     folder = root / entry["source"]
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / f"{entry['id']:04d}.json").write_text(
-        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    (folder / f"{entry['id']}-{entry['id']}.json").write_text(
+        json.dumps([payload], ensure_ascii=False), encoding="utf-8"
     )
 
 
@@ -298,7 +299,7 @@ def test_catalog_endpoint_lists_every_position_with_the_fields_the_list_needs(
 ) -> None:
     """5.1:列表所需的全部資料來自這一份索引 —— 題庫中每一題、欄位齊備。
 
-    欄位就是列表要畫的那幾樣:題號、局名、描述、難度、標籤、出處、可解標記。
+    欄位就是列表要畫的那幾樣:題號、局名、描述、難度、標籤、出處。
     出處由題目所在的書目資料夾表達,不是題目欄位,端點必須自題庫另取。
     """
     response = make_catalog_client().get("/api/catalog")
@@ -314,7 +315,6 @@ def test_catalog_endpoint_lists_every_position_with_the_fields_the_list_needs(
         "difficulty": 3,
         "tags": ["雙馬", "連將殺"],
         "source": "適情雅趣",
-        "solvable": True,
     }
     assert payload["positions"][2] == {
         "id": 201,
@@ -323,7 +323,6 @@ def test_catalog_endpoint_lists_every_position_with_the_fields_the_list_needs(
         "difficulty": 9,
         "tags": [],
         "source": "橘中秘",
-        "solvable": None,
     }
 
 
@@ -362,24 +361,7 @@ def test_catalog_endpoint_does_not_report_legal_moves_or_the_starting_position(
             "difficulty",
             "tags",
             "source",
-            "solvable",
         }
-
-
-def test_catalog_endpoint_keeps_an_unfilled_solvable_flag_empty(
-    make_catalog_client,
-) -> None:
-    """可解標記可為空,**不得視為必填**,也不得擅自補一個預設值。
-
-    corpus-verification 尚未回填,把空值當成 false 會讓整個題庫從列表上消失;
-    當成 true 則是替驗證工具作了它還沒作的結論。空值一律照實傳出去。
-    """
-    payload = make_catalog_client().get("/api/catalog").json()
-    by_id = {entry["id"]: entry for entry in payload["positions"]}
-
-    assert by_id[201]["solvable"] is None
-    # 標為不可解的題目仍在索引裡 —— 過不過濾是列表的事(1.4),索引只據實回報。
-    assert by_id[2]["solvable"] is False
 
 
 def test_catalog_endpoint_covers_a_new_position_after_a_restart(

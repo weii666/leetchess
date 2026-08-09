@@ -93,8 +93,12 @@ class BlackReply:
 class Position:
     """題庫中的一道題目。
 
-    欄位對應 `.kiro/steering/structure.md` 的題目 schema。
-    `max_dtm` 與 `solvable` 由驗證工具日後回填,現階段可為空,不得視為必填。
+    欄位對應 `.kiro/steering/structure.md` 的題目 schema,但**不是它的鏡像**:
+
+    - `side_to_move` **不是題目 JSON 的欄位**,而由 `fen` 的走子方那一欄推導
+      (`positions.py` 的 `_side_from_fen`)。起手方在 FEN 裡本來就寫著,再開一個
+      欄位等於同一件事有兩個出處,遲早互相矛盾。
+    - `max_dtm` 由驗證工具日後回填,現階段可為空,不得視為必填。
     """
 
     id: int
@@ -105,4 +109,3 @@ class Position:
     difficulty: int
     tags: list[str]
     max_dtm: int | None = None
-    solvable: bool | None = None

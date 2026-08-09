@@ -14,8 +14,17 @@
 因此本模組把「檔案落在哪個書目資料夾」讀成出處,並拒絕含 `source` 之類未知欄位的
 題目 —— 一旦出處同時存在於路徑與欄位,兩者遲早互相矛盾。
 
+同一道理也適用於起手方:`fen` 的走子方那一欄已經寫著誰先走,因此題目 JSON **沒有**
+`side_to_move` 欄位,`Position.side_to_move` 由 FEN 推導(見 `_side_from_fen`)。
+
+## 一檔多題
+
+一個題目檔裝的是**一份題目陣列**,檔名以局號區間表達(`20-24.json` 即第二〇局至
+第二四局)。收題是一次抄一段書,檔案切得比那更細只會讓一次收題散進五個檔案。
+
 `id` 為全域唯一的數字,跨書連續。唯一性由人工保證、無機制強制,故本模組在**啟動掃描
 階段偵測重複題號並拒絕啟動**,使資料錯誤在部署階段暴露而非等到使用者請求該題。
+重複的兩題可能落在同一個檔案裡,錯誤訊息因此指到「哪一檔的第幾題」而不只是檔名。
 
 ## 例外選擇
 
@@ -25,8 +34,8 @@
 
 ## 唯讀
 
-本模組只讀不寫。`max_dtm` 與 `solvable` 由 corpus-verification 日後回填,現階段可為空,
-**不得視為必填** —— 把它們當必填等於要求驗證工具先跑完才能啟動服務。
+本模組只讀不寫。`max_dtm` 由 corpus-verification 日後回填,現階段可為空,
+**不得視為必填** —— 把它當必填等於要求驗證工具先跑完才能啟動服務。
 """
 
 from __future__ import annotations
@@ -42,18 +51,20 @@ __all__ = ["PositionRepository"]
 
 
 #: 人工編輯、必填的欄位(structure.md 的題目 schema)。
+#:
+#: **不含 `side_to_move`**:起手方寫在 `fen` 的走子方那一欄,另立欄位等於同一件事有
+#: 兩個出處。它仍是 `Position` 的欄位,只是由 FEN 推導而來。
 REQUIRED_FIELDS = (
     "id",
     "title",
     "description",
     "fen",
-    "side_to_move",
     "difficulty",
     "tags",
 )
 
 #: 由題目驗證工具回填、可為空的欄位。
-OPTIONAL_FIELDS = ("max_dtm", "solvable")
+OPTIONAL_FIELDS = ("max_dtm",)
 
 KNOWN_FIELDS = frozenset(REQUIRED_FIELDS + OPTIONAL_FIELDS)
 
@@ -81,20 +92,24 @@ class PositionRepository:
 
         by_id: dict[int, Position] = {}
         source_by_id: dict[int, str] = {}
-        origin_by_id: dict[int, Path] = {}
-        conflicts: dict[int, list[Path]] = {}
+        origin_by_id: dict[int, str] = {}
+        conflicts: dict[int, list[str]] = {}
 
         for path in self._corpus_files():
             source = self._source_of_path(path)
-            position = _read_position(path)
-            if position.id in by_id:
-                conflicts.setdefault(position.id, [origin_by_id[position.id]]).append(
-                    path
-                )
-                continue
-            by_id[position.id] = position
-            source_by_id[position.id] = source
-            origin_by_id[position.id] = path
+            relative = path.relative_to(self._positions_dir)
+            for offset, position in enumerate(_read_positions(path), start=1):
+                # 一檔多題,所以出處要記到「第幾題」——只記檔名的話,同一個檔案裡
+                # 的兩題撞號會印成同一個檔名兩次,看不出該去改哪一題。
+                origin = f"{relative} 第 {offset} 題"
+                if position.id in by_id:
+                    conflicts.setdefault(
+                        position.id, [origin_by_id[position.id]]
+                    ).append(origin)
+                    continue
+                by_id[position.id] = position
+                source_by_id[position.id] = source
+                origin_by_id[position.id] = origin
 
         if conflicts:
             raise ValueError(self._duplicate_message(conflicts))
@@ -167,17 +182,13 @@ class PositionRepository:
             )
         return parts[0]
 
-    def _duplicate_message(self, conflicts: dict[int, list[Path]]) -> str:
+    def _duplicate_message(self, conflicts: dict[int, list[str]]) -> str:
         lines = [
             "題庫有重複的題號,服務拒絕啟動。題號須全域唯一且跨書連續,"
             "請修正下列衝突後重新啟動:"
         ]
         for position_id in sorted(conflicts):
-            where = "、".join(
-                str(path.relative_to(self._positions_dir))
-                for path in conflicts[position_id]
-            )
-            lines.append(f"  題號 {position_id}:{where}")
+            lines.append(f"  題號 {position_id}:{'、'.join(conflicts[position_id])}")
         return "\n".join(lines)
 
 
@@ -188,8 +199,18 @@ def _is_hidden(relative: Path) -> bool:
     return any(part.startswith(".") for part in relative.parts)
 
 
-def _read_position(path: Path) -> Position:
-    """讀取並驗證一個題目檔。任何不符即拋出 `ValueError`,附上檔案路徑。"""
+#: FEN 走子方那一欄的兩個合法取值。中國象棋 FEN 沿用國際象棋的 `w`/`b`,
+#: 紅方即 `w`(見 `positions/` 現有題目與 Pikafish 的 `position fen`)。
+FEN_SIDES = {"w": Side.RED, "b": Side.BLACK}
+
+
+def _read_positions(path: Path) -> list[Position]:
+    """讀取並驗證一個題目檔裡的每一題。
+
+    檔案裝的是**一份題目陣列**(見模組說明的「一檔多題」),即使只有一題也一樣 ——
+    形狀隨題數改變的話,收題時補進第二題就得順手改檔案結構,而那正是最容易漏掉的
+    一步。任何不符即拋出 `ValueError`,附上檔案路徑與檔內題序。
+    """
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as cause:
@@ -197,94 +218,104 @@ def _read_position(path: Path) -> Position:
     except OSError as cause:
         raise ValueError(f"題目檔案 {path} 無法讀取:{cause}") from cause
 
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"題目檔案 {path} 的內容必須是題目陣列。一個檔案裝一段局號區間的題目,"
+            "只有一題時也要寫成只有一個元素的陣列。"
+        )
+
+    return [
+        _read_position(f"題目檔案 {path} 第 {offset} 題", item)
+        for offset, item in enumerate(raw, start=1)
+    ]
+
+
+def _read_position(where: str, raw: Any) -> Position:
+    """驗證陣列中的一題。`where` 是出錯時指路用的說法,含檔案路徑與檔內題序。"""
     if not isinstance(raw, dict):
-        raise ValueError(f"題目檔案 {path} 的內容必須是 JSON 物件")
+        raise ValueError(f"{where} 必須是 JSON 物件")
 
-    _check_fields(path, raw)
+    _check_fields(where, raw)
 
+    fen = _read_str(where, raw, "fen")
     return Position(
-        id=_read_int(path, raw, "id"),
-        title=_read_str(path, raw, "title"),
-        description=_read_str(path, raw, "description"),
-        fen=_read_str(path, raw, "fen"),
-        side_to_move=_read_side(path, raw),
-        difficulty=_read_int(path, raw, "difficulty"),
-        tags=_read_tags(path, raw),
-        max_dtm=_read_optional_int(path, raw, "max_dtm"),
-        solvable=_read_optional_bool(path, raw, "solvable"),
+        id=_read_int(where, raw, "id"),
+        title=_read_str(where, raw, "title"),
+        description=_read_str(where, raw, "description"),
+        fen=fen,
+        side_to_move=_side_from_fen(where, fen),
+        difficulty=_read_int(where, raw, "difficulty"),
+        tags=_read_tags(where, raw),
+        max_dtm=_read_optional_int(where, raw, "max_dtm"),
     )
 
 
-def _check_fields(path: Path, raw: dict[str, Any]) -> None:
+def _check_fields(where: str, raw: dict[str, Any]) -> None:
     """必填欄位齊全,且沒有 schema 以外的欄位。
 
-    拒絕未知欄位是刻意的:出處寫成 `source` 欄位、或欄位名打錯字,都會在啟動階段
-    立刻現形,而不是靜靜地被忽略。
+    拒絕未知欄位是刻意的:出處寫成 `source` 欄位、起手方寫成 `side_to_move` 欄位、
+    或欄位名打錯字,都會在啟動階段立刻現形,而不是靜靜地被忽略。
     """
     missing = [name for name in REQUIRED_FIELDS if name not in raw]
     if missing:
-        raise ValueError(f"題目檔案 {path} 缺少必填欄位:{'、'.join(missing)}")
+        raise ValueError(f"{where} 缺少必填欄位:{'、'.join(missing)}")
 
     unknown = sorted(set(raw) - KNOWN_FIELDS)
     if unknown:
         raise ValueError(
-            f"題目檔案 {path} 含有題目 schema 以外的欄位:{'、'.join(unknown)}。"
-            "出處由所在資料夾表達,不是欄位。"
+            f"{where} 含有題目 schema 以外的欄位:{'、'.join(unknown)}。"
+            "出處由所在資料夾表達、起手方由 fen 表達,兩者都不是欄位。"
         )
 
 
-def _type_error(path: Path, field: str, expected: str, value: Any) -> ValueError:
-    return ValueError(
-        f"題目檔案 {path} 的欄位 {field} 必須是{expected},目前為 {value!r}"
-    )
+def _side_from_fen(where: str, fen: str) -> Side:
+    """由 FEN 的走子方那一欄判定起手方。
+
+    起手方**只有這一個出處**。題目 JSON 不再有 `side_to_move` 欄位:那個欄位與 FEN
+    講的是同一件事,而兩份會分岔 —— 分岔時前端畫的是 FEN、後端算輪方用的是欄位,
+    整盤棋的輪方從第一手起就錯開。
+    """
+    fields = fen.split()
+    if len(fields) < 2:
+        raise ValueError(
+            f"{where} 的 fen 缺少走子方那一欄,無從判定起手方:{fen!r}"
+        )
+    try:
+        return FEN_SIDES[fields[1]]
+    except KeyError as cause:
+        allowed = "、".join(FEN_SIDES)
+        raise ValueError(
+            f"{where} 的 fen 走子方必須是 {allowed} 之一,目前為 {fields[1]!r}"
+        ) from cause
 
 
-def _read_int(path: Path, raw: dict[str, Any], field: str) -> int:
+def _type_error(where: str, field: str, expected: str, value: Any) -> ValueError:
+    return ValueError(f"{where} 的欄位 {field} 必須是{expected},目前為 {value!r}")
+
+
+def _read_int(where: str, raw: dict[str, Any], field: str) -> int:
     value = raw[field]
     # `bool` 是 `int` 的子類別,不先擋下就會讓 true 靜靜變成 1。
     if isinstance(value, bool) or not isinstance(value, int):
-        raise _type_error(path, field, "整數", value)
+        raise _type_error(where, field, "整數", value)
     return value
 
 
-def _read_optional_int(path: Path, raw: dict[str, Any], field: str) -> int | None:
+def _read_optional_int(where: str, raw: dict[str, Any], field: str) -> int | None:
     if raw.get(field) is None:
         return None
-    return _read_int(path, raw, field)
+    return _read_int(where, raw, field)
 
 
-def _read_optional_bool(path: Path, raw: dict[str, Any], field: str) -> bool | None:
-    if raw.get(field) is None:
-        return None
-    value = raw[field]
-    if not isinstance(value, bool):
-        raise _type_error(path, field, "布林值", value)
-    return value
-
-
-def _read_str(path: Path, raw: dict[str, Any], field: str) -> str:
+def _read_str(where: str, raw: dict[str, Any], field: str) -> str:
     value = raw[field]
     if not isinstance(value, str):
-        raise _type_error(path, field, "字串", value)
+        raise _type_error(where, field, "字串", value)
     return value
 
 
-def _read_tags(path: Path, raw: dict[str, Any]) -> list[str]:
+def _read_tags(where: str, raw: dict[str, Any]) -> list[str]:
     value = raw["tags"]
     if not isinstance(value, list) or any(not isinstance(tag, str) for tag in value):
-        raise _type_error(path, "tags", "字串陣列", value)
+        raise _type_error(where, "tags", "字串陣列", value)
     return list(value)
-
-
-def _read_side(path: Path, raw: dict[str, Any]) -> Side:
-    value = raw["side_to_move"]
-    if not isinstance(value, str):
-        raise _type_error(path, "side_to_move", "字串", value)
-    try:
-        return Side(value)
-    except ValueError as cause:
-        allowed = "、".join(side.value for side in Side)
-        raise ValueError(
-            f"題目檔案 {path} 的欄位 side_to_move 必須是 {allowed} 之一,"
-            f"目前為 {value!r}"
-        ) from cause

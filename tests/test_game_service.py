@@ -54,8 +54,12 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 SERVICE_DIR = PROJECT_ROOT / "service"
 REAL_ENGINE = PROJECT_ROOT / "engine" / "pikafish"
 
-#: 測試題庫用的題號。
+#: 合成測試題庫用的題號。與真實題庫無關,只需在該次測試的暫存題庫裡唯一。
 PUZZLE_ID = 1
+
+#: **真實**題庫裡《適情雅趣》第二一局的題號。題號即書上的局號,兩個真實引擎的
+#: 測試載入 `positions/` 本身,因此不能沿用上面那個合成題號。
+REAL_PUZZLE_ID = 21
 
 #: 《適情雅趣》第 21 局起始局面(紅先)。
 RED_FEN = "3ak4/3RaR3/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 w - - 0 1"
@@ -94,25 +98,26 @@ requires_real_engine = pytest.mark.skipif(
 # --- 測試題庫 -----------------------------------------------------------
 
 
-def _write_position(
-    root: pathlib.Path, position_id: int, side: Side, fen: str
-) -> pathlib.Path:
-    """在 `root/測試書/` 底下寫一題。出處由資料夾表達,題目 JSON 沒有出處欄位。"""
+def _write_position(root: pathlib.Path, position_id: int, fen: str) -> pathlib.Path:
+    """在 `root/測試書/` 底下寫一題。
+
+    題目 JSON 沒有出處欄位(出處由資料夾表達),也沒有 `side_to_move` —— 起手方是
+    `fen` 走子方那一欄的事,所以 `RED_FEN` 與 `BLACK_FEN` 的差別就是起手方的差別。
+    檔案內容是陣列,即使只裝一題。
+    """
     payload: dict[str, Any] = {
         "id": position_id,
         "title": f"題目{position_id}",
         "description": f"測試題目 {position_id}",
         "fen": fen,
-        "side_to_move": side.value,
         "difficulty": 3,
         "tags": ["連將殺"],
         "max_dtm": 16,
-        "solvable": True,
     }
     folder = root / "測試書"
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"{position_id:04d}.json"
-    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    path = folder / f"{position_id}-{position_id}.json"
+    path.write_text(json.dumps([payload], ensure_ascii=False), encoding="utf-8")
     return path
 
 
@@ -159,7 +164,7 @@ def make_service(tmp_path: pathlib.Path, fake_engine):
     ) -> _Harness:
         root = tmp_path / f"corpus_{len(harnesses)}"
         fen = RED_FEN if start_side is Side.RED else BLACK_FEN
-        _write_position(root, PUZZLE_ID, start_side, fen)
+        _write_position(root, PUZZLE_ID, fen)
         repository = PositionRepository(root)
         repository.load()
 
@@ -693,7 +698,7 @@ def test_real_engine_plays_the_puzzle_to_a_true_end_with_red_winning() -> None:
     service = GameService(repository, pool, settings)
 
     try:
-        fen, state = service.start(PUZZLE_ID)
+        fen, state = service.start(REAL_PUZZLE_ID)
         assert fen == RED_FEN
         assert state.over is False
 
@@ -713,7 +718,7 @@ def test_real_engine_plays_the_puzzle_to_a_true_end_with_red_winning() -> None:
             if best.score is not None and best.score.kind is ScoreKind.MATE:
                 mate_seen_while_in_progress = True
             moves.append(best.move)
-            state = service.state(PUZZLE_ID, moves)
+            state = service.state(REAL_PUZZLE_ID, moves)
 
         assert state.over is True, f"走了 {len(moves)} 步仍未終局"
         assert state.legal_moves == []
@@ -765,7 +770,7 @@ def test_real_engine_black_reply_signals_red_winning_until_the_game_ends() -> No
     service = GameService(repository, pool, settings)
 
     try:
-        fen, state = service.start(PUZZLE_ID)
+        fen, state = service.start(REAL_PUZZLE_ID)
         moves: list[str] = []
         countdowns: list[int] = []
         reply = None
@@ -777,13 +782,13 @@ def test_real_engine_black_reply_signals_red_winning_until_the_game_ends() -> No
                     best = engine.best_move(fen, moves, REAL_NODES, REAL_SEARCH_TIMEOUT)
                 assert best.move is not None, "合法著法非空時引擎不應回報無著可走"
                 moves.append(best.move)
-                state = service.state(PUZZLE_ID, moves)
+                state = service.state(REAL_PUZZLE_ID, moves)
                 continue
 
             # 輪到黑方 —— 即使上一手已經把黑方將死也照樣送出應手請求,那正是
             # 完成狀態要驗的路徑:前端不必先查局面才敢問應手。
             black_legal_moves = state.legal_moves
-            reply = service.black_reply(PUZZLE_ID, moves)
+            reply = service.black_reply(REAL_PUZZLE_ID, moves)
             if reply.signal is Signal.RED_WINNING:
                 assert reply.mate_in is not None, "紅方即將取勝時必須附殺著倒數(2.2)"
                 countdowns.append(reply.mate_in)

@@ -40,9 +40,8 @@
 `page.route()` 攔下 `/api/catalog` 供一份合成索引,而受測的仍是 `web/` 底下的
 **真實交付檔**(`index.html` / `list.js` / `list.css` 一個字都沒被替換)。
 
-合成索引刻意同時擺了 `solvable` 為 `null`、欄位不存在與 `false` 三種情形:
-**空值必須仍然列出**。corpus-verification 尚未回填,若把空值當成不可解,整個題庫
-在它跑完之前都會是空的 —— 那是本檔最要緊的一條。
+合成索引的題號**刻意有缺口**(1、2、3、5):題庫按局號收題,收到哪一局就是哪一局,
+中間跳號是常態。列不得以位置推題號,「下一題」也不得寫成 `id + 1`。
 
 ## 出處與描述是「拿了不畫」
 
@@ -268,12 +267,13 @@ CONTENT_TYPES = {
 
 #: 合成的 `GET /api/catalog` 回應內容(形狀取自 `service/main.py` 的 `read_catalog`)。
 #:
-#: 五題涵蓋了本節要分辨的每一種情形:
+#: 四題涵蓋了本節要分辨的每一種情形:
 #:
-#: - 難度有 3、3、5、1、**0** 四種值;標籤「連將殺」橫跨多題,第 1 題帶兩個標籤
-#:   —— 上架的四題裡有兩題(5 與 0)**落在 schema 的 1–3 之外**,退路因此在每一條
+#: - 難度有 3、3、5、**0** 三種值;標籤「連將殺」橫跨多題,第 1 題帶兩個標籤
+#:   —— 四題裡有兩題(5 與 0)**落在 schema 的 1–3 之外**,退路因此在每一條
 #:   用到這份夾具的測試裡都被走到,不必特地去湊
-#: - `solvable`:1 為 `True`、2 為 `None`、3 完全沒有這個欄位、4 明確為 `False`
+#: - **題號有缺口**(1、2、3、5):第 4 局還沒收。「下一題」若寫成 `id + 1`,
+#:   在第 3 題就會指到一個不存在的題目
 #: - 第 5 題**沒有標籤**,那一欄的佔位路徑因此也會被走到
 #: - **描述與出處與局名、標籤沒有任何共同字串** —— 列表若把它們畫出去,一比對就抓得到
 #:
@@ -288,7 +288,6 @@ CATALOG: list[dict[str, Any]] = [
         "difficulty": 3,
         "tags": ["雙馬", "連將殺"],
         "source": "適情雅趣",
-        "solvable": True,
     },
     {
         "id": 2,
@@ -297,8 +296,6 @@ CATALOG: list[dict[str, Any]] = [
         "difficulty": 3,
         "tags": ["連將殺"],
         "source": "適情雅趣",
-        # corpus-verification 尚未驗到這一題 —— 空值,仍須列出。
-        "solvable": None,
     },
     {
         "id": 3,
@@ -307,18 +304,8 @@ CATALOG: list[dict[str, Any]] = [
         "difficulty": 5,
         "tags": ["連將殺", "鬥快"],
         "source": "橘中秘",
-        # 連欄位都沒有 —— 一樣是「尚未回填」,仍須列出。
     },
-    {
-        "id": 4,
-        "title": "殘局存疑",
-        "description": "尚未驗出著法的殘局",
-        "difficulty": 1,
-        "tags": ["雙包"],
-        "source": "橘中秘",
-        # 唯一明確不可解的一題 —— 任何情況下都不得出現。
-        "solvable": False,
-    },
+    # 第 4 局還沒收 —— 題號的缺口是刻意的,見上方說明。
     {
         "id": 5,
         "title": "一子解雙征",
@@ -328,11 +315,10 @@ CATALOG: list[dict[str, Any]] = [
         # 沒有標籤 —— 那一欄的佔位路徑。
         "tags": [],
         "source": "橘中秘",
-        "solvable": True,
     },
 ]
 
-#: 扣掉明確不可解的第 4 題之後應該上架的題號,順序即索引的順序。
+#: 索引裡的題號,順序即索引的順序。索引有幾題就列幾題 —— 列表不做任何過濾。
 LISTED_IDS = ["1", "2", "3", "5"]
 
 #: 總題數。由 `LISTED_IDS` 導出,夾具增減題目時不必逐條改斷言。
@@ -341,16 +327,18 @@ TOTAL = str(len(LISTED_IDS))
 #: 題號到局名的對照,供無障礙名稱的斷言使用。
 TITLES = {str(entry["id"]): entry["title"] for entry in CATALOG}
 
-#: 不得出現在列表上的字串:全部五題的描述、兩個出處,以及不可解那一題的局名。
+#: 不得出現在列表上的字串:每一題的描述,以及兩個出處。
 NEVER_ON_THE_LIST = [entry["description"] for entry in CATALOG] + [
     "適情雅趣",
     "橘中秘",
-    "殘局存疑",
 ]
 
 #: 難度分級到說法的對照(`.kiro/steering/structure.md` 的題目 schema:1–3)。
-#: 列表上的難度是**文字標籤**而非數字 —— 「困難」比「難度 3」少一次心算。
-DIFFICULTY_LABELS = {1: "簡單", 2: "中等", 3: "困難"}
+#: 列表上的難度是**一個詞**而非數字 —— 「Hard」比「難度 3」少一次心算。
+#:
+#: **說法是英文,那是 steering 明列的例外**(其餘使用者可見文字一律繁體中文)。
+#: 同一列的標籤也是中文詞,難度又是無底色的彩色字,兩者若同語言就只剩顏色分得開。
+DIFFICULTY_LABELS = {1: "Easy", 2: "Medium", 3: "Hard"}
 
 
 def difficulty_text(value: Any) -> str:
@@ -689,7 +677,7 @@ def test_the_row_number_reads_as_a_numbered_entry(list_page) -> None:
 #: 題號位數不同、標籤數也不同的三題 —— 一份夾具同時驗題號右對齊與標籤靠右。
 #:
 #: 位數刻意跨 1/2/3 位(`1`、`22`、`333`):題號**有缺口**是本專案的實情
-#: (`solvable: false` 會被濾掉,收第二本書之後更明顯),而位數全部相同的夾具
+#: (按局號收題,中間幾局還沒收;收第二本書之後更明顯),而位數全部相同的夾具
 #: 對「左對齊還是右對齊」完全不敏感 —— 兩者畫出來一模一樣。
 ALIGNMENT_SAMPLES: list[dict[str, Any]] = [
     {"id": 1, "title": "一個標籤", "difficulty": 1, "tags": ["連將殺"],
@@ -929,35 +917,45 @@ def test_the_tags_are_flushed_right_so_the_difficulty_never_drifts(list_page) ->
 
 
 #: 三個合法分級各一題,外加一題超出範圍 —— 一份夾具走完全部四條路徑。
+#:
+#: **每一題都帶一個標籤**,因為難度的字級是拿同一列的標籤 chip 當基準比的
+#: (`test_the_difficulty_is_coloured_text_not_a_tag`)。標籤全空的話那一列只有
+#: 佔位符號,沒有 chip 可比。
 DIFFICULTY_SAMPLES: list[dict[str, Any]] = [
-    {"id": 11, "title": "入門局", "difficulty": 1, "tags": [], "source": "適情雅趣"},
-    {"id": 12, "title": "進階局", "difficulty": 2, "tags": [], "source": "適情雅趣"},
-    {"id": 13, "title": "刁鑽局", "difficulty": 3, "tags": [], "source": "適情雅趣"},
-    {"id": 14, "title": "離譜局", "difficulty": 9, "tags": [], "source": "適情雅趣"},
+    {"id": 11, "title": "入門局", "difficulty": 1, "tags": ["連將殺"], "source": "適情雅趣"},
+    {"id": 12, "title": "進階局", "difficulty": 2, "tags": ["連將殺"], "source": "適情雅趣"},
+    {"id": 13, "title": "刁鑽局", "difficulty": 3, "tags": ["連將殺"], "source": "適情雅趣"},
+    {"id": 14, "title": "離譜局", "difficulty": 9, "tags": ["連將殺"], "source": "適情雅趣"},
 ]
 
 
 def test_each_difficulty_reads_as_a_word_not_a_number(list_page) -> None:
-    """1 / 2 / 3 分別畫成「簡單」「中等」「困難」。"""
+    """1 / 2 / 3 分別畫成 Easy / Medium / Hard。
+
+    **說法是英文,而且不是隨手選的**:它是 steering 對「使用者可見文字一律繁體中文」
+    列出的例外之一,理由寫在 `.kiro/steering/structure.md` 的難度分級表 —— 難度是
+    無底色的彩色字,同一列的標籤又都是中文詞,同語言的話兩者只剩顏色分得開。
+    改回中文會讓那條無障礙上的理由失效,故在此連字面一起釘住。
+    """
     open_list(list_page, DIFFICULTY_SAMPLES)
 
     cells = difficulty_cells(list_page)
 
     assert {row_id: cell["text"] for row_id, cell in cells.items()} == {
-        "11": "簡單",
-        "12": "中等",
-        "13": "困難",
+        "11": "Easy",
+        "12": "Medium",
+        "13": "Hard",
         # 超出範圍:原樣顯示那個數字,不是空白、不是猜一個分級。
         "14": "9",
     }
 
 
 def test_the_three_difficulties_do_not_share_a_colour(list_page) -> None:
-    """三級的顏色彼此不同 —— 三個標籤同色的話,顏色這個線索等於沒有。
+    """三級的文字色彼此不同 —— 三級同色的話,顏色這個線索等於沒有。
 
-    底色與文字色**兩者都要**分得開:leetcode 式的標籤是「淡底色 + 同色系文字」,
-    只換其中一個,另一個就成了三級共用的死值,而深色底上單靠文字色的差異在餘光裡
-    很容易糊成一片。
+    **只比文字色,因為顏色是這一格僅剩的線索。** 難度已從標籤改成一個帶顏色的詞
+    (底色與框寬都沒了),文字色一旦退化成三級共用的死值,就再也沒有第二個地方
+    分得出簡單與困難。
 
     比的是彼此相異而非某個色碼字面值:配色微調不該讓測試轉紅,而「三級同色」這種
     真正的退化逃不掉。順帶要求它們與中性色(超出範圍那一題)也不同,否則三級全部
@@ -968,13 +966,11 @@ def test_the_three_difficulties_do_not_share_a_colour(list_page) -> None:
     cells = difficulty_cells(list_page)
     graded = ["11", "12", "13"]
 
-    for channel in ("color", "background"):
-        seen = [cells[row_id][channel] for row_id in graded]
-        assert len(set(seen)) == 3, f"三個難度的 {channel} 沒有分開:{seen}"
-        assert cells["14"][channel] not in seen, (
-            f"合法分級的 {channel} 與中性色相同,規則沒有生效:{seen} 對 "
-            f"{cells['14'][channel]}"
-        )
+    seen = [cells[row_id]["color"] for row_id in graded]
+    assert len(set(seen)) == 3, f"三個難度的文字色沒有分開:{seen}"
+    assert cells["14"]["color"] not in seen, (
+        f"合法分級的文字色與中性色相同,規則沒有生效:{seen} 對 {cells['14']['color']}"
+    )
 
     # 上色掛勾本身也釘住:樣式表靠它挑規則,改名會讓上面那條靜默退回中性色。
     assert [cells[row_id]["level"] for row_id in graded] == ["1", "2", "3"]
@@ -982,20 +978,27 @@ def test_the_three_difficulties_do_not_share_a_colour(list_page) -> None:
 
 
 @pytest.mark.parametrize("row_id", ["11", "12", "13", "14"])
-def test_the_difficulty_tag_is_a_box_not_bare_text(list_page, row_id) -> None:
-    """標籤是**方框**,不是一行變了顏色的字。
+def test_the_difficulty_is_coloured_text_not_a_tag(list_page, row_id) -> None:
+    """難度是**一個帶顏色的詞**,不是標籤:沒有底色、沒有圓角,字級與標籤的 chip 相同。
 
-    底色與圓角是它之所以讀起來像個標籤的全部理由;只上文字色的話,在一整片深灰
-    背景上那就只是三個顏色略有不同的詞。
+    這條原本要求的是相反的事(底色 + 圓角 + 左右留白 = 一個方框)。使用者看過實際
+    畫面後改了主意:難度與標籤都做成 chip 的話,一列的右半邊是一排形狀相同的小方塊,
+    難度混在標籤裡認不出來。
 
-    底色不能只比 `backgroundColor`:那個屬性在完全透明時照樣回報一個顏色值
-    (`rgba(…, 0)`),整條 `background` 被刪掉也看不出來。因此連 alpha 一起要求。
-    (tasks 3.2 在 `borderLeftColor` 上踩過同一個坑。)
+    **字級與標籤看齊是第二次調整**:中途試過與局名同級的 18px,太搶 —— 難度終究是
+    次要資訊。同級卻仍分得出來,靠的是它沒有灰底 chip,以及它的說法是英文而標籤是
+    中文。
 
-    **四題全驗,超出範圍那一題(14)尤其要驗。** 三個合法分級各自宣告了自己的底色,
-    只驗它們的話,基底規則那條中性底色被刪掉照樣全綠 —— 而那正是超出範圍的值唯一的
-    底色來源,它一沒了,那一格就從方框退回一行灰字。突變實測過:只驗第 13 題時,
-    刪掉基底的 `background` 是**存活的**。
+    「看齊」在數值上是**比 chip 大 1px**,不是相等:相同 `font-size` 下拉丁字母的
+    x-height 只有 CJK 的一半上下,數值相等時英文看起來明顯比中文小。這裡因此驗
+    「大一點點」而不是「相等」,上界擋住有人把它一路放大回 18px。
+
+    底色**不能只比 `backgroundColor` 是不是某個值**:那個屬性在完全透明時照樣回報
+    一個顏色值(`rgba(…, 0)`)。這裡要的正是全透明,因此直接要求 alpha 為 0。
+    (tasks 3.2 在 `borderLeftColor` 上踩過同一個坑,方向相反而已。)
+
+    **四題全驗,超出範圍那一題(14)尤其要驗** —— 它走的是基底規則,三個合法分級
+    走的是各自的覆寫。只驗其中一邊的話,另一邊悄悄長回底色不會被發現。
     """
     open_list(list_page, DIFFICULTY_SAMPLES)
 
@@ -1007,10 +1010,13 @@ def test_the_difficulty_tag_is_a_box_not_bare_text(list_page, row_id) -> None:
           const style = getComputedStyle(cell);
           const rect = cell.getBoundingClientRect();
           const row = cell.closest('li').getBoundingClientRect();
+          const chip = cell.closest('li').querySelector('.position-tag');
           return {
             background: style.backgroundColor,
             radius: parseFloat(style.borderTopLeftRadius) || 0,
             padding: parseFloat(style.paddingLeft) || 0,
+            fontSize: parseFloat(style.fontSize),
+            chipFontSize: chip ? parseFloat(getComputedStyle(chip).fontSize) : null,
             width: rect.width,
             rowWidth: row.width,
           };
@@ -1018,14 +1024,18 @@ def test_the_difficulty_tag_is_a_box_not_bare_text(list_page, row_id) -> None:
         row_id,
     )
 
-    alpha = box["background"].startswith("rgba(") and box["background"].endswith(", 0)")
-    assert not alpha, (
-        f"第 {row_id} 題的難度標籤底色是全透明的,畫面上看不到方框:{box}"
+    transparent = box["background"] == "rgba(0, 0, 0, 0)" or box[
+        "background"
+    ].endswith(", 0)")
+    assert transparent, f"第 {row_id} 題的難度還帶著底色,那是標籤的樣子:{box}"
+    assert box["radius"] == 0, f"難度還留著圓角,那是標籤的樣子:{box}"
+    assert box["padding"] == 0, f"難度還留著左右留白,那是標籤的樣子:{box}"
+    gap = box["fontSize"] - box["chipFontSize"]
+    assert 0 < gap <= 2, (
+        f"難度的字級沒有與標籤 chip 看齊(該比它大 1px 左右,補拉丁字母的 x-height):{box}"
     )
-    assert box["radius"] > 0, f"難度標籤沒有圓角,不像個標籤:{box}"
-    assert box["padding"] > 0, f"難度標籤沒有左右留白,字會貼著框邊:{box}"
-    # 只有內容那麼寬:撐滿整欄的話「困難」與「簡單」的框一樣長,框寬這個線索就沒了。
-    assert box["width"] < box["rowWidth"] / 4, f"難度標籤撐得太寬:{box}"
+    # 只有內容那麼寬,不撐滿整欄。
+    assert box["width"] < box["rowWidth"] / 4, f"難度那一格撐得太寬:{box}"
 
 
 @pytest.mark.parametrize(
@@ -1094,47 +1104,6 @@ def test_a_difficulty_of_the_wrong_type_does_not_impersonate_a_grade(list_page) 
 
     assert cells["11"]["text"] == "1"
     assert cells["11"]["level"] is None, "型別不對的難度卻拿到了分級的上色掛勾"
-
-
-# --- 1.4:不可解的題目不列入,空值仍須列出 ------------------------------
-
-
-def test_a_position_marked_unsolvable_is_not_listed(list_page) -> None:
-    """1.4:明確標為不可解的題目不列入。"""
-    open_list(list_page)
-
-    assert "4" not in [row["id"] for row in rows(list_page)]
-
-
-def test_a_position_whose_solvable_flag_is_unfilled_is_still_listed(list_page) -> None:
-    """1.4:空值視為可上架 —— `null` 與欄位不存在都算空值。
-
-    這是最容易寫反的一條:`catalog.js` 已經做完過濾,`list.js` 若再加一層 truthy
-    判斷,目前題庫(全部都還沒回填)會整個空掉。
-    """
-    open_list(list_page)
-
-    listed = [row["id"] for row in rows(list_page)]
-
-    assert "2" in listed, "solvable 為 null 的題目必須列出"
-    assert "3" in listed, "沒有 solvable 欄位的題目必須列出"
-
-
-def test_a_catalog_where_nothing_is_verified_yet_still_lists_everything(
-    list_page,
-) -> None:
-    """1.4:整份索引都還沒回填時,列表**不得**變成空的。
-
-    這是上一條的極端情形,也正是今天題庫的現實 —— corpus-verification 尚未跑過,
-    每一題的 `solvable` 都是 `null`。列表在這裡空掉,產品就等於打不開。
-    """
-    unverified = [{**entry, "solvable": None} for entry in CATALOG]
-    open_list(list_page, unverified)
-
-    assert [row["id"] for row in rows(list_page)] == [
-        str(entry["id"]) for entry in CATALOG
-    ]
-    assert list_page.locator("#empty").is_hidden()
 
 
 # --- 3.1、3.2、3.5:完成標記與計數 --------------------------------------
@@ -1686,7 +1655,6 @@ def play_response(entry: dict[str, Any]) -> dict[str, Any]:
         "difficulty": entry.get("difficulty"),
         "tags": entry.get("tags", []),
         "max_dtm": 9,
-        "solvable": True,
         "source": entry.get("source", ""),
         "state": {
             "side_to_move": "red",
@@ -2275,9 +2243,9 @@ def test_the_meta_line_is_nothing_but_the_source(list_page) -> None:
 # 造法(改題庫不是選項:那會讓每一條依賴真實題庫的測試跟著漂)。真實服務那一側
 # 走到的是「已是最後一題」,由 `tests/test_web_e2e.py` 覆蓋。
 #
-# **題號有缺口是這一節的核心。** `CATALOG` 的第 4 題 `solvable: False`,因此可上架
-# 的題號是 1、2、3、5 —— 第 3 題的下一題是**第 5 題**,不是第 4 題。以 `id + 1` 取代
-# 查索引的寫法會在這裡直接撞牆,而在連號的夾具上完全看不出來。
+# **題號有缺口是這一節的核心。** `CATALOG` 的題號是 1、2、3、5(第 4 局還沒收)
+# —— 第 3 題的下一題是**第 5 題**,不是第 4 題。以 `id + 1` 取代查索引的寫法會在
+# 這裡直接撞牆,而在連號的夾具上完全看不出來。
 
 #: 「下一題」那個控制項的 id(`web/app.js` 的 `mountNextLink`)。與 `#back-to-list`
 #: 同性質:是 `app.js` 自己畫樣式與導航要用的結構契約,不是測試專用的鉤子。
@@ -2424,14 +2392,14 @@ def test_the_next_position_is_a_real_relative_link(list_page) -> None:
     assert link["href"] == f".{PLAY_PATH}?id=2", f"「下一題」不是相對位址:{link}"
 
 
-def test_the_next_position_skips_the_ones_that_are_not_listable(list_page) -> None:
-    """下一題是**題號大於當前題、且可上架的最小題號** —— 不是 `id + 1`。
+def test_the_next_position_skips_a_gap_in_the_numbering(list_page) -> None:
+    """下一題是**索引裡題號大於當前題的最小題號** —— 不是 `id + 1`。
 
-    夾具的第 4 題 `solvable: False`,因此第 3 題的下一題是**第 5 題**。`id + 1` 會
-    指到第 4 題,而那一題根本不該上架 —— 使用者按下去只會看到一個不存在的題目。
+    夾具沒有第 4 題,因此第 3 題的下一題是**第 5 題**。`id + 1` 會指到第 4 題,
+    而索引裡根本沒有那一題 —— 使用者按下去只會看到「找不到這一題」。
 
-    本專案的題號有缺口是實情而非假想:`solvable: false` 會被濾掉,收第二本書之後
-    更明顯,`PositionRepository.all()` 的存在正是為了這件事。
+    本專案的題號有缺口是實情而非假想:題庫按局號收題,收到哪一局就是哪一局,
+    `PositionRepository.all()` 的存在正是為了這件事。
     """
     open_and_win(list_page, 3)
     list_page.wait_for_selector(f"#{NEXT_LINK_ID}:not([hidden])")

@@ -1,0 +1,43 @@
+[
+  {
+    "id": 20,
+    "title": "推強扶弱",
+    "description": "適情雅趣 第二〇局 推強扶弱",
+    "fen": "2bak2r1/4aP2R/2R1b4/6p1p/1Np6/P1C6/8P/9/3pr4/5K2c w - - 0 1",
+    "difficulty": 2,
+    "tags": ["引離"]
+  },
+  {
+    "id": 21,
+    "title": "盡善克終",
+    "description": "適情雅趣 第二一局 盡善克終",
+    "fen": "3ak4/3RaR3/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 w - - 0 1",
+    "difficulty": 3,
+    "tags": ["雙馬", "解殺還殺"],
+    "max_dtm": 16
+  },
+  {
+    "id": 22,
+    "title": "思鄉及第",
+    "description": "適情雅趣 第二二局 思鄉及第",
+    "fen": "r1N3b2/1c1kaP3/3ab4/8N/9/9/9/4BA3/5p3/C1R1K1Rrc w - - 0 1",
+    "difficulty": 3,
+    "tags": ["借炮使馬"]
+  },
+  {
+    "id": 23,
+    "title": "滄海遺珠",
+    "description": "適情雅趣 第二三局 滄海遺珠",
+    "fen": "2bnk4/9/b8/2PRp1RN1/9/9/9/1C2B1r2/4p1r2/c1pC1K2c w - - 0 1",
+    "difficulty": 2,
+    "tags": ["馬後炮"]
+  },
+  {
+    "id": 24,
+    "title": "垂韁救主",
+    "description": "適情雅趣 第二四局 垂韁救主",
+    "fen": "2bak4/4a4/9/4pNpNn/6b2/9/4P4/3p5/crR1K3C/2nr2B2 w - - 0 1",
+    "difficulty": 3,
+    "tags": ["借炮使馬"]
+  }
+]

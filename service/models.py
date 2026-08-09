@@ -25,7 +25,7 @@ POC 的 `/api/state?moves=...` 在長局會使 URL 過長,這是本 spec 明列�
 ## 空值一律保留欄位,不省略
 
 回應模型不設 `exclude_none`,任何可為空的欄位(`mate_in`、`winner`、`max_dtm`、
-`solvable`、`source`)在空值時仍出現於 JSON。前端因此不必分辨「沒有這個欄位」與
+`source`)在空值時仍出現於 JSON。前端因此不必分辨「沒有這個欄位」與
 「值為空」—— 見 `BlackMoveResponse.mate_in` 的說明,那裡的差別會吃掉終局那一手。
 """
 
@@ -216,7 +216,11 @@ class PositionResponse(BaseModel):
     description: str = Field(description="完整描述,涵蓋書名、局號、局名。")
     fen: str = Field(description="起始局面。")
     side_to_move: Side = Field(
-        description="起手方。**不得假設為紅** —— 題庫容得下黑先的排局。"
+        description=(
+            "起手方。**不得假設為紅** —— 題庫容得下黑先的排局。不是題目 schema 的"
+            "欄位,由 `fen` 的走子方那一欄推導(見 `positions.py` 的 "
+            "`_side_from_fen`),在此攤成獨立欄位是省得每個 client 自己去剖 FEN。"
+        )
     )
     difficulty: int = Field(description="難度分級。")
     tags: list[str] = Field(description="題目標籤,可多個。")
@@ -225,12 +229,6 @@ class PositionResponse(BaseModel):
         description=(
             "最長殺著距離。由題目驗證工具(corpus-verification)日後回填,"
             "現階段可為空,**不得視為必填**。"
-        ),
-    )
-    solvable: bool | None = Field(
-        default=None,
-        description=(
-            "是否確認紅先必勝。同樣由題目驗證工具日後回填,現階段可為空。"
         ),
     )
     source: str | None = Field(
@@ -265,7 +263,6 @@ class PositionResponse(BaseModel):
             difficulty=position.difficulty,
             tags=list(position.tags),
             max_dtm=position.max_dtm,
-            solvable=position.solvable,
             source=source,
             state=GameStateResponse.from_domain(state),
         )

@@ -64,15 +64,15 @@ repo 內已有本地 POC(`poc/`:Python 小後端包住 native pikafish + 單頁�
   - **HTTP API 契約**是 engine-service 與 web-play-runtime 的正式接縫。POC 的 `/api/start`、`/api/state?moves=...`、`/api/black?moves=...` 是雛形,但 query string 傳整個走法序列在長局會爆長,契約須在 design 階段重新定案。
   - `EngineAdapter.best_move(fen, moves, nodes) -> (uci_move, score)` 外加 `legal_moves`(`tech.md`)仍是引擎存取的內部介面,由 engine-service 擁有;前端只認 HTTP 契約,不認 UCI。
   - **native 引擎封裝被兩個 spec 使用**:engine-service(互動式,求反應快)與 corpus-verification(離線驗證,求搜得深)。用途與參數截然不同,是否共用同一套 UCI 封裝程式碼須在 design 階段決定,不要為了「看起來該共用」而硬綁。
-  - `positions/*.json` 的 schema 由 position-corpus 擁有;corpus-verification 只回填 `max_dtm` / `solvable`,其餘 spec 只讀不寫。
+  - `positions/*.json` 的 schema 由 position-corpus 擁有;corpus-verification 只回填 `max_dtm`,其餘 spec 只讀不寫。
   - **判定表的預留接縫**:走脫回饋須設計成可插拔 —— 三態信號是目前唯一來源,日後判定表上線時是新增來源而非改寫流程(DESIGN §6 原案)。
 
 ## Specs (dependency order)
 
 - [ ] engine-service -- 將 `poc/server.py` 產品化為引擎後端:native Pikafish 進程池、併發與逾時、HTTP API 契約、rate limit。Dependencies: none
-- [ ] position-corpus -- 題目 schema 定案與《適情雅趣》前 200 局收錄,一題一檔進 git。Dependencies: none
+- [ ] position-corpus -- 題目 schema 定案與《適情雅趣》前 200 局收錄,一檔一段局號區間進 git。Dependencies: none
 - [ ] web-play-runtime -- 前端對局 client:棋盤、走子、真終局停局、三態信號、中文記譜,以及網路延遲與失敗的互動處理。Dependencies: engine-service
-- [ ] corpus-verification -- `tools/verify.py`:長時間搜尋確認紅先必勝、剔除偽題、回填 max_dtm 與 solvable,加 CI 的 FEN 合法性檢查。Dependencies: position-corpus
+- [ ] corpus-verification -- `tools/verify.py`:長時間搜尋確認紅先必勝、剔除偽題、回填 max_dtm,加 CI 的 FEN 合法性檢查。Dependencies: position-corpus
 - [ ] problem-browser -- 題目列表、難度與標籤篩選、練習進度紀錄(localStorage)。Dependencies: web-play-runtime, position-corpus, corpus-verification
 - [ ] service-deploy-ops -- 服務部署、引擎版本鎖定的上線流程、監控與資源上限、濫用防護、引擎與 NNUE 授權標示。Dependencies: engine-service, web-play-runtime
 

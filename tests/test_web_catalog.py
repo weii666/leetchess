@@ -11,12 +11,11 @@ Chromium 不允許自 `file://`(origin 為 `null`)匯入 ES module,一律以 COR
 http(s) 來源下被載入 —— 此處以 `page.route()` 就地供 `web/` 底下的**真實交付檔**,
 不啟動任何伺服器進程。同一個攔截機制順帶也是模擬後端的手段。
 
-## 這裡最要緊的一條
+## 這一層不過濾任何東西
 
-**`solvable` 為空值時必須仍然列出。** corpus-verification 尚未回填,若把空值當成
-不可解,整個題庫在驗證工具跑完之前都會是空的 —— 產品會在最需要能用的時候完全
-打不開。只有明確的 `false` 才排除。`CATALOG` 因此刻意同時擺了 `null`、欄位不存在
-與 `false` 三種情形。
+`loadCatalog()` 回的就是索引的全部,篩選是另一回事(`filterPositions()`,取值而
+不消耗)。曾有一道 `isListable()` 依 `solvable` 濾掉偽題,該欄位已隨題目 schema
+移除 —— 它從未有過非空的值,那道過濾不曾濾掉任何一題。
 """
 
 from __future__ import annotations
@@ -45,7 +44,7 @@ CATALOG_PATH = "/api/catalog"
 #:
 #: - 難度 3 有 1、2、5;難度 5 有 3、6;難度 1 只有 4
 #: - 標籤「連將殺」橫跨兩個出處,「雙馬」橫跨兩種難度
-#: - `solvable`:2 為 `null`、4 完全沒有這個欄位、5 明確為 `false`
+#: - 第 5 題的難度、標籤與出處都與第 1、2 題重疊 —— 條件命中它們就會一併命中它
 CATALOG: list[dict[str, Any]] = [
     {
         "id": 1,
@@ -54,7 +53,6 @@ CATALOG: list[dict[str, Any]] = [
         "difficulty": 3,
         "tags": ["雙馬", "連將殺", "鬥快"],
         "source": "適情雅趣",
-        "solvable": True,
     },
     {
         "id": 2,
@@ -63,8 +61,6 @@ CATALOG: list[dict[str, Any]] = [
         "difficulty": 3,
         "tags": ["連將殺"],
         "source": "適情雅趣",
-        # corpus-verification 尚未驗到這一題 —— 空值,仍須列出。
-        "solvable": None,
     },
     {
         "id": 3,
@@ -73,7 +69,6 @@ CATALOG: list[dict[str, Any]] = [
         "difficulty": 5,
         "tags": ["連將殺", "鬥快"],
         "source": "橘中秘",
-        "solvable": True,
     },
     {
         "id": 4,
@@ -82,7 +77,6 @@ CATALOG: list[dict[str, Any]] = [
         "difficulty": 1,
         "tags": ["雙馬"],
         "source": "橘中秘",
-        # 連欄位都沒有 —— 一樣是「尚未回填」,仍須列出。
     },
     {
         "id": 5,
@@ -91,8 +85,6 @@ CATALOG: list[dict[str, Any]] = [
         "difficulty": 3,
         "tags": ["連將殺"],
         "source": "適情雅趣",
-        # 唯一明確不可解的一題 —— 任何情況下都不得出現。
-        "solvable": False,
     },
     {
         "id": 6,
@@ -101,12 +93,11 @@ CATALOG: list[dict[str, Any]] = [
         "difficulty": 5,
         "tags": ["雙包"],
         "source": "適情雅趣",
-        "solvable": True,
     },
 ]
 
-#: 扣掉明確不可解的第 5 題之後應該上架的題號,順序即索引的順序。
-LISTABLE_IDS = [1, 2, 3, 4, 6]
+#: 索引裡的題號,順序即索引的順序。`loadCatalog()` 一題都不過濾。
+CATALOG_IDS = [1, 2, 3, 4, 5, 6]
 
 
 # --- 夾具與呼叫工具 -----------------------------------------------------
@@ -328,87 +319,7 @@ def test_the_catalog_preserves_the_order_of_the_index(catalog_page) -> None:
     """
     serve_catalog(catalog_page)
 
-    assert [p["id"] for p in loaded(catalog_page)] == LISTABLE_IDS
-
-
-# --- 1.4:可解標記的過濾 ------------------------------------------------
-
-
-def test_a_position_marked_unsolvable_is_left_out(catalog_page) -> None:
-    """1.4:明確標為不可解的題目不列入。"""
-    serve_catalog(catalog_page)
-
-    assert 5 not in [p["id"] for p in loaded(catalog_page)]
-
-
-def test_a_position_whose_solvable_flag_is_unfilled_is_still_listed(
-    catalog_page,
-) -> None:
-    """1.4:空值視為可上架 —— `null` 與欄位不存在都算空值。
-
-    這是最容易寫反的一條。corpus-verification 尚未回填,若把空值當成不可解,
-    整個題庫在它跑完之前都會是空的。
-    """
-    serve_catalog(catalog_page)
-
-    listed = [p["id"] for p in loaded(catalog_page)]
-
-    assert 2 in listed, "solvable 為 null 的題目必須列出"
-    assert 4 in listed, "沒有 solvable 欄位的題目必須列出"
-
-
-def test_an_index_where_nothing_is_verified_yet_still_lists_everything(
-    catalog_page,
-) -> None:
-    """1.4:整份索引都還沒回填時,題庫**不得**變成空的。
-
-    這是上一條的極端情形,也是它真正要防的災難 —— corpus-verification 之前的
-    現實就長這樣。
-    """
-    unverified = [{**entry, "solvable": None} for entry in CATALOG]
-    serve_catalog(catalog_page, unverified)
-
-    assert [p["id"] for p in loaded(catalog_page)] == [e["id"] for e in CATALOG]
-
-
-def test_only_an_explicit_false_excludes_a_position(catalog_page) -> None:
-    """1.4:排除的判準是「明確為 `false`」,不是「不為真」。
-
-    直接對判斷本身取值,把四種可解標記一次擺出來 —— 用 falsy 判斷的實作會
-    在 `null` 與欄位不存在這兩欄變紅。
-    """
-    verdicts = catalog_page.evaluate(
-        """async () => {
-          const catalog = await import('/catalog.js');
-          return {
-            yes: catalog.isListable({ id: 1, solvable: true }),
-            no: catalog.isListable({ id: 2, solvable: false }),
-            empty: catalog.isListable({ id: 3, solvable: null }),
-            absent: catalog.isListable({ id: 4 }),
-          };
-        }"""
-    )
-
-    assert verdicts == {"yes": True, "no": False, "empty": True, "absent": True}
-
-
-def test_an_unsolvable_position_stays_out_of_every_filter_result(catalog_page) -> None:
-    """1.4:過濾先於篩選 —— 不可解的題目不會因為符合條件而回來。
-
-    第 5 題的難度、標籤與出處都與第 1、2 題重疊,任何一組條件命中它們就會
-    一併命中第 5 題;過濾若做在錯誤的層次,這裡就會看到 5。
-    """
-    serve_catalog(catalog_page)
-
-    results = ids_for(
-        catalog_page,
-        {"difficulty": 3},
-        {"tag": "連將殺"},
-        {"source": "適情雅趣"},
-        {"difficulty": 3, "tag": "連將殺", "source": "適情雅趣"},
-    )
-
-    assert results == [[1, 2], [1, 2, 3], [1, 2, 6], [1, 2]]
+    assert [p["id"] for p in loaded(catalog_page)] == CATALOG_IDS
 
 
 # --- 2.1、2.2、2.3:單一條件 -------------------------------------------
@@ -435,11 +346,11 @@ def test_filtering_by_source_lists_only_that_source(catalog_page) -> None:
     serve_catalog(catalog_page)
 
     assert one_result(catalog_page, {"source": "橘中秘"}) == [3, 4]
-    assert one_result(catalog_page, {"source": "適情雅趣"}) == [1, 2, 6]
+    assert one_result(catalog_page, {"source": "適情雅趣"}) == [1, 2, 5, 6]
 
 
 def test_no_criteria_lists_the_whole_catalog(catalog_page) -> None:
-    """沒有條件時列出全部(扣掉不可解的),空字串等同於未選 —— 下拉選單的「全部」。"""
+    """沒有條件時列出全部,空字串等同於未選 —— 下拉選單的「全部」。"""
     serve_catalog(catalog_page)
 
     assert ids_for(
@@ -448,7 +359,7 @@ def test_no_criteria_lists_the_whole_catalog(catalog_page) -> None:
         None,
         {"difficulty": None, "tag": None, "source": None},
         {"difficulty": "", "tag": "", "source": ""},
-    ) == [LISTABLE_IDS] * 4
+    ) == [CATALOG_IDS] * 4
 
 
 def test_a_difficulty_given_as_text_filters_the_same_as_a_number(catalog_page) -> None:
@@ -525,7 +436,7 @@ def test_filtering_leaves_the_loaded_index_untouched(catalog_page) -> None:
         }"""
     )
 
-    assert result == {"after": LISTABLE_IDS, "cleared": LISTABLE_IDS}
+    assert result == {"after": CATALOG_IDS, "cleared": CATALOG_IDS}
 
 
 # --- 取不到索引的情形 ---------------------------------------------------

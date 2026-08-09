@@ -59,21 +59,38 @@
   --line: #6b5433;
 
   /*
-   * 難度三色。**只有這一頁用得到,故不列入與 `style.css` 比對的共用清單**
+   * 難度三色,取自 leetcode 的綠 / 琥珀 / 紅(使用者提供的參考圖)。
+   * **只有這一頁用得到,故不列入與 `style.css` 比對的共用清單**
    * (`tests/test_web_list.py` 的 `SHARED_CUSTOM_PROPERTIES`)—— 對局頁沒有難度欄。
    *
-   * 每一組都是「深底 + 亮字」,亮度刻意壓在局名(`--text`)之下:難度是次要資訊。
+   * 三個都是直接畫在列底(`--panel-bg` #3a3a3a)上的字色,**沒有配對的底色**:
+   * 難度已不是 chip(見 `.position-difficulty`)。
+   *
+   * ## 參考圖的色不能照抄
+   *
+   * 那張圖是**白底**的。同一組色搬到深色底上會整體偏暗:參考圖的紅 #ef4743 對列底
+   * 只有 3.06:1,遠低於 WCAG AA 對一般文字的 4.5:1(難度是 18px 非粗體,不適用
+   * 大文字的 3:1)。因此三色都沿原色相往上提亮,提到「還看得出是那個顏色」為止。
    */
-  --difficulty-easy-bg: #1f3d31;
-  --difficulty-easy-text: #6fdcad;
+  --difficulty-easy-text: #35c98f; /* 5.36:1 */
   /*
-   * 中等刻意偏橙而非偏金:`--accent`(#ffd479)是題號與計數的顏色,兩者若同色系,
-   * 同一列上會出現兩個亮金的東西而分不出哪個是難度。實測過 #ffbe5c,太靠近了。
+   * 中等取飽和的琥珀而非淺金:`--accent`(#ffd479)是題號與計數的顏色,兩者若太近,
+   * 同一列上會出現兩個亮金的東西而分不出哪個是難度。實測過 #ffbe5c,太靠近了;
+   * 這個值飽和度高得多(88% 對 53%),分得開。
    */
-  --difficulty-medium-bg: #43300f;
-  --difficulty-medium-text: #ff9f43;
-  --difficulty-hard-bg: #4d2320;
-  --difficulty-hard-text: #ff9b91;
+  --difficulty-medium-text: #ffc01e; /* 6.94:1 */
+  /*
+   * 困難是三色裡唯一**低於 AA** 的一個(3.87:1)。這是刻意的取捨:再往上提亮就會
+   * 從紅偏成粉橘(#ff8078 才跨過 4.5:1,而那正是使用者說「不夠紅」的那個方向)。
+   * 要換回合規值就用 #ff8078 —— 差別在紅得夠不夠,不在讀不讀得到。
+   */
+  --difficulty-hard-text: #ff6259; /* 3.87:1,見上 */
+
+  /*
+   * 標籤 chip 與難度共用的字級。**單一出處是刻意的**:兩者同級是設計上的決定
+   * (使用者的意見),各自寫一個 12px 的話,改其中一個就會靜默地讓它們分家。
+   */
+  --chip-font-size: 12px;
 
   --gap: 24px;
   --radius: 8px;
@@ -193,8 +210,8 @@ h1 {
  *
  * ## 為什麼右對齊
  *
- * 題號是「數字 + 點」(`1.`、`201.`),而**本專案的題號有缺口** —— `solvable: false`
- * 的題目會被濾掉,收第二本書之後缺口只會更多。左對齊的話那一排點會跟著數字位數
+ * 題號是「數字 + 點」(`1.`、`201.`),而**本專案的題號有缺口** —— 題庫按局號
+ * 收題,中間幾局還沒收;收第二本書之後缺口只會更多。左對齊的話那一排點會跟著數字位數
  * 跑成參差的一排(`1.` 的點在第 2 個字位、`201.` 的在第 4 個),右對齊則讓那排點
  * 連成一條直線、局名的起點固定。
  *
@@ -205,7 +222,8 @@ h1 {
  */
 .position-id {
   text-align: right;
-  font-size: 16px;
+  /* 比局名小一級。兩者都是主要識別,但一列的入口是局名,題號是它的座標。 */
+  font-size: 15px;
   font-weight: 700;
   color: var(--accent);
   font-variant-numeric: tabular-nums;
@@ -217,12 +235,18 @@ h1 {
  *
  * `align-self: stretch` 是實質的 —— 連結的點擊區域因此是那一格的全高全寬,而不是
  * 幾個字那麼大。列與列之間只隔 8px,點歪一點就落到隔壁題上。
+ *
+ * ## 字級
+ *
+ * 16px:一行一題的列表尺度,不是文章標題的尺度。原本是 18px,使用者看過實際畫面後
+ * 覺得偏大 —— 題庫會長到兩百題以上,列高每多幾 px,一屏能掃到的題數就少一題。
+ * 往下還試過 15px,可讀性仍夠,但與難度(13px)只差 2px,主次就開始糊了。
  */
 .position-title {
   display: flex;
   align-items: center;
   align-self: stretch;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text);
   text-decoration: none;
@@ -239,38 +263,53 @@ h1 {
 }
 
 /*
- * 難度與標籤是次要資訊:字級小、顏色淡。
+ * 難度是**一個帶顏色的詞,不是標籤**:沒有底色、沒有圓角,字級與標籤的 chip 相同
+ * (`--chip-font-size`)。
+ *
+ * 兩件事各調過一次,都是使用者看過實際畫面後的意見:先是拿掉底色(原本與標籤一樣
+ * 是 chip,一列的右半邊因此是一排形狀相同的小方塊,難度混在裡面認不出來),接著把
+ * 字級從局名的 18px 降回這裡 —— 與局名同級太搶,難度終究是次要資訊。
+ *
+ * **與標籤同級卻仍分得出來**,靠的是另外兩件事:標籤有灰底 chip 而它沒有,以及
+ * 它的說法是英文而標籤是中文(`list.js` 的 `DIFFICULTY_LABELS`)。字級不必再擔第
+ * 三份工作。
+ *
+ * ## 為什麼字級比 chip 大 1px 卻仍算「一樣大」
+ *
+ * 相同 `font-size` 下**拉丁字母看起來就是比 CJK 小**:中文字幾乎填滿整個 em 方框,
+ * 而拉丁小寫的 x-height 只有 em 的一半上下。12px 的「解殺還殺」因此明顯比 12px 的
+ * `Hard` 大一圈。加 1px 與 600 字重是補這個差,補完之後兩者在畫面上**等重** ——
+ * 這是視覺上的相等,不是數值上的相等,實測 12/13/14px 三種後定在 13。
+ *
+ * 字重順帶還了一點債:`--difficulty-hard-text` 的對比低於 AA(見該處),粗一點的
+ * 筆畫在小字級下讀起來實際上更清楚。
  *
  * 這條是**基底兼退路**:認不得的難度(0、4、`null`、欄位不存在)只走到這裡,拿到
- * 中性灰的方框與原樣數值。三個合法分級各自在下面覆寫顏色。
+ * 中性灰與原樣數值。三個合法分級各自在下面**只覆寫顏色**。
  *
- * `justify-self: start` 讓方框只有內容那麼寬,不撐滿整欄 —— 撐滿的話「困難」與
- * 「簡單」的框一樣長,顏色以外的第二個線索(框寬)就沒了。
+ * `justify-self: start` 讓它只有內容那麼寬,不撐滿整欄。
  */
 .position-difficulty {
   justify-self: start;
-  padding: 1px 8px;
-  border-radius: 6px;
-  background: var(--chip-bg);
   color: var(--text-muted);
-  font-size: 13px;
+  /* 以 chip 字級為基準加一級 —— chip 改字級時這裡跟著走,兩者不會靜默分家。 */
+  font-size: calc(var(--chip-font-size) + 1px);
+  font-weight: 600;
+  letter-spacing: 0.01em;
   line-height: 1.6;
   font-variant-numeric: tabular-nums;
 }
 
 /* 1 = 簡單、2 = 中等、3 = 困難(`.kiro/steering/structure.md` 的題目 schema)。 */
 .position-difficulty[data-level="1"] {
-  background: var(--difficulty-easy-bg);
   color: var(--difficulty-easy-text);
 }
 
 .position-difficulty[data-level="2"] {
-  background: var(--difficulty-medium-bg);
   color: var(--difficulty-medium-text);
 }
 
 .position-difficulty[data-level="3"] {
-  background: var(--difficulty-hard-bg);
   color: var(--difficulty-hard-text);
 }
 
@@ -293,13 +332,13 @@ h1 {
   border-radius: 999px;
   background: var(--chip-bg);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--chip-font-size);
   line-height: 1.6;
 }
 
 .position-tag-none {
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--chip-font-size);
 }
 
 /* --- 空狀態與錯誤 ----------------------------------------------------- */

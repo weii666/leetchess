@@ -50,7 +50,6 @@ POSITION_RESPONSE: dict[str, Any] = {
     "difficulty": 3,
     "tags": ["排局"],
     "max_dtm": 9,
-    "solvable": True,
     "source": "適情雅趣",
     "state": {
         "side_to_move": "red",

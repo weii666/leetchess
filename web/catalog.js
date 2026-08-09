@@ -67,21 +67,6 @@ const isObject = (value) =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
- * 這一題是否該上架(1.4)。
- *
- * **判準是「可解標記明確為 `false`」,不是「不為真」。** 空值(`null`,或欄位
- * 根本不存在)代表 corpus-verification 還沒驗到這一題,一律視為可上架 ——
- * 若把空值當成不可解,在驗證工具跑完之前整個題庫都會是空的,產品會在最需要
- * 能用的時候完全打不開。
- *
- * @param {{solvable?: boolean|null}} position 索引中的一題。
- * @returns {boolean}
- */
-export function isListable(position) {
-  return position?.solvable !== false;
-}
-
-/**
  * 難度的比對值。空值代表「不篩這個維度」。
  *
  * 轉成數字是因為篩選條件多半來自下拉選單,而 DOM 給出來的值是字串;`'3'` 與
@@ -171,20 +156,25 @@ async function fetchIndex(timeoutMs) {
 }
 
 /**
- * 取得題目索引(5.1、5.2、1.4)。
+ * 取得題目索引(5.1、5.2)。
  *
- * 回傳的物件就是列表之後要用的**全部**資料:`positions` 是已經濾掉不可解題目的
- * 完整清單(順序即索引的順序,依題號遞增),`filter()` 則在這份清單上就地求值。
+ * 回傳的物件就是列表之後要用的**全部**資料:`positions` 是索引裡的完整清單
+ * (順序即索引的順序,依題號遞增),`filter()` 則在這份清單上就地求值。
  * **`filter()` 不會再發任何請求。**
+ *
+ * ## 這裡不再過濾任何東西
+ *
+ * 曾有一道 `isListable()` 依索引的 `solvable` 濾掉偽題(1.4)。該欄位已隨題目
+ * schema 移除:它要等 corpus-verification 跑完才有值,而在那之前每一題都是空值,
+ * 於是那道過濾從上線到拆掉為止不曾濾掉任何一題。日後真要標記偽題時,那是驗證
+ * 工具的產出,屆時重新決定它要落在索引還是這一層 —— 而不是留一道空轉的過濾。
  *
  * @param {{timeoutMs?: number}} [options]
  * @returns {Promise<{positions: readonly object[], filter: (criteria?: object) => object[]}>}
  * @throws {CatalogError} 索引取不到或形狀認不得時。呈現層只拿得到一個碼。
  */
 export async function loadCatalog(options) {
-  // 過濾先於任何篩選:不可解的題目從一開始就不在這份清單裡,因此不可能因為
-  // 符合某組條件而回來(1.4)。
-  const positions = Object.freeze((await fetchIndex(options?.timeoutMs)).filter(isListable));
+  const positions = Object.freeze(await fetchIndex(options?.timeoutMs));
 
   return Object.freeze({
     positions,

@@ -107,11 +107,12 @@ requires_real_engine = pytest.mark.skipif(
     not REAL_ENGINE.is_file(), reason="真實引擎未安裝,請先執行 engine/fetch.sh"
 )
 
-#: 題庫中的《適情雅趣》第 21 局 —— `positions/適情雅趣/0001.json`。
-PUZZLE_ID = 1
+#: 題庫中的《適情雅趣》第 21 局 —— `positions/適情雅趣-卷一/20-24.json` 裡的第 21 題。
+#: 題號即書上的局號,出處即題目所在的資料夾名。
+PUZZLE_ID = 21
 PUZZLE_TITLE = "盡善克終"
-PUZZLE_SOURCE = "適情雅趣"
-#: 這一題**真實的**最長殺著距離(`positions/適情雅趣/0001.json` 的 `max_dtm`)。
+PUZZLE_SOURCE = "適情雅趣-卷一"
+#: 這一題**真實的**最長殺著距離(題目的 `max_dtm`)。
 #:
 #: 用途已經反過來了:它現在是「**不得**出現在側欄上」的那個字串。requirement 1.3
 #: 已被推翻 —— 那個數字對使用者是劇透,等於預告這題幾步殺得完。後端照樣回傳它
@@ -533,17 +534,28 @@ def test_the_whole_puzzle_is_played_to_a_red_win_against_the_real_service(
 
     # --- 「下一題」在真實題庫上的那條路徑 -------------------------------
     #
-    # 題庫今天只有這一題,對真實服務而言**永遠沒有下一題** —— 這裡走到的正是
-    # 「已是最後一題」那條分支:按鈕不出現。三種情況的另外兩種(有下一題、索引
-    # 取不到)只有合成索引才驗得到,在 `tests/test_web_list.py`。
+    # 有沒有下一題**由真實索引決定,不寫進斷言** —— 題庫每收一題,這裡走到的分支
+    # 就可能從「已是最後一題」換成「有下一題」。把任一種寫死,收題的那一天轉紅的
+    # 會是這條動線,而不是題庫的內容檢查。索引取不到那條分支只有合成索引才驗得到,
+    # 在 `tests/test_web_list.py`。
     #
-    # 這一條的價值不在於「按鈕沒出現」本身,而在於它是**對真實 `/api/catalog`**
-    # 走的:索引真的被要了、真的解析了、真的算出沒有下一題,而終局畫面上方那幾條
-    # 斷言全部照常成立。
+    # 這一條的價值在於它是**對真實 `/api/catalog`** 走的:索引真的被要了、真的解析
+    # 了、真的算出下一題是誰,而終局畫面上方那幾條斷言全部照常成立。
     page.wait_for_timeout(500)  # 索引是終局之後才去要的,給它時間回來再看
-    assert page.locator("#next-position:not([hidden])").count() == 0, (
-        "題庫只有一題,卻冒出了一個「下一題」"
+    later = sorted(
+        entry["id"]
+        for entry in get_json(f"{live_service}{CATALOG_PATH}")["positions"]
+        if entry["id"] > PUZZLE_ID
     )
+    link = page.locator("#next-position:not([hidden])")
+    if later:
+        # 下一題是**題號更大的最小者**,不是 `id + 1` —— 題庫的題號有缺口。
+        assert link.count() == 1, f"索引裡還有第 {later[0]} 題,卻沒有「下一題」"
+        assert (link.get_attribute("href") or "").endswith(f"?id={later[0]}"), (
+            f"「下一題」指的不是第 {later[0]} 題:{link.get_attribute('href')!r}"
+        )
+    else:
+        assert link.count() == 0, "已是題庫的最後一題,卻冒出了一個「下一題」"
     assert text_of(page, "#turn") == GAME_OVER_YOU_WON, "查索引影響到了終局畫面"
     assert page.locator("#error").is_hidden(), "查索引把錯誤區弄出來了"
 
@@ -685,30 +697,27 @@ def test_a_position_is_picked_from_the_list_played_and_returned_from(
     page.wait_for_selector("#positions > li")
 
     assert page.locator("#board").count() == 0, "入口給的是棋盤,不是題庫列表"
-    # 這些列是**去真實服務要來的**。內容比對抓不到這件事:題庫今天只有一題,一份
-    # 寫死的清單長得跟真的一模一樣。有沒有發出那個請求才分得開。
+    # 這些列是**去真實服務要來的**。有沒有發出那個請求,是內容比對分不出來的事。
     assert catalog_requests, "列表沒有向真實服務取索引"
 
-    # 列表該有哪幾列,由真實索引決定。真實題庫今天只有一題,而這裡不把「一題」
-    # 寫進斷言 —— position-corpus 收進第二題的那一天,該轉紅的是題庫的內容檢查,
-    # 不是這條動線。
+    # 列表該有哪幾列,由真實索引決定 —— 題數不寫進斷言。題庫每收一題就會多一列,
+    # 那時該轉紅的是題庫的內容檢查,不是這條動線。
     catalog = get_json(f"{live_service}{CATALOG_PATH}")["positions"]
-    listable = [entry for entry in catalog if entry.get("solvable") is not False]
-    assert listable, "真實題庫裡沒有任何可上架的題目,這條動線無從走起"
-    chosen = next(entry for entry in listable if entry["id"] == PUZZLE_ID)
+    assert catalog, "真實題庫是空的,這條動線無從走起"
+    chosen = next(entry for entry in catalog if entry["id"] == PUZZLE_ID)
 
     drawn = listed_rows(page)
-    assert [row["id"] for row in drawn] == [str(entry["id"]) for entry in listable], (
+    assert [row["id"] for row in drawn] == [str(entry["id"]) for entry in catalog], (
         f"列表畫出來的題目與真實索引對不上:{[row['id'] for row in drawn]}"
     )
     # 局名也要對得上:只比題號的話,一份題號恰好相同而內容寫死的清單照樣全綠。
     on_screen = {row["id"]: row["text"] for row in drawn}
-    for entry in listable:
+    for entry in catalog:
         assert entry["title"] in on_screen[str(entry["id"])], (
             f"第 {entry['id']} 題的局名「{entry['title']}」沒有畫在它那一列上:"
             f"{on_screen[str(entry['id'])]!r}"
         )
-    assert listed_counts(page) == ["0", str(len(listable))]
+    assert listed_counts(page) == ["0", str(len(catalog))]
     assert stored_completed(page) is None, "只是開啟列表就寫進了儲存區"
 
     # --- 標記一題完成(3.1、3.2)---------------------------------------
@@ -719,7 +728,7 @@ def test_a_position_is_picked_from_the_list_played_and_returned_from(
 
     marked = {row["id"]: (row["checked"], row["marked"]) for row in listed_rows(page)}
     assert marked[str(PUZZLE_ID)] == (True, True), f"標記沒有立即反映:{marked}"
-    assert listed_counts(page) == ["1", str(len(listable))]
+    assert listed_counts(page) == ["1", str(len(catalog))]
     stored_after_marking = stored_completed(page)
     assert completed_ids(page) == [PUZZLE_ID], (
         f"標記完成之後儲存區裡不是那一題:{stored_after_marking!r}"
@@ -811,9 +820,9 @@ def test_a_position_is_picked_from_the_list_played_and_returned_from(
     returned = {row["id"]: (row["checked"], row["marked"]) for row in listed_rows(page)}
     assert returned == {
         row_id: (row_id == str(PUZZLE_ID), row_id == str(PUZZLE_ID))
-        for row_id in [str(entry["id"]) for entry in listable]
+        for row_id in [str(entry["id"]) for entry in catalog]
     }, f"返回列表之後完成標記不見了:{returned}"
-    assert listed_counts(page) == ["1", str(len(listable))]
+    assert listed_counts(page) == ["1", str(len(catalog))]
     # 畫面對了而儲存區已被清掉的話,要到下一次重新載入才會浮現 —— 一併釘住。
     assert completed_ids(page) == [PUZZLE_ID], (
         f"返回列表之後儲存區裡的完成狀態不對:{stored_completed(page)!r}"
