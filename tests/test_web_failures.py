@@ -24,6 +24,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
+
 from test_web_play import (  # noqa: F401 — `play_page` 以夾具身分被 pytest 取用
     ORIGIN,
     black_reply,
@@ -116,12 +118,16 @@ def test_an_engine_timeout_is_reported_as_a_timeout(play_page) -> None:
     assert "逾時" in text_of(play_page, "#error")
 
 
+@pytest.mark.slow
 def test_a_client_side_timeout_is_reported_and_clears_the_waiting_state(play_page) -> None:
     """**後端整個不回話**時,前端自己的逾時上界要接手(7.1、6.4)。
 
     這是唯一一條會真的等滿 `api.js` 的逾時上界(10 秒)的測試,慢得刻意:沒有它,
     「等待態必被解除」在最該成立的情況下反而沒有人驗證 —— 後端不回話正是使用者
     最容易永遠卡在等待中的那一種失敗。
+
+    **標記為 slow,平時開發跳過**:它一個人就佔全套執行時間的一成以上,而逾時上界
+    是 `api.js` 的模組常數、無法從外部縮短。上線前以 `uv run pytest --slow` 跑到。
     """
     open_game(play_page)
     play_page.route(f"{ORIGIN}/api/black-move", lambda route: None)

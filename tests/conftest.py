@@ -29,6 +29,26 @@ FAKES_DIR = pathlib.Path(__file__).resolve().parent / "fakes"
 FAKE_ENGINE_SCRIPT = FAKES_DIR / "fake_engine.py"
 
 
+def pytest_addoption(parser: pytest.Parser) -> None:
+    """`--slow`:連同標記為 slow 的測試一起跑。
+
+    `pyproject.toml` 的 addopts 預設帶著 `-m 'not slow'`,平時開發即跳過那些
+    必須真的等滿逾時上界的測試。上線前與 CI 應加上此旗標跑完整套。
+    """
+    parser.addoption(
+        "--slow",
+        action="store_true",
+        default=False,
+        help="連同標記為 slow 的測試一起跑(預設跳過)",
+    )
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    # 清掉 addopts 寫死的 `-m 'not slow'`,而不是再疊一層 marker 運算式。
+    if config.getoption("--slow"):
+        config.option.markexpr = ""
+
+
 @dataclass(frozen=True)
 class FakeEngine:
     """一個引擎替身執行檔,以及它收到的指令記錄。"""

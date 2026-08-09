@@ -23,6 +23,16 @@ dev = [
 # 將專案根加入 sys.path,測試才能 `import service`。
 pythonpath = ["."]
 
+# 少數測試必須真的等滿某個逾時上界才有意義,無法靠縮短參數加速。它們在開發期
+# 每次跑都在浪費等待,故預設排除;上線前與 CI 以 `--slow` 跑完整套。
+#
+#   uv run pytest            平時開發:跳過
+#   uv run pytest --slow     完整驗證:全跑
+addopts = "-m 'not slow'"
+markers = [
+    "slow: 需要真的等滿逾時上界的測試,預設跳過,加 --slow 才跑",
+]
+
 [tool.uv]
 # 明確宣告非套件模式:uv sync 只安裝依賴,不建置本專案本身。
 # 無 [build-system] 時 uv 本來就預設如此,此處只是把意圖寫明。

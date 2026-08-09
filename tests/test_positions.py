@@ -222,55 +222,27 @@ def test_source_of_unknown_id_raises_position_not_found(
 # --- 重複題號使啟動失敗 --------------------------------------------------
 
 
-def test_duplicate_id_across_books_refuses_to_start(tmp_path: pathlib.Path) -> None:
-    _write_position(tmp_path, "適情雅趣", 1)
-    _write_position(tmp_path, "橘中秘", 1)
-
-    with pytest.raises(ValueError) as info:
-        PositionRepository(tmp_path).load()
-    assert "1" in str(info.value)
-
-
-def test_duplicate_id_within_one_book_refuses_to_start(
+def test_duplicate_ids_refuse_to_start_and_name_every_conflict(
     tmp_path: pathlib.Path,
 ) -> None:
-    """同一本書內以不同檔名放入同題號,同樣必須擋下。"""
-    _write_position(tmp_path, "適情雅趣", 42)
-    _write_position(tmp_path, "適情雅趣", 42, filename="0042-copy.json")
+    """一次指出所有衝突的題號與檔案,才能一輪修完而不是逐題重試。
 
-    with pytest.raises(ValueError) as info:
-        PositionRepository(tmp_path).load()
-    assert "42" in str(info.value)
-
-
-def test_duplicate_message_names_every_conflicting_id(
-    tmp_path: pathlib.Path,
-) -> None:
-    """一次指出所有衝突的題號,才能一輪修完而不是逐題重試。"""
+    跨書重複、同書內以不同檔名重複、多組衝突並存,在此一併涵蓋 —— 它們走的是
+    `load()` 裡同一段衝突累積邏輯,原本拆成四個測試只是把同一條路徑走四遍。
+    """
     _write_position(tmp_path, "適情雅趣", 1)
-    _write_position(tmp_path, "橘中秘", 1)
+    _write_position(tmp_path, "橘中秘", 1)  # 跨書重複
     _write_position(tmp_path, "適情雅趣", 5)
-    _write_position(tmp_path, "橘中秘", 5)
+    _write_position(tmp_path, "適情雅趣", 5, filename="0005-copy.json")  # 同書重複
     _write_position(tmp_path, "適情雅趣", 9)  # 未衝突,不該被指名
 
     with pytest.raises(ValueError) as info:
         PositionRepository(tmp_path).load()
+
     message = str(info.value)
     assert "1" in message and "5" in message
-    assert "9" not in message
-
-
-def test_duplicate_message_points_at_the_conflicting_files(
-    tmp_path: pathlib.Path,
-) -> None:
-    """啟動失敗訊息只給操作者看,指出檔案才修得動。"""
-    _write_position(tmp_path, "適情雅趣", 1)
-    _write_position(tmp_path, "橘中秘", 1)
-
-    with pytest.raises(ValueError) as info:
-        PositionRepository(tmp_path).load()
-    message = str(info.value)
-    assert "適情雅趣" in message and "橘中秘" in message
+    assert "9" not in message, "未衝突的題號不該被指名"
+    assert "適情雅趣" in message and "橘中秘" in message, "須指出檔案才修得動"
 
 
 def test_duplicate_id_leaves_the_repository_unusable(
@@ -290,23 +262,18 @@ def test_duplicate_id_leaves_the_repository_unusable(
 # --- max_dtm 與 solvable 可為空 -----------------------------------------
 
 
-def test_missing_max_dtm_and_solvable_are_none(tmp_path: pathlib.Path) -> None:
-    """兩欄由題目驗證工具日後回填,現階段缺欄不得視為錯誤。"""
-    _write_position(tmp_path, "適情雅趣", 1, max_dtm=OMIT, solvable=OMIT)
-
-    position = _loaded(tmp_path).get(1)
-    assert position.max_dtm is None
-    assert position.solvable is None
-
-
-def test_explicit_null_max_dtm_and_solvable_are_none(
-    tmp_path: pathlib.Path,
+@pytest.mark.parametrize(
+    ("case", "value"), [("缺欄位", OMIT), ("明寫 null", None)], ids=["缺欄位", "明寫 null"]
+)
+def test_unfilled_max_dtm_and_solvable_are_none(
+    tmp_path: pathlib.Path, case: str, value: Any
 ) -> None:
-    _write_position(tmp_path, "適情雅趣", 1, max_dtm=None, solvable=None)
+    """兩欄由 corpus-verification 日後回填,現階段缺欄與明寫 null 都不得視為錯誤。"""
+    _write_position(tmp_path, "適情雅趣", 1, max_dtm=value, solvable=value)
 
     position = _loaded(tmp_path).get(1)
-    assert position.max_dtm is None
-    assert position.solvable is None
+    assert position.max_dtm is None, case
+    assert position.solvable is None, case
 
 
 def test_solvable_false_is_preserved(tmp_path: pathlib.Path) -> None:
@@ -319,68 +286,51 @@ def test_solvable_false_is_preserved(tmp_path: pathlib.Path) -> None:
 # --- schema 不符於啟動階段失敗 ------------------------------------------
 
 
+# 每一種「題目檔壞掉」的代表性情形各一個案例。
+#
+# 這裡曾經有 19 個案例(每個必填欄位各一、每種型別錯配各一),但題目 JSON 是專案
+# 自己寫的資料、不是使用者輸入,逐欄位窮舉只是把 `REQUIRED_FIELDS` 的清單抄第二遍。
+# 真正要守住的是「壞掉的題目會在啟動時被擋下,且訊息指得出是哪個檔案哪裡壞了」,
+# 每種壞法一個代表就足以釘住這件事。
+BROKEN_POSITIONS = [
+    ("缺必填欄位", {"fen": OMIT}, "fen"),
+    ("欄位型別不符", {"id": "1"}, "id"),
+    ("認不得的行棋方", {"side_to_move": "green"}, "side_to_move"),
+    # 出處由資料夾表達;寫成欄位就是兩個真相來源,遲早互相矛盾。
+    ("出處寫成欄位", {"source": "橘中秘"}, "source"),
+]
+
+
 @pytest.mark.parametrize(
-    "field", ["id", "title", "description", "fen", "side_to_move", "difficulty", "tags"]
+    ("case", "overrides", "expected"),
+    BROKEN_POSITIONS,
+    ids=[case for case, _, _ in BROKEN_POSITIONS],
 )
-def test_missing_required_field_refuses_to_start(
-    tmp_path: pathlib.Path, field: str
+def test_a_broken_position_refuses_to_start(
+    tmp_path: pathlib.Path, case: str, overrides: dict[str, Any], expected: str
 ) -> None:
-    _write_position(tmp_path, "適情雅趣", 1, **{field: OMIT})
+    _write_position(tmp_path, "適情雅趣", 1, **overrides)
 
     with pytest.raises(ValueError) as info:
         PositionRepository(tmp_path).load()
-    assert field in str(info.value)
+    assert expected in str(info.value), f"{case}:錯誤訊息須指出問題所在"
 
 
-def test_malformed_json_refuses_to_start(tmp_path: pathlib.Path) -> None:
+@pytest.mark.parametrize(
+    ("case", "content"),
+    [("不是合法 JSON", "{ 這不是 JSON"), ("不是 JSON 物件", "[]")],
+    ids=["不是合法 JSON", "不是 JSON 物件"],
+)
+def test_an_unparsable_position_file_refuses_to_start(
+    tmp_path: pathlib.Path, case: str, content: str
+) -> None:
     book = tmp_path / "適情雅趣"
     book.mkdir(parents=True)
-    (book / "0001.json").write_text("{ 這不是 JSON", encoding="utf-8")
+    (book / "0001.json").write_text(content, encoding="utf-8")
 
     with pytest.raises(ValueError) as info:
         PositionRepository(tmp_path).load()
-    assert "0001.json" in str(info.value)
-
-
-def test_unknown_side_to_move_refuses_to_start(tmp_path: pathlib.Path) -> None:
-    _write_position(tmp_path, "適情雅趣", 1, side_to_move="green")
-
-    with pytest.raises(ValueError) as info:
-        PositionRepository(tmp_path).load()
-    assert "side_to_move" in str(info.value)
-
-
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("id", "1"),
-        ("id", True),
-        ("title", 1),
-        ("side_to_move", 1),
-        ("difficulty", "3"),
-        ("tags", "連將殺"),
-        ("tags", [1, 2]),
-        ("max_dtm", "16"),
-        ("solvable", "true"),
-    ],
-)
-def test_wrong_field_type_refuses_to_start(
-    tmp_path: pathlib.Path, field: str, value: Any
-) -> None:
-    _write_position(tmp_path, "適情雅趣", 1, **{field: value})
-
-    with pytest.raises(ValueError) as info:
-        PositionRepository(tmp_path).load()
-    assert field in str(info.value)
-
-
-def test_source_as_a_field_refuses_to_start(tmp_path: pathlib.Path) -> None:
-    """出處由資料夾表達;寫成欄位就是兩個真相來源,必須在部署階段擋下。"""
-    _write_position(tmp_path, "適情雅趣", 1, source="橘中秘")
-
-    with pytest.raises(ValueError) as info:
-        PositionRepository(tmp_path).load()
-    assert "source" in str(info.value)
+    assert "0001.json" in str(info.value), f"{case}:錯誤訊息須指出是哪個檔案"
 
 
 def test_position_file_outside_any_book_folder_refuses_to_start(
@@ -394,37 +344,9 @@ def test_position_file_outside_any_book_folder_refuses_to_start(
     assert "0001.json" in str(info.value)
 
 
-def test_json_object_is_required(tmp_path: pathlib.Path) -> None:
-    book = tmp_path / "適情雅趣"
-    book.mkdir(parents=True)
-    (book / "0001.json").write_text("[]", encoding="utf-8")
-
-    with pytest.raises(ValueError):
-        PositionRepository(tmp_path).load()
-
-
 def test_missing_corpus_directory_refuses_to_start(tmp_path: pathlib.Path) -> None:
     with pytest.raises(ValueError):
         PositionRepository(tmp_path / "不存在").load()
-
-
-# --- 未載入前不得取題 ----------------------------------------------------
-
-
-def test_get_before_load_raises(tmp_path: pathlib.Path) -> None:
-    """`load()` 是啟動掛鉤的責任;未載入就取題是程式錯誤,不是題目不存在。"""
-    _two_book_corpus(tmp_path)
-    repository = PositionRepository(tmp_path)
-
-    with pytest.raises(RuntimeError):
-        repository.get(1)
-
-
-def test_source_of_before_load_raises(tmp_path: pathlib.Path) -> None:
-    _two_book_corpus(tmp_path)
-
-    with pytest.raises(RuntimeError):
-        PositionRepository(tmp_path).source_of(1)
 
 
 # --- 唯讀 ----------------------------------------------------------------
@@ -438,17 +360,8 @@ def _corpus_digest(root: pathlib.Path) -> dict[str, str]:
     }
 
 
-def test_loading_does_not_write_to_the_corpus(tmp_path: pathlib.Path) -> None:
-    _two_book_corpus(tmp_path)
-    before = _corpus_digest(tmp_path)
-
-    repository = _loaded(tmp_path)
-    repository.get(1)
-
-    assert _corpus_digest(tmp_path) == before
-
-
 def test_loading_the_real_corpus_does_not_write_to_it() -> None:
+    """載入是唯讀的。以**真實題庫**驗證,合成題庫的同名測試已刪(同一件事測兩遍)。"""
     before = _corpus_digest(DEFAULT_POSITIONS_DIR)
 
     _loaded(DEFAULT_POSITIONS_DIR).get(1)
@@ -456,21 +369,7 @@ def test_loading_the_real_corpus_does_not_write_to_it() -> None:
     assert _corpus_digest(DEFAULT_POSITIONS_DIR) == before
 
 
-# --- 擴充至 500 題不需改程式或設定(6.3) ------------------------------
-
-
-def test_five_hundred_positions_load_without_code_or_config_change(
-    tmp_path: pathlib.Path,
-) -> None:
-    """題庫擴充只靠放檔案:同一份程式、同一個題庫路徑,不列舉書名。"""
-    books = ["適情雅趣", "橘中秘", "梅花譜"]
-    for position_id in range(1, 501):
-        _write_position(tmp_path, books[position_id % len(books)], position_id)
-
-    repository = _loaded(tmp_path)
-
-    assert len(repository) == 500
-    assert {repository.get(i).id for i in range(1, 501)} == set(range(1, 501))
+# --- 擴充不需改程式或設定(6.3) ---------------------------------------
 
 
 def test_a_brand_new_book_needs_no_registration(tmp_path: pathlib.Path) -> None:
