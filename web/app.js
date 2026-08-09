@@ -156,6 +156,33 @@ const SIGNAL_LABELS = Object.freeze({
 /** 後端的信號值對應到哪一方即將取勝;認不得的值一律當作未知。 */
 const SIGNAL_WINNERS = Object.freeze({ red_winning: 'red', black_winning: 'black' });
 
+/**
+ * **對局結束後**的說法(requirements 4.2)—— 陳述已經發生的事,不再是預測。
+ *
+ * 形態取自 `poc/index.html` 的 `finish()`。用詞是**顏色絕對**的(不是「你贏了」),
+ * 與進行中那三個相對使用者的標籤刻意不同:這一句講的是盤面上發生了什麼事,而
+ * 「該不該高興」由 `#turn` 的「你獲勝」/「黑方勝」承擔,不必在側欄裡說兩遍。
+ */
+const MATE_OUTCOMES = Object.freeze({
+  red: '已將死黑方',
+  black: '紅方被將死',
+});
+
+/**
+ * 對局結束、但**信號不足以說出「將死」**時的說法。
+ *
+ * 象棋規則下輪方無合法著法即負 —— 那可能是將死,也可能是困斃(無子可動)。
+ * 後端的 `state` 只回報**誰贏**,沒有回報**為什麼贏**,而 steering 的不可違反約束
+ * 之一是前端不自實作勝負判定:從「紅方贏了」推出「所以是將死」正是那種推斷。
+ *
+ * 唯一說得出「將死」二字的依據是**引擎自己報了 mate**:`service/game.py` 的
+ * `classify_score()` 只在分數型別為 `mate` 時才給 `red_winning` / `black_winning`,
+ * `cp` 與無分數一律歸 `unknown`(連正負號都不看)。因此「信號是這兩者之一」等價於
+ * 「引擎回報了 mate」—— 那是引擎給的資訊,不是我們推的。信號為未知或根本沒有信號
+ * (引擎一分未報)時,能誠實說的就只有對局結束了。
+ */
+const GAME_OVER_READING = '對局結束';
+
 /** 還沒有任何一手應手時的信號 —— 這不是「未知」,是根本還沒問過。 */
 const NO_SIGNAL_YET = '尚未取得';
 
@@ -174,6 +201,10 @@ const NO_SIGNAL_YET = '尚未取得';
  * 但語氣是載重的,不是修辭:把「即將取勝　約 15 步」寫成「紅勝 15」就真的變成判決。
  * 那條約束現在記在 requirement 4.2,並由 `test_the_mate_countdown_is_shown_as_an_approximation`
  * 釘住整句讀數(而非只驗子字串)。
+ *
+ * **未然語氣的適用範圍是「對局進行中」**(requirement 4.2 修訂後)。對局一旦結束就
+ * 沒有東西好預測了,「即將取勝　約 0 步」在那裡是自相矛盾:說「即將」卻已經結束,
+ * 說「約 0 步」卻是在倒數一件已經發生的事。終局的說法見 `outcomeReading()`。
  *
  * `#signal` 的 `role="note"`(而非 `role="status"`)**仍然保留且不得更動**:它與已刪的
  * 4.4 是分開的價值 —— `status` 會讓螢幕閱讀器把信號當系統狀態**主動播報**,那在聽覺上
@@ -442,11 +473,16 @@ function turnText(state) {
 }
 
 /**
- * 三態諮詢信號的讀數(requirements 4.1、4.2)。
+ * **對局進行中**的三態諮詢信號讀數(requirements 4.1、4.2)。
  *
- * **殺著倒數一律以 `!= null` 判斷。** `mate_in` 可能是 `0` —— 那正是每一題排局的
- * 最後一手(這一手就將死對方),而 JS 的 `if (mateIn)`、`mateIn || '—'` 對 0 都是
- * 假,倒數會在最關鍵的那一手被靜默吞掉。
+ * 這裡的每一句都是**預測**:「即將」是未然語氣,倒數說的是還要走多久。對局結束
+ * 之後就沒有東西好預測了,那條路徑走的是 `outcomeReading()`。
+ *
+ * **殺著倒數一律以 `!= null` 判斷。** `mate_in` 可能是 `0`,而 JS 的 `if (mateIn)`、
+ * `mateIn || '—'` 對 0 都是假,倒數會被靜默吞掉。這個陷阱**沒有因為終局改成陳述句
+ * 而消失,只是換了位置**:後端給倒數的條件是「引擎回報 mate」,不是「對局還沒
+ * 結束」,兩者不必同步 —— `over` 為假而 `mate_in` 為 0 的回應照樣要正常畫出倒數,
+ * 由 `test_a_mate_countdown_of_zero_is_still_shown_while_the_game_goes_on` 釘住。
  *
  * 倒數寫成「約 N 步」而非確數:後端在 250k 節點下可能高估 1 步,寫成確數等於把一個
  * 刻意接受的誤差說成精確值。
@@ -468,6 +504,33 @@ function signalReading(entry, userSide) {
 }
 
 /**
+ * **對局結束後**的讀數(requirements 4.2)—— 陳述結果,不再預測。
+ *
+ * 「即將取勝　約 0 步」在終局是兩個錯誤:對局已經結束了還說「即將」,而「約 0 步」
+ * 是在倒數一件已經發生的事。
+ *
+ * ## 兩份輸入各管一件事,誰都不越界
+ *
+ * - **誰贏了** 只看 `state.winner` —— 後端 `state` 的欄位,唯一權威。`#turn` 讀的
+ *   是同一個來源,兩行因此不可能互相矛盾。
+ * - **能不能說「將死」** 只看信號是不是 mate 信號(見 `GAME_OVER_READING`)。
+ *
+ * 換句話說,方向來自後端的勝負,而「將死」這個**理由**來自引擎的 mate 回報。兩者
+ * 缺一就退回「對局結束」:沒有勝方(後端只說結束)說不出誰將死誰,沒有 mate 信號
+ * 則說不出這是將死還是困斃。
+ *
+ * **倒數在這條路徑上一律不畫**,而且判斷的依據是 `state.over` 而不是 `mateIn` 是否
+ * 為 0 —— 用倒數的值決定要不要畫倒數,正是 4.2 那個 falsy 陷阱換個地方重來。
+ * 因此 `over` 為真而 `mate_in` 不是 0(例如引擎報 mate 3 的那一手正好終局)時,
+ * 這裡照樣只說「已將死黑方」,不會冒出一個「約 3 步」。
+ */
+function outcomeReading(state, entry) {
+  const mateReported = entry != null && SIGNAL_WINNERS[entry.signal] != null;
+  if (!mateReported) return GAME_OVER_READING;
+  return MATE_OUTCOMES[state.winner] ?? GAME_OVER_READING;
+}
+
+/**
  * 三態信號(requirements 4.1、4.2、4.4)。
  *
  * 回饋是**一份來源清單**(`game.js` 的 `feedbackSources`),信號只是其中一個來源 ——
@@ -475,13 +538,20 @@ function signalReading(entry, userSide) {
  *
  * **信號與對手著法是各自獨立的欄位**:對手著法為空(排局的最後一手)時信號仍可能
  * 有值,兩者分開呈現。把「無應手」實作成整份回應為空,就會在最後一手把信號弄丟。
+ *
+ * **`state.over` 是預測與陳述之間唯一的分水嶺**(requirements 4.2)。它與 `game.js`
+ * 的終局判定是同一個欄位、同一個來源,所以信號區不會在對局已結束時還說「即將」,
+ * 也不會在對局還在進行時就宣告將死。信號本身仍然**碰不到** `over`(4.3):這裡只是
+ * 讀它來決定用哪一種語氣。
  */
 function renderSignal(state) {
   const entry = state.feedback.find((item) => item.source === 'signal') ?? null;
 
   const reading = document.createElement('p');
   reading.className = 'signal-reading';
-  reading.textContent = signalReading(entry, state.userSide);
+  reading.textContent = state.over
+    ? outcomeReading(state, entry)
+    : signalReading(entry, state.userSide);
 
   elements.signal.replaceChildren(reading);
 }

@@ -31,9 +31,11 @@ Pikafish、真題庫),用瀏覽器把《適情雅趣》第 21 局從起始局面
 
 1. **只在真終局停局**(3.3)—— 引擎自第一手起就回報 mate,信號一路顯示「即將
    取勝」,但每一個中途局面都必須仍然選得到子、標得出落點、走得出下一手。
-2. **最後一手**(3.2、3.4、4.2)—— 對手著法為空、對局結束、呈現使用者獲勝,而且
-   該手的 `mate_in` 是真實引擎給的 **0**(黑方已被將死時引擎仍輸出 `score mate 0`),
-   倒數必須照樣顯示。這一段在攔截測試裡是手寫的 JSON,在這裡是引擎真的產生的。
+2. **最後一手**(3.2、3.4、4.2、4.5)—— 對手著法為空、對局結束、呈現使用者獲勝,
+   而且該手的 `mate_in` 是真實引擎給的 **0**(黑方已被將死時引擎仍輸出
+   `score mate 0`)。這一段在攔截測試裡是手寫的 JSON,在這裡是引擎真的產生的。
+   **那個 0 在畫面上一個字都不該出現**:終局的信號改為陳述結果(「已將死黑方」),
+   不再是「即將取勝　約 0 步」那種倒數一件已經發生的事的說法。
 3. **中文記譜與實際走法一致**(8.1)—— 記譜由本檔自己依走法與**走子前**的盤面
    獨立算一份再比對,而不是拿 `notation.js` 的輸出跟自己比。
 
@@ -156,10 +158,24 @@ MARGIN = 40
 #: 格說的是「該不該我動」,不是使用者執的顏色叫什麼。
 TURN_YOURS = "輪到你"
 GAME_OVER_YOU_WON = "你獲勝"
-FINAL_SIGNAL = "即將取勝　約 0 步"
 
-#: 信號讀數的形狀:`即將取勝　約 N 步`,分隔用**全形空格**(形態取自 POC 的
-#: `renderSignal`)。錨定在頭尾,前綴跑回來就對不上。
+#: **終局之後**信號那一行說的話(4.5,形態取自 `poc/index.html` 的 `finish()`)。
+#:
+#: 原本是 `即將取勝　約 0 步` —— 對局都結束了還說「即將」,而「約 0 步」是在倒數
+#: 一件已經發生的事。現在改為陳述結果。
+#:
+#: 「將死」二字在這裡說得出來,是因為**真實引擎在黑方被將死時仍輸出 `score mate 0`**,
+#: 服務端因此回報 `red_winning`(`service/game.py` 的 `classify_score()` 只有分數
+#: 型別為 `mate` 才給這個值)。引擎若一分未報,同樣的終局只會說「對局結束」——
+#: 那條路徑在真實引擎上跑不出來,由 `test_web_play.py` 的
+#: `test_a_win_without_a_mate_signal_is_not_called_a_mate` 以攔截驗證。
+FINAL_SIGNAL = "已將死黑方"
+
+#: **對局進行中**的信號讀數形狀:`即將取勝　約 N 步`,分隔用**全形空格**(形態取自
+#: POC 的 `renderSignal`)。錨定在頭尾,前綴跑回來就對不上。
+#:
+#: 終局那一手**不適用**這個形狀(4.2 的適用範圍已縮小到對局進行中),故底下比對時
+#: 一律把最後一則讀數排除在外,它自己與 `FINAL_SIGNAL` 比對。
 WINNING_SIGNAL = re.compile(r"^即將取勝　約 (\d+) 步$")
 
 #: 入口、列表與對局介面的路徑。入口靠 `StaticFiles(html=True)` 解析到 `index.html`,
@@ -502,8 +518,15 @@ def test_the_whole_puzzle_is_played_to_a_red_win_against_the_real_service(
     assert reply["mate_in"] == 0, f"終局那一手的殺著倒數是 {reply['mate_in']},不是 0"
 
     assert text_of(page, "#turn") == GAME_OVER_YOU_WON
-    assert text_of(page, ".signal-reading") == FINAL_SIGNAL, (
-        "倒數為 0 的那一手沒有正常顯示 —— 這正是 JS 的 falsy 陷阱該出現的地方"
+    # 終局的信號**陳述結果,不再預測**(4.5):不得有「即將」,也不得倒數 ——
+    # 上一行剛驗過引擎給的 `mate_in` 確實是 0,而它在這裡一個字都不該畫出來。
+    final_reading = text_of(page, ".signal-reading")
+    assert final_reading == FINAL_SIGNAL, (
+        f"終局的信號讀數是 {final_reading!r},不是陳述句 {FINAL_SIGNAL!r}"
+    )
+    assert "即將" not in final_reading, f"對局已結束,信號仍用未然語氣:{final_reading}"
+    assert not re.search(r"\d", final_reading), (
+        f"對局已結束,信號仍在倒數一件已經發生的事:{final_reading}"
     )
     assert page.locator("#error").is_hidden()
     assert pieces(page) == board, "終局盤面與實際走法對不上"
@@ -525,15 +548,19 @@ def test_the_whole_puzzle_is_played_to_a_red_win_against_the_real_service(
     assert page.locator("#error").is_hidden(), "查索引把錯誤區弄出來了"
 
     # --- 中途的信號早就說即將取勝,對局卻沒有因此結束(3.3、4.2)-------
-    winning = [reading for reading in readings if WINNING_SIGNAL.match(reading)]
-    assert len(winning) == len(readings), (
-        f"有信號不是「即將取勝」:{[r for r in readings if r not in winning]}"
+    #
+    # **最後一則讀數排除在外** —— 它是終局那一手,4.2 的「即將取勝　約 N 步」已
+    # 不適用於它(適用範圍縮小到對局進行中),它自己在上面與 `FINAL_SIGNAL` 比過了。
+    in_play = readings[:-1]
+    winning = [reading for reading in in_play if WINNING_SIGNAL.match(reading)]
+    assert len(winning) == len(in_play), (
+        f"有中途信號不是「即將取勝」:{[r for r in in_play if r not in winning]}"
     )
-    first = WINNING_SIGNAL.match(readings[0])
+    assert in_play, "整局只有一手,「中途不得提早停局」等於沒被驗到"
+    first = WINNING_SIGNAL.match(in_play[0])
     assert first is not None and int(first.group(1)) > 0, (
-        f"第一手之後的信號沒有帶正的殺著倒數:{readings[0]}"
+        f"第一手之後的信號沒有帶正的殺著倒數:{in_play[0]}"
     )
-    assert len(readings) > 1, "整局只有一手,「中途不得提早停局」等於沒被驗到"
     assert not any("即將落敗" in reading for reading in readings)
 
     # --- 歷史著法的中文記譜(8.1)---------------------------------------

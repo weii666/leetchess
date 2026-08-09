@@ -1,5 +1,5 @@
 """介面組裝層的互動驗證(tasks 4.3、4.4;requirements 1.2、1.3、1.4、3.2、4.1、4.2、
-4.4、5.1、6.1、6.2、6.4、8.1、8.4)。
+4.4、4.5、5.1、6.1、6.2、6.4、8.1、8.4)。
 
 `web/app.js` 是唯一把三個模組接起來的地方 —— 它沒有自己的邏輯可言,價值全在
 「接得對不對」。因此本檔一律**以真實點擊驅動真實頁面**:載入 `web/play.html`
@@ -701,20 +701,33 @@ def test_the_mate_countdown_is_shown_as_an_approximation(play_page) -> None:
     assert reading == "即將取勝　約 4 步", f"信號讀數是:{reading}"
 
 
-def test_a_mate_countdown_of_zero_is_still_shown(play_page) -> None:
-    """**倒數為 0 時仍正常呈現**(4.2)。
+@pytest.mark.parametrize("mate_in", [0, 1])
+def test_a_mate_countdown_of_zero_is_still_shown_while_the_game_goes_on(
+    play_page, mate_in: int
+) -> None:
+    """**對局進行中,倒數為 0 時仍正常呈現**(4.2 修訂後)。
 
-    `mate_in: 0` 不是邊緣案例 —— 它正是每一題排局的最後一手(紅方這一手就將死
-    黑方)。JS 的 `if (mateIn)`、`mateIn || '—'` 對 0 都是假,倒數會在最關鍵的那
-    一手被靜默吞掉。此處鎖住的是「有值就呈現」,不是「非零才呈現」。
+    JS 的 `if (mateIn)`、`mateIn || '—'` 對 0 都是假,倒數會被靜默吞掉,而
+    engine-service 的 tasks 3.3 明文記著這個陷阱。此處鎖住的是「有值就呈現」,
+    不是「非零才呈現」。
+
+    **這一條原本用的是終局那一手(`FINAL_REPLY`),現在改用進行中的回應。**
+    終局的信號已改為陳述結果、不再畫倒數(4.5),原本的寫法會與那條需求直接打架。
+    但 falsy 陷阱**沒有因此消失,只是換了位置**:後端給倒數的條件是「引擎回報
+    mate」而不是「對局還沒結束」,兩者不必同步 —— `over` 為假而 `mate_in` 為 0
+    的回應照樣要畫出「約 0 步」。這正是 4.2 修訂後仍然保留該半句的理由。
+
+    連 `mate_in: 1` 一起驗,是為了擋住另一種吞法:把倒數整段拿掉、或用一個下界
+    把小數字濾掉,只驗 0 的話那些改動不見得會轉紅。
     """
-    open_game(play_page, [FINAL_REPLY])
+    open_game(play_page, [black_reply(signal="red_winning", mate_in=mate_in)])
 
     click_square(play_page, "d8")
     click_square(play_page, "d9")
-    wait_for_reply(play_page)
+    wait_for_moves(play_page, 2)
 
-    assert "0" in text_of(play_page, "#signal")
+    reading = text_of(play_page, ".signal-reading")
+    assert reading == f"即將取勝　約 {mate_in} 步", f"信號讀數是:{reading}"
 
 
 def test_a_signal_without_a_countdown_shows_no_bogus_number(play_page) -> None:
@@ -746,7 +759,136 @@ def test_a_reply_without_an_opponent_move_still_shows_its_signal(play_page) -> N
     wait_for_reply(play_page)
 
     assert move_rows(play_page) == [("俥六進一", "")], "前置條件:黑方確實沒有應手"
-    assert "即將取勝" in text_of(play_page, "#signal")
+    # 這一手同時是終局,故信號說的是結果而非預測(4.5)。「已將死黑方」這四個字
+    # **只有在信號帶著 mate 時說得出來** —— 信號若在最後一手被弄丟,這裡會退成
+    # 「對局結束」,斷言照樣轉紅。
+    assert text_of(play_page, ".signal-reading") == "已將死黑方"
+
+
+# --- 終局的信號:陳述結果而非預測(4.5)---------------------------------
+#
+# 這一節整節是新的。終局之後信號那一行原本仍顯示 `即將取勝　約 0 步` —— 對局都
+# 結束了還說「即將」,而「約 0 步」是在倒數一件已經發生的事。形態取自
+# `poc/index.html` 的 `finish()`,POC 早就這樣做了。
+#
+# **三種說法各一條測試,第三種尤其不能少**:象棋規則下輪方無合法著法即負,那可能
+# 是將死、也可能是困斃,而後端的 `state` 只回報**誰贏**、沒有回報**為什麼贏**。
+# 「將死」二字唯一的依據是引擎自己報了 mate(`service/game.py` 的 `classify_score()`
+# 只在分數型別為 `mate` 時才給 `red_winning` / `black_winning`)。信號為未知時前端
+# **不得自己推斷**,只能說對局結束。
+
+
+def test_a_red_win_is_stated_as_a_delivered_mate(play_page) -> None:
+    """紅勝且引擎回報 mate -> `已將死黑方`(4.5)。
+
+    整句比對而非子字串:退回「即將取勝　約 0 步」與多長出一段倒數,都只有比對
+    整句才擋得下來。
+    """
+    open_game(play_page, [FINAL_REPLY])
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_reply(play_page)
+
+    assert text_of(play_page, "#turn") == "你獲勝", "前置條件:這一手確實終局且紅方勝"
+    reading = text_of(play_page, ".signal-reading")
+    assert reading == "已將死黑方", f"終局的信號讀數是:{reading}"
+    assert "即將" not in reading, f"對局已結束,信號仍用未然語氣:{reading}"
+    assert not re.search(r"\d", reading), f"對局已結束,信號仍在倒數:{reading}"
+
+
+def test_a_black_win_is_stated_as_a_mate_suffered(play_page) -> None:
+    """黑勝且引擎回報 mate -> `紅方被將死`(4.5)。
+
+    **`mate_in` 在這條路徑上是 `None`,而那是後端的契約**:`service/types.py` 寫著
+    倒數「僅 `RED_WINNING` 時有值」。因此終局那句話**不得以倒數有沒有值為依據**
+    ——「引擎報了 mate」這件事由信號值本身承擔,黑方即將取勝時一樣是 mate 信號。
+    """
+    open_game(
+        play_page,
+        [black_reply(move="e9d9", signal="black_winning", mate_in=None, over=True, winner="black")],
+    )
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_moves(play_page, 2)
+
+    assert text_of(play_page, "#turn") == "黑方勝", "前置條件:這一手確實終局且黑方勝"
+    reading = text_of(play_page, ".signal-reading")
+    assert reading == "紅方被將死", f"終局的信號讀數是:{reading}"
+    assert "即將" not in reading, f"對局已結束,信號仍用未然語氣:{reading}"
+
+
+def test_a_win_without_a_mate_signal_is_not_called_a_mate(play_page) -> None:
+    """**結束但信號不足以判斷是不是將死 -> `對局結束`**(4.5)。
+
+    這是本節最重要的一條。引擎一分未報時 `classify_score()` 回的是 `unknown`,
+    而對局仍可能因輪方無合法著法而結束 —— 那**可能是將死,也可能是困斃**。後端的
+    `state` 說的只有「紅方贏了」,從它推出「所以是將死」就是前端自己在判勝負,正是
+    steering 的不可違反約束(「不自實作勝負判定」)禁止的事。
+
+    **一個只看 `state.winner` 就喊將死的實作會在這裡轉紅**,而其餘每一條終局測試
+    都照樣是綠的 —— 這條測試存在的唯一理由就是釘住那個差別。
+    """
+    open_game(
+        play_page,
+        [black_reply(move=None, signal="unknown", mate_in=None, over=True, winner="red")],
+    )
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_reply(play_page)
+
+    assert text_of(play_page, "#turn") == "你獲勝", "前置條件:後端確實回報紅方勝"
+    reading = text_of(play_page, ".signal-reading")
+    assert reading == "對局結束", (
+        f"引擎一分未報,信號卻說得出勝負的原委:{reading}"
+    )
+    assert "將死" not in reading, f"信號未報 mate,前端卻自己推斷出將死:{reading}"
+
+
+def test_a_finished_game_without_a_winner_only_says_it_finished(play_page) -> None:
+    """結束但後端沒給勝方 -> 同樣只說 `對局結束`(4.5)。
+
+    「誰贏」只有 `state.winner` 一個來源(`#turn` 讀的也是它),沒有勝方就說不出
+    是誰將死了誰。信號帶著 mate 也一樣 —— mate 信號給的是**理由**不是**方向**。
+    """
+    open_game(
+        play_page,
+        [black_reply(move=None, signal="red_winning", mate_in=0, over=True, winner=None)],
+    )
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_reply(play_page)
+
+    assert text_of(play_page, "#turn") == "對局結束", "前置條件:後端確實沒給勝方"
+    assert text_of(play_page, ".signal-reading") == "對局結束"
+
+
+def test_a_finished_game_draws_no_countdown_even_when_the_countdown_is_not_zero(
+    play_page,
+) -> None:
+    """**`over` 為真而 `mate_in` 不是 0 時,照樣不畫倒數**(4.5)。
+
+    `over` 與 `mate_in` 是兩個獨立欄位,實作**不得假設兩者同步**。真實引擎在黑方
+    被將死時給的是 `score mate 0`,但那是引擎的行為而非協定的保證。
+
+    這一條同時是一道防線:要是有人把「要不要畫倒數」的判斷從 `over` 改成「`mate_in`
+    是不是 0」,那正是 4.2 那個 falsy 陷阱換個地方重來,而它會在這裡轉紅。
+    """
+    open_game(
+        play_page,
+        [black_reply(move=None, signal="red_winning", mate_in=5, over=True, winner="red")],
+    )
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_reply(play_page)
+
+    reading = text_of(play_page, ".signal-reading")
+    assert reading == "已將死黑方", f"終局的信號讀數是:{reading}"
+    assert "5" not in reading, f"對局已結束,信號仍在倒數:{reading}"
 
 
 def test_the_signal_is_presented_as_advisory_not_a_verdict(play_page) -> None:
