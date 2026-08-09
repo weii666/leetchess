@@ -211,10 +211,26 @@ export function createGame({
     });
   }
 
-  /** 重建快照並通知訂閱者。狀態的每一次變動都經過這裡。 */
+  /**
+   * 重建快照並通知訂閱者。狀態的每一次變動都經過這裡。
+   *
+   * **每個訂閱者各自被保護起來。** 訂閱者是呈現層,它會碰 DOM —— 一個沒接到的
+   * 節點就足以讓它丟出例外。若讓那個例外往上穿,對局狀態會壞在兩種方式:推進到
+   * 一半的狀態被當成失敗而只退回一部分,或永遠停在等待中(違反 6.4)。呈現層的
+   * 缺陷不得升級成對局狀態的缺陷,使用者才不會卡在誰都救不回來的畫面(7.4)。
+   *
+   * 例外經 `console.error` 留下痕跡就好 —— 這裡是狀態機,沒有立場決定要怎麼告訴
+   * 使用者;安靜吞掉則會讓呈現層的缺陷完全查不到。
+   */
   function notify() {
     snapshot = buildSnapshot();
-    for (const listener of listeners) listener(snapshot);
+    for (const listener of listeners) {
+      try {
+        listener(snapshot);
+      } catch (error) {
+        console.error('訂閱者處理狀態時失敗', error);
+      }
+    }
   }
 
   /** 跑過每個回饋來源,收集這次推進的回饋。 */
@@ -292,6 +308,11 @@ export function createGame({
 
     const issued = ++generation;
     const beforeSending = moves;          // 整份留著,失敗時原樣換回
+    // 局面狀態也一起留著。序列與局面是同一份真相的兩半:只退回序列而讓局面停在
+    // 推進後,快照就會對著起始盤面發出**走後**的著法清單,而那份畫面上的每一個
+    // 落點都會被後端拒絕。收下回應之後才發生的失敗(例如某個回饋來源丟例外)
+    // 正好落在這條路徑上。
+    const stateBeforeSending = currentState;
     moves = [...moves, uci];
     waiting = true;
     failure = null;
@@ -313,6 +334,7 @@ export function createGame({
     } catch (error) {
       if (issued !== generation) return false;
       moves = beforeSending;
+      currentState = stateBeforeSending;
       waiting = false;
       failure = toFailure(error);
       notify();

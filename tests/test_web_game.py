@@ -907,6 +907,114 @@ def test_feedback_is_cleared_when_the_game_restarts(game_page) -> None:
     assert state(game_page)["feedback"] == []
 
 
+# --- 訂閱者的例外不得使狀態機壞掉 -----------------------------------------
+#
+# 呈現層(`app.js`)是第一個訂閱者,而它會在通知期間碰 DOM —— 一個沒接到的節點、
+# 一則記譜算不出來的著法,都會讓 listener 丟出例外。那是呈現層的缺陷,但**不得
+# 由此變成對局狀態的缺陷**:狀態機若因此讓快照與走法序列說不同的話,或讓等待態
+# 永遠解不開(6.4),使用者就卡在一個誰都救不回來的畫面(7.4)。
+
+
+def break_subscriber(page) -> None:
+    """掛一個一被通知就丟例外的訂閱者,後面再掛一個正常的觀察者。
+
+    兩個一起掛,才問得出第二件事:壞掉的那個不能把後面的訂閱者一併噤聲。
+    """
+    page.evaluate(
+        """() => {
+          window.game.subscribe(() => { throw new Error('呈現層壞了'); });
+          window.later = [];
+          window.game.subscribe((state) => window.later.push(state.moves));
+        }"""
+    )
+
+
+def test_a_throwing_subscriber_does_not_corrupt_a_successful_move(game_page) -> None:
+    """訂閱者丟例外之後,快照仍與走法序列一致。
+
+    退化的樣子是快照對著**起始盤面**發出**走後**的著法清單 —— 那份畫面上的每一個
+    落點都會被後端拒絕,而使用者看不出哪裡不對。
+    """
+    start(game_page)
+    route_black_move(game_page, replies(black_reply()))
+    break_subscriber(game_page)
+
+    assert call(game_page, "play", "d8d9") is True
+    snapshot = state(game_page)
+
+    assert snapshot["moves"] == ["d8d9", "e9d9"]
+    assert snapshot["legalMoves"] == ["d9d8", "f8f9"]
+    assert snapshot["waiting"] is False
+    assert snapshot["error"] is None
+
+
+def test_a_throwing_subscriber_does_not_strand_the_waiting_state(game_page) -> None:
+    """訂閱者丟例外時等待態仍必被解除(6.4),失敗也仍記得下來(7.1)。"""
+    start(game_page)
+    route_black_move(game_page, [backend_error("INTERNAL")])
+    break_subscriber(game_page)
+
+    assert call(game_page, "play", "d8d9") is False
+    snapshot = state(game_page)
+
+    assert snapshot["waiting"] is False
+    assert snapshot["error"]["code"] == "INTERNAL"
+    assert snapshot["moves"] == []
+
+
+def test_a_throwing_subscriber_does_not_silence_the_others(game_page) -> None:
+    """壞掉的訂閱者不得讓排在它後面的訂閱者收不到通知。"""
+    start(game_page)
+    route_black_move(game_page, replies(black_reply()))
+    break_subscriber(game_page)
+
+    call(game_page, "play", "d8d9")
+
+    assert game_page.evaluate("() => window.later") == [["d8d9"], ["d8d9", "e9d9"]]
+
+
+def test_a_throwing_subscriber_does_not_break_load_or_reset(game_page) -> None:
+    """載入與重來同樣經過通知,同樣不得因訂閱者的例外而失敗。"""
+    start(game_page)
+    route_black_move(game_page, replies(black_reply()))
+    call(game_page, "play", "d8d9")
+    break_subscriber(game_page)
+
+    call(game_page, "reset")
+    assert state(game_page)["moves"] == []
+
+    assert call(game_page, "load") is True
+    assert state(game_page)["legalMoves"] == START_LEGAL
+
+
+def test_a_throwing_feedback_source_rolls_the_whole_state_back(game_page) -> None:
+    """回饋來源丟例外時,**盤面與著法清單也要一起退回送出前的值**(7.4)。
+
+    只退 `moves` 是不夠的:局面狀態停在推進後,快照就會對著起始盤面發出走後的
+    著法清單。回饋是參考資訊,它壞掉不得讓對局進到一個說不通的狀態。
+    """
+    game_page.evaluate(
+        """async () => {
+          const { createGame } = await import('/game.js');
+          window.game = createGame({
+            positionId: 1,
+            feedbackSources: [() => { throw new Error('回饋來源壞了'); }],
+          });
+        }"""
+    )
+    assert call(game_page, "load") is True
+    route_black_move(game_page, replies(black_reply()))
+
+    assert call(game_page, "play", "d8d9") is False
+    snapshot = state(game_page)
+
+    assert snapshot["moves"] == []
+    assert snapshot["legalMoves"] == START_LEGAL, "退回之後盤面要與起始局面一致"
+    assert snapshot["waiting"] is False
+    assert snapshot["over"] is False
+    assert piece_at(snapshot, "d8") == "R"
+
+
 # --- 依賴方向 -----------------------------------------------------------
 
 
