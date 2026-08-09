@@ -1,0 +1,305 @@
+/*
+ * 版面與行動裝置適配(tasks 5.1;requirements 8.2、4.4)。
+ *
+ * 視覺語言自 `poc/index.html` 的行內樣式移植 —— 深色底、盤面暖色、側欄以卡片
+ * 分區。POC 已實際跑過整局,配色與字級不必重新發明。
+ *
+ * ## 與 POC 的三處必要差異
+ *
+ * 1. **盤面是 SVG,棋子是 `<g>`。** POC 的棋子是絕對定位的 `div`,外觀靠
+ *    `box-shadow` / `border` / `border-radius` / `background`;這四個屬性對 `<g>`
+ *    一律無效。棋子外觀因此改由 `circle.piece-disc` 的 `fill` / `stroke` 與
+ *    `text.piece-label` 的 `fill` 表達。
+ * 2. **盤面尺寸不再是固定 px。** POC 以 `--cell` 算出固定的 `#board` 寬高,窄畫面
+ *    必然溢出。此處只給 `#board svg` 一條 `width: 100%; height: auto` —— `board.js`
+ *    同時寫了 `width` / `height` 屬性與 `viewBox`,CSS 勝過呈現屬性,長寬比由
+ *    `viewBox` 自動維持。棋子與格線都在同一個座標系內,縮放盤面不需要重新定位
+ *    任何東西,這正是 requirements 8.2 成立的關鍵。
+ * 3. **`#board` 的底色改由 `<rect class="board-bg">` 提供**(`board.js` 畫的),
+ *    容器本身不再需要背景;沒有 CSS 時頁面也還是一面完整的棋盤。
+ *
+ * ## 不得碰的兩件事
+ *
+ * - **落點標示的 `pointer-events`。** `board.js` 在吃子的空心圈上寫了
+ *   `pointer-events: all`,因為 `fill="none"` 的圈只有筆畫吃得到點擊,圈內會穿透
+ *   到底下那枚被吃的子。任何覆寫都會讓那一手點不出去。
+ * - **`#waiting` 與 `#error` 的 `hidden`。** 兩者的顯示由 `app.js` 以 `hidden`
+ *   屬性控制;給它們 `display` 會蓋掉 `hidden` 的預設值,畫面將永遠停在「引擎
+ *   思考中」。故本檔在最上方補一條 `[hidden] { display: none }` 作為保險。
+ *
+ * ## 版面
+ *
+ * 單一 flex 容器加 `flex-wrap`,沒有媒體查詢:盤面與側欄各給一個 flex basis,
+ * 容器塞不下兩欄時自然換行成單欄。寬度是連續的,不存在「剛好卡在斷點上」的
+ * 尺寸。行動裝置適配真正靠的是 `#board svg { width: 100%; height: auto }`。
+ */
+
+:root {
+  color-scheme: dark;
+
+  --page-bg: #2b2b2b;
+  --panel-bg: #3a3a3a;
+  --panel-bg-strong: #40454a;
+  --text: #eeeeee;
+  --text-muted: #a8a8a8;
+  --text-dim: #8d8d8d;
+  --accent: #ffd479;
+  --line: #6b5433;
+
+  --gap: 24px;
+  --radius: 8px;
+
+  /* 盤面的 `viewBox` 寬度 —— 放大超過原尺寸只會讓線條變糊。 */
+  --board-max-width: 576px;
+  --sidebar-basis: 300px;
+  --sidebar-max-width: 420px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* `app.js` 以 `hidden` 屬性控制等待與錯誤區塊,任何 `display` 都不得蓋掉它。 */
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  padding: var(--gap);
+  background: var(--page-bg);
+  color: var(--text);
+  font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC",
+    sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  justify-content: center;
+  align-items: flex-start;
+}
+
+/* --- 盤面 ------------------------------------------------------------- */
+
+/*
+ * `flex: 1 1 320px` 讓盤面在寬畫面上與側欄並排、在窄畫面上獨佔一列。
+ *
+ * `min-width: 0` 是**防禦性的空操作**,不是行動裝置適配的解法 —— review 以突變
+ * 證實:移除它之後 320/360/390/414/768/1280 六個尺寸的量測逐位元組相同。原因是
+ * 下方的 `width: 100%` 使百分比尺寸的替換元素對 min-content 的貢獻為 0,flex 的
+ * 自動最小尺寸本來就已經是 0。留著它是為了「子元素改成固定寬時仍不溢出」,
+ * **真正防住橫向捲軸的是 `#board svg` 那三行**(移除 `width: 100%` 會讓 7 條測試轉紅)。
+ */
+#board {
+  flex: 1 1 320px;
+  min-width: 0;
+  max-width: var(--board-max-width);
+}
+
+/*
+ * 這三行是行動裝置適配的全部:蓋掉 `board.js` 寫在元素上的 `width` / `height`
+ * 屬性,高度交給 `viewBox` 的長寬比。**不得加 `pointer-events`** —— POC 的
+ * `#board svg { pointer-events: none }` 是因為棋子在 SVG 之外,現在棋子就在裡面。
+ */
+#board svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 2px solid var(--line);
+  border-radius: 4px;
+}
+
+/* 點在棋子上是選子,不是選字。 */
+#board svg text {
+  user-select: none;
+}
+
+/* 可選取的子與已標示的落點是能點的,游標要說得出來。 */
+.piece.selectable,
+.dot {
+  cursor: pointer;
+}
+
+/*
+ * 棋子的懸停回饋。`.piece` 是 `<g>`,`box-shadow` 對它無效 —— 改為加粗圓底的
+ * 筆畫,那是 SVG 上等價的「浮起來一點」。
+ */
+.piece.selectable:hover .piece-disc {
+  stroke-width: 4;
+}
+
+/* 沒有盤面可畫時 `app.js` 放的那句話(requirements 1.4)。 */
+.board-placeholder {
+  margin: 0;
+  padding: 48px 16px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* --- 側欄 ------------------------------------------------------------- */
+
+#sidebar {
+  flex: 1 1 var(--sidebar-basis);
+  /* 同 `#board`:防禦性的空操作,非適配解法。 */
+  min-width: 0;
+  max-width: var(--sidebar-max-width);
+}
+
+#puzzle-info {
+  margin-bottom: 12px;
+}
+
+#puzzle-title {
+  margin: 0 0 6px;
+  font-size: 20px;
+  line-height: 1.4;
+}
+
+#puzzle-info p {
+  margin: 2px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+#puzzle-info span {
+  color: var(--text);
+}
+
+/* 當前輪方(requirements 8.4)—— 側欄裡最該一眼看到的一行。 */
+#turn {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--panel-bg);
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* --- 三態諮詢信號(requirements 4.4)---------------------------------- */
+
+/*
+ * 信號是**參考資訊而非勝負判決**。讀數與說明因此刻意做成主從兩層:讀數保持
+ * 一般字重與字級,說明明顯更小更淡。兩行長得一樣重時,「參考而非判決」就只
+ * 存在於文案裡,看畫面的人讀不出來。
+ *
+ * 同理,整塊用的是中性灰而非紅綠 —— 勝負色會讓它看起來就是判決本身。
+ */
+#signal {
+  display: block;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  border-left: 3px solid var(--text-dim);
+  background: var(--panel-bg-strong);
+}
+
+.signal-reading {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.signal-note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+/* --- 等待與錯誤 ------------------------------------------------------- */
+
+/*
+ * 兩者都只在 `hidden` 為假時才會排出來,故此處不寫 `display` —— 上方的
+ * `[hidden] { display: none !important }` 是保險,規則本身不去挑戰它。
+ */
+#waiting {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: #2c4a63;
+  color: #cfe6ff;
+  font-size: 14px;
+}
+
+/* 全部的失敗共用這一個區塊(design 的 Error Handling),不為每種錯誤各做一套。 */
+#error {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: #5c2a24;
+  color: #ffd6d0;
+  font-size: 14px;
+}
+
+/* --- 重來 ------------------------------------------------------------- */
+
+#reset {
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  background: #4a4a4a;
+  color: var(--text);
+  cursor: pointer;
+}
+
+#reset:hover {
+  background: #5a5a5a;
+}
+
+#reset:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- 歷史著法(requirements 8.1)-------------------------------------- */
+
+#moves-panel {
+  margin-top: 16px;
+}
+
+#moves-panel h2 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+}
+
+/*
+ * 著法可以很長,側欄卻不該跟著長到天邊 —— 給一個上限並自行捲動。捲的是縱向,
+ * 橫向仍不得溢出,故列內的每一欄都以 `em` 為寬且允許換行。
+ */
+#moves {
+  margin: 0;
+  padding-left: 2.4em;
+  max-height: 260px;
+  overflow-y: auto;
+  font-size: 15px;
+  color: #dddddd;
+}
+
+#moves li {
+  padding: 3px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+#moves li::marker {
+  color: var(--text-dim);
+}
+
+.mv-r,
+.mv-b {
+  display: inline-block;
+  min-width: 5.5em;
+}

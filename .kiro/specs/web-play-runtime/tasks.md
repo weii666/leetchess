@@ -101,7 +101,7 @@
 
 ## 5. 版面與端到端驗收
 
-- [ ] 5.1 (P) 版面與行動裝置適配
+- [x] 5.1 (P) 版面與行動裝置適配
   - `web/style.css`:桌面與行動裝置直向畫面的版面
   - 行動裝置直向畫面須完整呈現盤面與對局資訊,**不需橫向捲動**
   - 完成狀態:以行動裝置尺寸的視窗載入頁面,盤面與側欄皆完整可見且無橫向捲軸
@@ -180,3 +180,8 @@
 - 4.4:`#signal` 呈現為 `參考信號:<讀數>` 加一行常駐說明「僅供參考,不是勝負判決;對局只在真終局結束。」讀數依 `state.userSide` 換算而非依顏色。殺著倒數為 `約 N 步`,以 `!= null` 判斷 —— **實測 `mate_in: 0` 確實顯示「約 0 步」**。
 - 4.4:**⚠ 給 5.1**:`#signal` 現在含兩個 `<p>`(`.signal-reading` 與 `.signal-note`),說明那行要做成從屬樣式,讓「參考而非判決」在視覺上也讀得出來。`#signal` 骨架裡的靜態文字「勝負難料」已被取代,`#waiting` 的文字每次 render 都會被覆寫。錯誤區塊是單一 `<p>` 無分類 class —— 若要讓可重試與須重來有不同樣式,得先在 `app.js` 加 class hook。
 - 4.4:三處非阻斷的測試敏感度缺口(程式正確,缺護欄):使用者方信號換算未被測到(所有 fixture 都是紅先,硬編 `winner === 'red'` 會存活);載入中與思考中的等待文案只斷言非空;`wait_for_reply` 與 `wait_settled` 是兩檔重複的相同輔助函式。
+- 5.1:版面為**單一 flex 容器加 `flex-wrap`,無媒體查詢** —— 寬度連續,不存在「剛好卡在斷點上」的尺寸。行動裝置適配真正靠的是 `#board svg { width: 100%; height: auto }`(蓋掉 `board.js` 寫在元素上的 width/height 屬性,長寬比由 viewBox 保持)。
+- 5.1:**`min-width: 0` 是防禦性的空操作,不是適配解法**。實作者原本在註解裡宣稱它是必要的,review 以突變推翻:移除後 320/360/390/414/768/1280 六個尺寸的量測**逐位元組相同**。註解已更正 —— 留著錯誤說明會讓維護者保住空操作、刪掉真正有用的那行。
+- 5.1:CSS **完全沒有 `pointer-events` 宣告**(只在註解裡提到),3.2 吃子標示的 `pointer-events: all` 因此完好。`[hidden] { display: none !important }` 保護 `app.js` 對 `#waiting` / `#error` 的控制。
+- 5.1:**⚠ 給 5.2 的既知脆弱性**:`tests/test_web_play.py` 的 `click_square()` 以 **viewBox 使用者座標**呼叫 Playwright 的 `position`,而那是 CSS 像素。目前成立只因為 `--board-max-width: 576px` 剛好等於 viewBox 寬度、且預設視窗夠寬。review 實測:把該變數改為 480px 會讓 **38 條測試失敗且大量掛住(1060 秒 vs 平常 30 秒)**。另外 `box-sizing: border-box` 加 2px 邊框已使實際偏移達 (3.7, 4.2)px,對半格 30.8px 尚有約 7 倍餘裕。**5.2 若新增點擊測試,請改用依實際 bounding box 縮放的座標。**
+- 5.1:`#moves` 設了 `overflow-y: auto`,依 CSS 規範會**強制 `overflow-x` 也成為 `auto`** —— 水平溢出被它自己的內部捲軸吸收,`li` 的佈局盒永遠不會超出容器。拿 `li` 右緣跟視窗比的斷言**結構上不可能失敗**,必須比 `#moves` 自己的 `scrollWidth` 與 `clientWidth`。
