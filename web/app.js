@@ -24,11 +24,17 @@
  * 類別碼。因此「找不到題目」這幾個字必須由本檔依碼自己決定,而不是把後端回的東西
  * 印出來。文字一律繁體中文(requirements 8.3)。
  *
+ * ## 失敗只有一個區塊、只分兩類
+ *
+ * 載入失敗與走子途中的失敗**寫進同一個 `#error`**(design 的 Error Handling)。
+ * 兩條各自寫死的路徑會互相蓋掉對方的訊息 —— 共用一個區塊才保證任一時刻只有一則
+ * 訊息,而且它一定是最新的那一則。區分只到「可重試」與「須重來」兩類,不為七種
+ * 類別碼各做一套 UI;類別碼只影響**說法**(忙碌要能與真正的錯誤分開,7.2),
+ * 不影響版面。
+ *
  * ## 本檔目前不含的部分
  *
- * 三態信號、等待呈現與一般的錯誤區塊屬 tasks 4.4;版面屬 `style.css`(tasks 5.1)。
- * 唯一先做的是 requirements 1.4(題目不存在的告知)—— 那是**載入**失敗,沒有它
- * 使用者會對著一片空白不知道發生什麼事。
+ * 版面屬 `style.css`(tasks 5.1)。
  */
 
 import { renderBoard } from './board.js';
@@ -55,6 +61,38 @@ const LOAD_FAILURE_MESSAGES = Object.freeze({
 /** 其餘載入失敗共用的說法 —— 連線、逾時、後端出錯,對使用者而言都是「再試一次」。 */
 const GENERIC_LOAD_FAILURE = '題目載入失敗,請稍後再試。';
 
+/**
+ * 走子途中失敗的**成因**,依類別碼決定(requirements 7.1、7.2)。
+ *
+ * 這裡的每一句都是本檔自己寫的,與後端回的 `message` 無關 —— 呈現層拿得到的
+ * 只有一個碼(requirements 7.5)。列出來的碼只有一個作用:讓使用者分得出這次
+ * 是哪一種情況,尤其是**服務忙碌必須與真正的錯誤區分**(requirements 7.2)。
+ * 沒列到的碼一律走通用說法,而不是各自長出一套 UI。
+ */
+const FAILURE_CAUSES = Object.freeze({
+  SERVICE_BUSY: '服務忙碌中。',
+  // 前端自己的逾時上界到了,與後端回報引擎搜尋逾時,對使用者是同一件事:等太久了。
+  TIMEOUT: '等候回應逾時。',
+  ENGINE_TIMEOUT: '等候回應逾時。',
+  NETWORK: '連線失敗。',
+  ILLEGAL_MOVE_SEQUENCE: '走法序列與後端的局面對不上。',
+  WRONG_SIDE_TO_MOVE: '走法序列與後端的局面對不上。',
+});
+
+/** 認不得的碼(含 `UNKNOWN` 這種無法辨識的回應形狀)共用的說法。 */
+const GENERIC_FAILURE_CAUSE = '發生了預期外的問題。';
+
+/**
+ * 失敗之後使用者能做的事 —— **只有兩類**,對應 `game.js` 的 `FailureKind`。
+ *
+ * 光說「出錯了」不算告知(requirements 7.1):使用者要知道下一步能做什麼。而那
+ * 只有兩種答案 —— 再試一次同一手,或整局重來(requirements 7.3)。
+ */
+const RECOVERY = Object.freeze({
+  retry: '這一手沒有送出,請稍後再試一次。',
+  reset: '對局狀態已失效,請按「重來」重新開始。',
+});
+
 /** 載入失敗時頂上標題的位置。不能留著「載入中…」,那會讓人以為還在等。 */
 const LOAD_FAILURE_TITLES = Object.freeze({
   POSITION_NOT_FOUND: '找不到題目',
@@ -73,12 +111,50 @@ const IDLE_TITLE = '尚未載入題目';
 /** 沒有值可填時的佔位符號。 */
 const BLANK = '—';
 
+/**
+ * 三態諮詢信號的說法(requirements 4.1)。
+ *
+ * 三種狀態是**相對使用者**的,而後端給的 `red_winning` / `black_winning` 是相對
+ * 顏色的 —— 中間隔著「使用者執哪一方」。照顏色直譯在今天的題庫(一律執紅)看不
+ * 出差別,但那是巧合而非契約:題目自己帶著 `side_to_move`,換成執黑的題目時直譯
+ * 會把即將取勝說成即將落敗。
+ */
+const SIGNAL_LABELS = Object.freeze({
+  winning: '即將取勝',
+  losing: '即將落敗',
+  unknown: '勝負未知',
+});
+
+/** 後端的信號值對應到哪一方即將取勝;認不得的值一律當作未知。 */
+const SIGNAL_WINNERS = Object.freeze({ red_winning: 'red', black_winning: 'black' });
+
+/** 還沒有任何一手應手時的信號 —— 這不是「未知」,是根本還沒問過。 */
+const NO_SIGNAL_YET = '尚未取得';
+
+/**
+ * 信號區的前綴與註記,合起來讓使用者辨識它是**參考資訊而非勝負判決**
+ * (requirements 4.4)。
+ *
+ * 沒有這層框定的話,「即將取勝」看起來就是系統宣告勝負,而對局其實還在繼續 ——
+ * 終局只由後端的結束旗標決定,信號連碰都碰不到它(requirements 3.3、4.3)。
+ */
+const SIGNAL_PREFIX = '參考信號';
+const SIGNAL_NOTE = '僅供參考,不是勝負判決;對局只在真終局結束。';
+
+/** 等待中要說的話 —— 載入題目與等應手是兩件事,不能都說成「引擎思考中」。 */
+const WAITING_TEXTS = Object.freeze({
+  load: '正在載入題目…',
+  play: '引擎思考中…',
+});
+
 const elements = {
   board: document.getElementById('board'),
   title: document.getElementById('puzzle-title'),
   source: document.getElementById('puzzle-source'),
   maxDtm: document.getElementById('puzzle-max-dtm'),
   turn: document.getElementById('turn'),
+  signal: document.getElementById('signal'),
+  waiting: document.getElementById('waiting'),
   error: document.getElementById('error'),
   moves: document.getElementById('moves'),
   reset: document.getElementById('reset'),
@@ -156,14 +232,86 @@ function turnText(state) {
 }
 
 /**
- * 載入失敗的告知(requirements 1.4)。
+ * 三態諮詢信號的讀數(requirements 4.1、4.2)。
  *
- * 只處理**沒有題目**的情況;走子途中的失敗屬 tasks 4.4。題目載入成功後這一區
- * 一律收起來 —— 失敗後重試成功的話,上一次的訊息不能留在畫面上。
+ * **殺著倒數一律以 `!= null` 判斷。** `mate_in` 可能是 `0` —— 那正是每一題排局的
+ * 最後一手(這一手就將死對方),而 JS 的 `if (mateIn)`、`mateIn || '—'` 對 0 都是
+ * 假,倒數會在最關鍵的那一手被靜默吞掉。
+ *
+ * 倒數寫成「約 N 步」而非確數:後端在 250k 節點下可能高估 1 步,寫成確數等於把一個
+ * 刻意接受的誤差說成精確值。
  */
-function renderLoadFailure(state) {
-  const failed = state.position == null && state.error != null;
-  elements.error.textContent = failed ? loadFailureMessage(state.error.code) : '';
+function signalReading(entry, userSide) {
+  if (!entry) return NO_SIGNAL_YET;
+  const winner = SIGNAL_WINNERS[entry.signal] ?? null;
+  const label =
+    winner == null
+      ? SIGNAL_LABELS.unknown
+      : winner === userSide
+        ? SIGNAL_LABELS.winning
+        : SIGNAL_LABELS.losing;
+  return entry.mateIn != null ? `${label}(約 ${entry.mateIn} 步)` : label;
+}
+
+/**
+ * 三態信號(requirements 4.1、4.2、4.4)。
+ *
+ * 回饋是**一份來源清單**(`game.js` 的 `feedbackSources`),信號只是其中一個來源 ——
+ * 因此這裡是挑出信號那一則,而不是假設清單裡只有它。日後判定表加進來時本函式不必改。
+ *
+ * **信號與對手著法是各自獨立的欄位**:對手著法為空(排局的最後一手)時信號仍可能
+ * 有值,兩者分開呈現。把「無應手」實作成整份回應為空,就會在最後一手把信號弄丟。
+ */
+function renderSignal(state) {
+  const entry = state.feedback.find((item) => item.source === 'signal') ?? null;
+
+  const reading = document.createElement('p');
+  reading.className = 'signal-reading';
+  reading.textContent = `${SIGNAL_PREFIX}:${signalReading(entry, state.userSide)}`;
+
+  const note = document.createElement('p');
+  note.className = 'signal-note';
+  note.textContent = SIGNAL_NOTE;
+
+  elements.signal.replaceChildren(reading, note);
+}
+
+/**
+ * 等待狀態(requirements 6.1、6.4)。
+ *
+ * 「解除」在此**只是快照的 `waiting` 為假**,沒有第二個地方記著它 —— 成功、失敗、
+ * 重來三條路徑因此不必各自記得要收起這一區,requirements 6.4 也就不會依賴任何一條
+ * 路徑有沒有寫全。
+ */
+function renderWaiting(state) {
+  elements.waiting.textContent = state.position ? WAITING_TEXTS.play : WAITING_TEXTS.load;
+  elements.waiting.hidden = !state.waiting;
+}
+
+/**
+ * 失敗的說法。載入失敗與走子途中的失敗共用同一個區塊,但說的不是同一件事。
+ *
+ * 還沒有題目時(requirements 1.4)不談「這一手」—— 使用者根本還沒走;有題目之後
+ * 的失敗才需要告訴他那一手怎麼了,以及接下來能做什麼(requirements 7.1、7.3)。
+ */
+function failureMessage(state) {
+  const { code, kind } = state.error;
+  if (state.position == null) return loadFailureMessage(code);
+  return `${FAILURE_CAUSES[code] ?? GENERIC_FAILURE_CAUSE}${RECOVERY[kind] ?? RECOVERY.retry}`;
+}
+
+/**
+ * 失敗的告知 —— **全部的失敗只有這一個區塊**(requirements 1.4、7.1、7.2、7.3)。
+ *
+ * 載入失敗與走子途中的失敗刻意不分開寫:兩條路徑各自控制同一個節點的話,後寫的
+ * 那條會蓋掉前一條的訊息,而畫面上留著的是哪一則取決於呼叫順序。共用一條路徑則
+ * 保證任一時刻只有一則訊息,且它一定是快照裡最新的那一個失敗。
+ *
+ * 沒有失敗時一律收起來 —— 重試成功後,上一次的訊息不能留在畫面上。
+ */
+function renderFailure(state) {
+  const failed = state.error != null;
+  elements.error.textContent = failed ? failureMessage(state) : '';
   elements.error.hidden = !failed;
 }
 
@@ -250,7 +398,9 @@ function render() {
   const state = game.getState();
   renderPuzzleInfo(state);
   elements.turn.textContent = turnText(state);
-  renderLoadFailure(state);
+  renderSignal(state);
+  renderWaiting(state);
+  renderFailure(state);
   renderMoves(state);
   renderBoardArea(state);
 }

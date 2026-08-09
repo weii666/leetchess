@@ -1,4 +1,5 @@
-"""介面組裝層的互動驗證(tasks 4.3;requirements 1.2、1.3、1.4、3.2、5.1、8.1、8.4)。
+"""介面組裝層的互動驗證(tasks 4.3、4.4;requirements 1.2、1.3、1.4、3.2、4.1、4.2、
+4.4、5.1、6.1、6.4、8.1、8.4)。
 
 `web/app.js` 是唯一把三個模組接起來的地方 —— 它沒有自己的邏輯可言,價值全在
 「接得對不對」。因此本檔一律**以真實點擊驅動真實頁面**:載入 `web/index.html`
@@ -18,8 +19,9 @@ Chromium 不允許自 `file://`(origin 為 `null`)匯入 ES module。與那兩�
 `style.css` 尚屬 tasks 5.1、此刻不存在,靜態路由會回 404 —— 那不影響任何斷言:
 盤面的呈現屬性直接寫在 SVG 元素上(tasks 3.1),沒有 CSS 也畫得出來。
 
-三態信號、等待呈現與錯誤區塊屬 tasks 4.4,不在本檔範圍;唯一的例外是 1.4
-(題目不存在時的告知),它是**載入失敗**的處理,tasks 4.3 明列。
+三態信號(4.1、4.2、4.4)與等待狀態(6.1、6.4)屬 tasks 4.4,由本檔最後兩節驗證 ——
+它們是**成功路徑上的呈現**,與這裡既有的走子流程共用同一組夾具。走子途中的失敗
+呈現(7.1、7.2、7.3)另立 `test_web_failures.py`(design 的 File Structure Plan)。
 """
 
 from __future__ import annotations
@@ -169,6 +171,14 @@ def hang_black_move(page) -> None:
     page.route(f"{ORIGIN}/api/black-move", lambda route: None)
 
 
+def hang_position(page) -> None:
+    """題目端點收下請求就不回話 —— 觀察**載入期間**的畫面。
+
+    後註冊的路由優先,因此這會蓋掉 `play_page` 夾具裝好的那一條。
+    """
+    page.route(f"{ORIGIN}/api/positions/**", lambda route: None)
+
+
 def visit(page, position_id: Any = 1) -> None:
     """開啟頁面。**題號自網址帶入** —— 要載入哪一題由外部決定(brief 的邊界)。"""
     page.goto(f"{ORIGIN}/index.html?id={position_id}")
@@ -269,6 +279,16 @@ def wait_for_moves(page, count: int) -> None:
            ) === count""",
         arg=count,
     )
+
+
+def wait_for_reply(page) -> None:
+    """等到剛送出的那一手真的有了結果。
+
+    **數手數在這裡不管用**:排局的最後一手黑方沒有應手,手數在應手回來前後都是
+    同一個數字,以它為條件的斷言會在回應還在路上時就跑起來。等待態解除才是「這
+    次請求已經落地」的唯一信號,而它在點擊當下就已同步變為真。
+    """
+    page.wait_for_function("() => document.getElementById('waiting').hidden")
 
 
 # --- 題目資訊(1.2、1.3)-------------------------------------------------
@@ -587,6 +607,183 @@ def test_reset_clears_the_selected_piece(play_page) -> None:
     wait_for_moves(play_page, 0)
 
     assert marked_squares(play_page) == set()
+
+
+# --- 三態諮詢信號(4.1、4.2、4.4)---------------------------------------
+
+
+def test_a_winning_signal_is_shown_after_a_reply(play_page) -> None:
+    """取得應手後呈現三種信號狀態之一 —— 這是「即將取勝」那一種(4.1)。"""
+    open_game(play_page, [black_reply(signal="red_winning", mate_in=4)])
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_moves(play_page, 2)
+
+    assert "即將取勝" in text_of(play_page, "#signal")
+
+
+def test_a_losing_signal_is_shown_after_a_reply(play_page) -> None:
+    """「即將落敗」那一種(4.1)。使用者執紅,故黑方即將取勝就是他要落敗。"""
+    open_game(play_page, [black_reply(signal="black_winning", mate_in=3)])
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_moves(play_page, 2)
+
+    assert "即將落敗" in text_of(play_page, "#signal")
+
+
+def test_an_unknown_signal_is_shown_after_a_reply(play_page) -> None:
+    """「未知」那一種(4.1)—— 引擎一分未報時仍要有話說,不得留白。"""
+    open_game(play_page, [black_reply(signal="unknown", mate_in=None)])
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_moves(play_page, 2)
+
+    assert "未知" in text_of(play_page, "#signal")
+
+
+def test_the_mate_countdown_is_shown_as_an_approximation(play_page) -> None:
+    """殺著倒數以**近似值**形式呈現(4.2)。
+
+    後端在 250k 節點下可能高估 1 步,寫成確數等於把一個刻意接受的誤差說成精確值。
+    """
+    open_game(play_page, [black_reply(signal="red_winning", mate_in=4)])
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_moves(play_page, 2)
+
+    signal = text_of(play_page, "#signal")
+    assert "4" in signal
+    assert "約" in signal, "倒數必須是近似值的說法,不能寫成確數"
+
+
+def test_a_mate_countdown_of_zero_is_still_shown(play_page) -> None:
+    """**倒數為 0 時仍正常呈現**(4.2)。
+
+    `mate_in: 0` 不是邊緣案例 —— 它正是每一題排局的最後一手(紅方這一手就將死
+    黑方)。JS 的 `if (mateIn)`、`mateIn || '—'` 對 0 都是假,倒數會在最關鍵的那
+    一手被靜默吞掉。此處鎖住的是「有值就呈現」,不是「非零才呈現」。
+    """
+    open_game(play_page, [FINAL_REPLY])
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_reply(play_page)
+
+    assert "0" in text_of(play_page, "#signal")
+
+
+def test_a_signal_without_a_countdown_shows_no_bogus_number(play_page) -> None:
+    """沒有殺著倒數時不得憑空生一個數字 —— 與 `max_dtm` 的條件式呈現同理。"""
+    open_game(play_page, [black_reply(signal="red_winning", mate_in=None)])
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_moves(play_page, 2)
+
+    assert not re.search(r"\d", text_of(play_page, "#signal"))
+
+
+def test_a_reply_without_an_opponent_move_still_shows_its_signal(play_page) -> None:
+    """對手著法為空時信號仍呈現 —— 兩者是**獨立**欄位(design 的 app.js 一節)。
+
+    把「無應手」實作成整份回應為空、或順手省掉信號,就會在每一題的最後一手把
+    信號一起弄丟。此處刻意同時斷言:黑方那一半是空的,而信號有值。
+    """
+    open_game(play_page, [FINAL_REPLY])
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_reply(play_page)
+
+    assert move_rows(play_page) == [("俥六進一", "")], "前置條件:黑方確實沒有應手"
+    assert "即將取勝" in text_of(play_page, "#signal")
+
+
+def test_the_signal_is_presented_as_advisory_not_a_verdict(play_page) -> None:
+    """信號的呈現須讓使用者辨識它是**參考資訊而非勝負判決**(4.4)。
+
+    同一份畫面上還必須看得出對局沒有結束 —— 信號說即將取勝,但對局未終,盤面
+    仍然可走(3.3 在呈現層的體現)。
+    """
+    open_game(play_page, [black_reply(signal="red_winning", mate_in=2, legal_moves=["f8f9"])])
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_moves(play_page, 2)
+
+    assert "參考" in text_of(play_page, "#signal")
+    assert "結束" not in text_of(play_page, "#turn")
+    click_square(play_page, "f8")
+    assert marked_squares(play_page) != set(), "信號為即將取勝不得讓盤面停下來"
+
+
+def test_the_signal_goes_back_to_no_reading_after_a_reset(play_page) -> None:
+    """重來後信號回到「尚未取得」—— 上一局的讀數不得留在畫面上(5.1、4.4)。"""
+    open_game(play_page, [black_reply(signal="red_winning", mate_in=4)])
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_moves(play_page, 2)
+    assert "即將取勝" in text_of(play_page, "#signal")
+
+    play_page.locator("#reset").click()
+    wait_for_moves(play_page, 0)
+
+    signal = text_of(play_page, "#signal")
+    assert "即將取勝" not in signal
+    assert not re.search(r"\d", signal)
+
+
+# --- 等待狀態(6.1、6.4)-----------------------------------------------
+
+
+def test_the_waiting_state_is_shown_while_the_engine_answers(play_page) -> None:
+    """等待後端回應期間呈現等待中的狀態(6.1)。"""
+    open_game(play_page)
+    hang_black_move(play_page)
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    play_page.wait_for_selector("#waiting:not([hidden])")
+
+    assert text_of(play_page, "#waiting") != ""
+
+
+def test_the_waiting_state_is_shown_while_the_puzzle_loads(play_page) -> None:
+    """載入題目也是在等後端回應,同樣要有狀態(6.1)。"""
+    hang_position(play_page)
+    visit(play_page)
+
+    play_page.wait_for_selector("#waiting:not([hidden])")
+    assert text_of(play_page, "#waiting") != ""
+
+
+def test_the_waiting_state_is_cleared_after_the_reply(play_page) -> None:
+    """回應之後等待狀態解除(6.4)。"""
+    open_game(play_page, [black_reply(move="e9d9")])
+    assert play_page.locator("#waiting").is_hidden(), "前置條件:載入完成後就不該還在等"
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_moves(play_page, 2)
+
+    assert play_page.locator("#waiting").is_hidden()
+
+
+def test_the_waiting_state_is_cleared_after_a_failure(play_page) -> None:
+    """**失敗之後等待狀態也要解除**(6.4)—— 不得留在等待中無法操作。"""
+    open_game(play_page)
+    play_page.route(f"{ORIGIN}/api/black-move", lambda route: route.abort("failed"))
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    play_page.wait_for_selector("#error:not([hidden])")
+
+    assert play_page.locator("#waiting").is_hidden()
 
 
 # --- 依賴方向 -----------------------------------------------------------
