@@ -149,7 +149,7 @@ progress / catalog  →  list
 | Requirement | Summary | Components |
 |---|---|---|
 | 1.1 | 入口是列表不是棋盤 | list.html, service/main.py |
-| 1.2, 1.3 | 每列的題號局名難度標籤出處 | list.js, catalog.js |
+| 1.2, 1.3 | 每列的題號局名難度標籤 | list.js, catalog.js |
 | 1.4 | 不可解的題目不列入 | catalog.js |
 | 1.5 | 題庫為空時的告知 | list.js |
 | 2.1, 2.2, 2.3, 2.4 | 依難度標籤出處篩選、多條件並用 | catalog.js, list.js |
@@ -164,6 +164,7 @@ progress / catalog  →  list
 | 4.1, 4.2 | 選題進入對局並載入該題 | list.js, play.html |
 | 4.3 | 返回列表的途徑 | app.js |
 | 4.4 | 返回後保留條件與標記 | list.js, progress.js |
+| 4.5 | 對局介面顯示出處與描述 | app.js |
 | 5.1, 5.2 | 單一索引、不打引擎服務 | catalog.js |
 | 5.3, 5.4 | 新增題目自動涵蓋、可擴充至 500 題 | 索引產出 |
 | 6.1 | 行動裝置列表版面 | list.css |
@@ -232,7 +233,7 @@ progress / catalog  →  list
 
 ### 列表互動
 
-- 列表呈現每題的題號、局名、難度、標籤、出處
+- 列表呈現每題的題號、局名、難度、標籤(**出處與描述不在列表**,見 1.2)
 - 篩選後只剩符合的題目;無結果時的告知與清除
 - **切換完成標記後重新載入頁面,狀態仍在**(3.3)
 - 完成題數與總題數可見
