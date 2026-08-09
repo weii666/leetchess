@@ -1,5 +1,6 @@
-"""列表頁骨架、入口路由,與列表的呈現與完成標記
-(tasks 3.1、3.2;requirements 1.1、1.2、1.3、1.5、3.1、3.2、3.3、3.5、6.2、6.3)。
+"""列表頁骨架、入口路由、列表的呈現與完成標記,以及自列表進入對局
+(tasks 3.1、3.2、4.1;requirements 1.1、1.2、1.3、1.5、3.1、3.2、3.3、3.5、4.1、
+4.2、6.2、6.3)。
 
 前半(3.1)問兩件事:
 
@@ -49,6 +50,12 @@
 時列表要靠它們;見 tasks.md 的 Backlog),但列表**不畫**這兩個欄位:列是掃視用的。
 合成索引裡的描述與出處因此刻意與局名、標籤沒有任何共同字串,「有沒有畫出去」才驗
 得出來。
+
+## 4.1 為什麼連對局頁的回應也要合成
+
+「載入的**確實是那一題**」只有在題目端點按題號給出**不同的**局名時才驗得出來 ——
+題庫今天只有 1 題,不論交接對不對,點下去看到的都是那一題。因此 4.1 那一節讓
+`/api/positions/{id}` 依題號回同一份索引夾具裡的那一題,再比對對局頁顯示的局名。
 """
 
 from __future__ import annotations
@@ -63,6 +70,7 @@ from fastapi.testclient import TestClient
 
 from service.main import create_app
 from test_web_page import SIMPLIFIED_ONLY_CHARACTERS
+from test_web_play import PUZZLE_FEN, START_LEGAL
 
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 WEB_DIR = PROJECT_ROOT / "web"
@@ -1069,3 +1077,288 @@ def test_the_desktop_layout_needs_no_horizontal_scrolling(list_page) -> None:
     )
 
     assert overflow["scroll"] <= overflow["client"], f"桌面尺寸下仍需橫向捲動:{overflow}"
+
+
+# =======================================================================
+# tasks 4.1:自列表進入對局(requirements 4.1、4.2)
+# =======================================================================
+#
+# 交接只有一個契約:`/play.html?id=<題號>`(tasks 3.1 定案),題號就是列上的
+# `data-id`(tasks 3.2 的結構契約),不另起一套識別。
+#
+# 本節分成兩層,兩層都必要:
+#
+# 1. **每一列指向的是它自己那一題** —— 以連結位址逐列比對。這一層抓得到「一律指向
+#    第一題」與「拿陣列索引當題號」兩種寫法,而它們在只點第一題的測試下都是全綠的
+#    (第一題的題號恰好是 1,也恰好是索引 0 加一)。
+# 2. **對局介面載入的確實是那一題** —— 真的點下去、真的走完導航,再看對局頁的
+#    局名與它實際請求的題號。完成狀態明寫「以題目資訊比對,不是只看有沒有開啟」:
+#    網址對了但頁面載入別題(例如對局頁讀錯參數)只有這一層看得出來。
+
+
+#: 對局介面的路徑(tasks 3.1 定案)。
+PLAY_PATH = "/play.html"
+
+#: 題號有缺口的一份索引 —— 題庫刪過題、或 corpus-verification 篩掉中間幾題之後
+#: 就長這樣。**列的順序與題號在此完全對不上**,拿列的位置當題號會直接指錯題。
+GAPPED_CATALOG: list[dict[str, Any]] = [
+    {"id": 1, "title": "首局", "difficulty": 1, "tags": [], "source": "適情雅趣"},
+    {"id": 2, "title": "次局", "difficulty": 2, "tags": [], "source": "適情雅趣"},
+    {"id": 201, "title": "末局", "difficulty": 3, "tags": [], "source": "適情雅趣"},
+]
+
+
+def play_response(entry: dict[str, Any]) -> dict[str, Any]:
+    """合成 `GET /api/positions/{id}` 的回應,**局名取自同一份索引夾具**。
+
+    形狀取自 `test_web_play.py` 的實測回應。局名共用夾具是刻意的:斷言因此讀成
+    「點第 N 題,對局頁就顯示第 N 題的局名」,而不是去比一個另外寫死的字串。
+    """
+    return {
+        "id": entry["id"],
+        "title": entry["title"],
+        "description": entry.get("description", ""),
+        "fen": PUZZLE_FEN,
+        "side_to_move": "red",
+        "difficulty": entry.get("difficulty"),
+        "tags": entry.get("tags", []),
+        "max_dtm": 9,
+        "solvable": True,
+        "source": entry.get("source", ""),
+        "state": {
+            "side_to_move": "red",
+            "legal_moves": START_LEGAL,
+            "over": False,
+            "winner": None,
+        },
+    }
+
+
+def route_api(page, positions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """索引端點與題目端點由**同一個**處理器接手,並記下題目端點被要求的題號。
+
+    非合併不可:Playwright 後註冊的路由優先,`/api/**` 各註冊一條只有最後那條會
+    生效,對局頁的題目請求會落回夾具的 404。
+
+    回傳的 `positions` 是**對局頁實際要了哪幾題**,依序。這是「載入的確實是那一題」
+    最直接的證據 —— 局名比對之外再加一層,連「畫面對了但要了別題」都排除掉。
+    """
+    entries = CATALOG if positions is None else positions
+    by_id = {str(entry["id"]): entry for entry in entries}
+    served: dict[str, Any] = {"catalog": 0, "positions": []}
+
+    def handler(route) -> None:
+        path = urlsplit(route.request.url).path
+        if path == CATALOG_PATH:
+            served["catalog"] += 1
+            body: Any = catalog_of(entries)
+        elif path.startswith("/api/positions/"):
+            requested = path.rsplit("/", 1)[-1]
+            served["positions"].append(requested)
+            entry = by_id.get(requested)
+            if entry is None:
+                route.fulfill(
+                    status=404,
+                    content_type="application/json",
+                    body=json.dumps({"detail": "not found"}),
+                )
+                return
+            body = play_response(entry)
+        else:
+            route.fulfill(status=404, content_type="text/plain", body="not found")
+            return
+        route.fulfill(
+            status=200, content_type="application/json", body=json.dumps(body)
+        )
+
+    page.route(f"{ORIGIN}/api/**", handler)
+    return served
+
+
+def open_list_that_can_be_played(
+    page, positions: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """開啟列表頁,且**點進去之後對局頁也活著** —— 兩個端點都備妥。"""
+    served = route_api(page, positions)
+    page.goto(f"{ORIGIN}/")
+    page.wait_for_selector("#positions > li")
+    return served
+
+
+def row_links(page) -> list[dict[str, Any]]:
+    """每一列的題號,以及那一列上通往對局的連結(原樣與解析後的位址)。"""
+    return page.evaluate(
+        """() => [...document.querySelectorAll('#positions > li')].map((li) => {
+          const link = li.querySelector('a[href]');
+          return {
+            id: li.dataset.id ?? null,
+            href: link?.getAttribute('href') ?? null,
+            resolved: link?.href ?? null,
+            links: li.querySelectorAll('a[href]').length,
+          };
+        })"""
+    )
+
+
+def open_position(page, position_id: Any) -> None:
+    """自列表點進某一題 —— 真實點擊那個連結,不是直接改網址。"""
+    page.locator(f'#positions > li[data-id="{position_id}"] a[href]').click()
+
+
+def played_title(page) -> str:
+    """對局介面此刻顯示的局名。"""
+    page.wait_for_selector("#board svg .piece")
+    return page.locator("#puzzle-title").inner_text().strip()
+
+
+# --- 4.1:每一列指向的是它自己那一題 ------------------------------------
+
+
+def test_every_row_offers_a_link_into_its_own_position(list_page) -> None:
+    """4.1:每一列都有一個通往**該題**對局介面的連結,位址即 `?id=` 契約。
+
+    逐列比對是有理由的:只驗第一列的話,「一律指向第一題」與「拿陣列索引當題號」
+    兩種寫法都會全綠 —— 第一題的題號恰好既是 1 也是索引 0 加一。
+    """
+    open_list(list_page)
+
+    links = row_links(list_page)
+
+    assert [link["id"] for link in links] == LISTED_IDS
+    for link in links:
+        assert link["href"], f"第 {link['id']} 題沒有通往對局的連結"
+        assert link["resolved"] == f"{ORIGIN}{PLAY_PATH}?id={link['id']}", (
+            f"第 {link['id']} 題的連結指向別處:{link['resolved']}"
+        )
+        # 原樣位址也要驗,不能只驗解析後的結果:服務今天掛在網域根目錄,`/play.html`
+        # 與 `./play.html` 解析出來一模一樣,於是「改用絕對路徑」這種退化完全看不出來。
+        # 一旦部署到子路徑底下,絕對路徑就會跳出整個應用,相對路徑才是唯一正確的。
+        assert link["href"] == f".{PLAY_PATH}?id={link['id']}", (
+            f"第 {link['id']} 題的連結不是相對位址:{link['href']}"
+        )
+
+
+def test_the_links_carry_the_real_ids_not_the_row_order(list_page) -> None:
+    """4.1:題號取自題目本身,不是列的位置。
+
+    題庫的題號**會有缺口**(刪題、或 corpus-verification 篩掉中間幾題),此時
+    「第三列就是第三題」不成立。以位置推題號在今天的題庫(1、2、3、…)上完全
+    看不出問題,收第二本書之後每一列都會指錯題。
+    """
+    open_list(list_page, GAPPED_CATALOG)
+
+    resolved = [link["resolved"] for link in row_links(list_page)]
+
+    assert resolved == [
+        f"{ORIGIN}{PLAY_PATH}?id={entry['id']}" for entry in GAPPED_CATALOG
+    ]
+
+
+def test_the_link_is_as_tall_as_the_row_it_opens(list_page) -> None:
+    """入口的點擊區域是整格,不是那幾個字那麼大。
+
+    列與列之間只隔 8px,而標籤一多、那一列就會長高 —— 連結若只有一行文字高,列一
+    高就變成「一條細細的可點區域浮在一大片死區中間」,點歪一點不是沒反應就是落到
+    隔壁題上。
+
+    夾具刻意給一題八個標籤讓那一欄折行:標籤少的時候局名本來就是全列最高的元素,
+    這條斷言不論寫不寫都會成立 —— 那正是 tasks 3.2 那條假的金邊斷言犯過的錯。
+    """
+    crowded = [{**CATALOG[0], "tags": [f"標籤{index}" for index in range(8)]}]
+    open_list(list_page, crowded)
+
+    box = list_page.evaluate(
+        """() => {
+          const li = document.querySelector('#positions > li');
+          const style = getComputedStyle(li);
+          return {
+            link: li.querySelector('a[href]').getBoundingClientRect().height,
+            content:
+              li.getBoundingClientRect().height
+              - parseFloat(style.paddingTop)
+              - parseFloat(style.paddingBottom),
+          };
+        }"""
+    )
+
+    # 這一列真的因為標籤而變高了,否則下面那條斷言什麼也沒證明。
+    assert box["content"] > 40, f"夾具沒能讓這一列長高,斷言失去意義:{box}"
+    assert box["link"] >= box["content"] - 0.5, (
+        f"連結的點擊區域比整列矮:{box}"
+    )
+
+
+def test_a_row_offers_exactly_one_way_in(list_page) -> None:
+    """一列只給一個入口。
+
+    同一列擺兩個指向同一題的連結,輔助技術會逐一讀出來,鍵盤使用者也得多按一次
+    Tab 才跳得過一列 —— 掃視一份長列表時,那是每一列都要付一次的代價。
+    """
+    open_list(list_page)
+
+    counts_per_row = {link["id"]: link["links"] for link in row_links(list_page)}
+
+    assert counts_per_row == {row_id: 1 for row_id in LISTED_IDS}
+
+
+# --- 4.2:對局介面載入的確實是那一題 ------------------------------------
+
+
+@pytest.mark.parametrize("position_id", ["1", "2", "5"])
+def test_opening_a_position_loads_that_very_position(list_page, position_id) -> None:
+    """4.2:點下去之後,對局介面載入的是**所選的那一題**。
+
+    比的是題目資訊而非「有沒有開啟」:網址對了、頁面也開了,而載入的是別題
+    (交接參數名寫錯、對局頁讀錯 query),只看有沒有棋盤完全分不出來。
+
+    兩層證據都要:對局頁顯示的局名,以及題目端點**實際被要的那個題號**。前者
+    確認使用者看到的是這一題,後者確認那不是巧合。
+    """
+    served = open_list_that_can_be_played(list_page)
+
+    open_position(list_page, position_id)
+
+    assert played_title(list_page) == TITLES[position_id]
+    assert served["positions"] == [position_id], (
+        f"對局頁要的題號不是所選的那一題:{served['positions']}"
+    )
+    assert urlsplit(list_page.url).path == PLAY_PATH
+
+
+def test_opening_a_position_can_be_done_from_the_keyboard(list_page) -> None:
+    """入口是一個真的連結,不是掛在某個元素上的 click 處理器。
+
+    這條要的不是「Enter 也能用」這件小事,而是那一整組隨真連結一起來的東西 ——
+    中鍵開新分頁、右鍵複製網址、瀏覽器的上一頁。自己寫 `location.href = …` 的話
+    這些全部要各自重做一次,而通常不會做。
+    """
+    served = open_list_that_can_be_played(list_page)
+
+    list_page.locator('#positions > li[data-id="3"] a[href]').press("Enter")
+
+    assert played_title(list_page) == TITLES["3"]
+    assert served["positions"] == ["3"]
+
+
+def test_marking_a_position_complete_does_not_open_it(list_page) -> None:
+    """完成標記與導航是兩個動作:按核取方塊**不得**把使用者丟進對局頁。
+
+    整列可點是很自然的寫法,而完成標記就在那一列裡面 —— 想標記一題卻被丟進棋盤,
+    每標一次就得按一次上一頁,列表也就沒法一路標下去。
+    """
+    served = open_list_that_can_be_played(list_page)
+
+    toggle(list_page, 2)
+
+    # 導航是非同步的:點完立刻斷言,真的跳走時也還來得及全綠。所有內容都在本機
+    # 攔截下就地供應,離開這一頁只需要幾毫秒,這段等待綽綽有餘。
+    list_page.wait_for_timeout(300)
+
+    assert urlsplit(list_page.url).path == "/", "按完成標記卻離開了列表頁"
+    assert served["positions"] == [], f"按完成標記卻載入了題目:{served['positions']}"
+
+    state = {row["id"]: (row["checked"], row["marked"]) for row in rows(list_page)}
+    assert state == {
+        row_id: (True, True) if row_id == "2" else (False, False)
+        for row_id in LISTED_IDS
+    }

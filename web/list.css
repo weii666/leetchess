@@ -153,10 +153,31 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
+/*
+ * 局名同時是進入該題的連結(4.1)。瀏覽器預設的藍字加底線會壓過整份列表的視覺
+ * 語言,故收回來:平時就是一行局名,指上去才以底線點出它可以點。
+ *
+ * `align-self: stretch` 是實質的 —— 連結的點擊區域因此是那一格的全高全寬,而不是
+ * 幾個字那麼大。列與列之間只隔 8px,點歪一點就落到隔壁題上。
+ */
 .position-title {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
   font-size: 18px;
   font-weight: 700;
   color: var(--text);
+  text-decoration: none;
+}
+
+.position-title:hover {
+  text-decoration: underline;
+}
+
+.position-title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
 }
 
 /* 難度與標籤是次要資訊:字級小、顏色淡。 */

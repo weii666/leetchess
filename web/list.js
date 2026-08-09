@@ -8,6 +8,14 @@
  * 1. 把使用者的操作翻成一個狀態變更(切換某題的完成標記、重試載入);
  * 2. 把當下的狀態翻成畫面。
  *
+ * ## 進入對局是一個連結,不是一段程式
+ *
+ * 選題的交接只有一個契約:`/play.html?id=<題號>`(3.1)。本檔因此**不處理導航** ——
+ * 它只在每一列上放一個 `<a href>`,剩下的交給瀏覽器。這不只是省事:中鍵開新分頁、
+ * 右鍵複製網址、Enter 鍵、上一頁,全部是真連結免費附帶而攔 click 改 `location`
+ * 要一一重做的東西。連結只包住局名,完成標記在結構上就落在連結之外,「按標記不會
+ * 跳走」因此是版面的結果,不是靠事件處理器裡的補救。
+ *
  * ## 只有一條寫進畫面的路徑
  *
  * 所有呈現都由 `render()` 自**當下的狀態**整份重畫,沒有任何一處是「事件發生時
@@ -57,6 +65,18 @@ const UNTITLED = '(未命名)';
 /** 難度欄的前綴。四項各自帶著自己的名目,列表因此不需要一列表頭。 */
 const DIFFICULTY_PREFIX = '難度';
 
+/** 對局介面的位址。題號經 `?id=` 交接(3.1 定案的契約,`web/app.js:173` 讀它)。 */
+const PLAY_PAGE = './play.html';
+
+/**
+ * 通往某一題對局介面的位址(4.1、4.2)。
+ *
+ * 題號取自題目本身,**與列上的 `data-id` 是同一個值**(3.2 的結構契約),不另立
+ * 一套識別。特別不是列的位置:題庫的題號會有缺口(刪題、或依可解標記篩掉中間
+ * 幾題),那時「第三列就是第三題」不成立,以位置推題號會整排指錯題。
+ */
+const playHref = (id) => `${PLAY_PAGE}?id=${encodeURIComponent(id)}`;
+
 /** 完成標記的無障礙名稱 —— 一整欄的核取方塊長得一樣,要靠局名才分得出是哪一題。 */
 const toggleLabel = (title) => `標記「${title}」為已完成`;
 
@@ -90,7 +110,7 @@ let loading = false;
 function row(position) {
   const item = document.createElement('li');
   item.className = 'position';
-  // 題號是列與題目的對應,樣式與日後的導航(4.1)都靠它。
+  // 題號是列與題目的對應,樣式與進入對局的連結(4.1)都靠同一個值。
   item.dataset.id = String(position.id);
 
   const done = completed.has(position.id);
@@ -111,8 +131,13 @@ function row(position) {
   id.className = 'position-id';
   id.textContent = `第 ${position.id} 題`;
 
-  const name = document.createElement('span');
+  // 局名即進入該題的入口(4.1)。**用真的 `<a href>`** —— 中鍵開新分頁、右鍵複製
+  // 網址、Enter 鍵、上一頁全部隨之而來,自己攔 click 再改 `location` 則要一一重做,
+  // 而通常不會做。連結只包住局名,完成標記因此**在結構上就不在連結裡** —— 標記
+  // 一題不會把使用者丟進棋盤,這件事不靠 `stopPropagation` 之類的補救維持。
+  const name = document.createElement('a');
   name.className = 'position-title';
+  name.href = playHref(position.id);
   name.textContent = title;
 
   // 難度以 `!= null` 判斷而非 falsy:這個欄位可能是 0,而 0 是一個真的難度。
