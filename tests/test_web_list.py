@@ -395,11 +395,14 @@ SHARED_CUSTOM_PROPERTIES = [
 # 列的結構契約(由 `web/list.js` 產生、`web/list.css` 據以上色):
 #
 #   <li class="position" data-id="<題號>" [data-completed]>
-#     <span class="position-id">
+#     <span class="position-id">                          <- 「<題號>.」,右對齊
 #     <a class="position-title" href="./play.html?id=<題號>">
+#     <span class="position-tags">                         <- 靠右對齊
 #     <span class="position-difficulty" [data-level="1|2|3"]>
-#     <span class="position-tags">
 #     <input type="checkbox" class="position-toggle">
+#
+# **DOM 順序即左到右的欄序。** 難度緊鄰完成標記(不在局名旁邊):標籤是全列最不
+# 可預測的一項,夾在中間,右側那兩欄才連成固定的兩直欄。
 #
 # `data-id` 是列與題號的對應,`data-completed` 是完成狀態的呈現掛勾,`data-level`
 # 是難度標籤的上色掛勾;三者都不是測試專用的鉤子,列表本身要靠它們才畫得出樣式與
@@ -649,14 +652,15 @@ def test_every_row_shows_its_id_title_difficulty_and_tags(list_page) -> None:
             assert tag in text, f"第 {entry['id']} 題:列上看不到標籤「{tag}」"
 
 
-def test_the_row_number_is_just_the_number(list_page) -> None:
-    """題號那一欄就是一個數字,不加「第…題」。
+def test_the_row_number_reads_as_a_numbered_entry(list_page) -> None:
+    """題號那一欄是「數字 + 點」,不加「第…題」。
 
-    參照形態是 leetcode 的 problemset:題號是一整欄對齊的數字,「第」與「題」在每一
-    列各重複一次,而那一欄本來就在說「第幾題」。
+    參照形態是 leetcode 的 `1. Two Sum`:**點是分隔符而不是贅字** —— 它把題號與局名
+    分開;「第」與「題」則是每一列各重複一次的贅字,而那一欄本來就在說「第幾題」。
 
-    斷言分兩層:那一格**恰好等於**題號的字串(只驗「數字在裡面」的話,「第 3 題」
-    照樣全綠),以及那兩個字在整列的可見文字中一次都沒出現(避免只把字搬到別欄)。
+    斷言分兩層:那一格**恰好等於**「題號.」(只驗「數字在裡面」的話,「第 3 題」與
+    光禿禿的「3」都照樣全綠),以及那兩個字在整列的可見文字中一次都沒出現(避免只把
+    字搬到別欄)。
     """
     open_list(list_page)
 
@@ -674,10 +678,91 @@ def test_the_row_number_is_just_the_number(list_page) -> None:
 
     assert sorted(cells) == sorted(LISTED_IDS)
     for row_id, cell in cells.items():
-        assert cell["id"] == row_id, f"第 {row_id} 題的題號欄不是純數字:{cell['id']!r}"
+        assert cell["id"] == f"{row_id}.", (
+            f"第 {row_id} 題的題號欄不是「{row_id}.」:{cell['id']!r}"
+        )
         assert "第" not in cell["row"] and "題" not in cell["row"], (
             f"第 {row_id} 題的列上仍留著「第…題」的字樣:{cell['row']!r}"
         )
+
+
+#: 題號位數不同、標籤數也不同的三題 —— 一份夾具同時驗題號右對齊與標籤靠右。
+#:
+#: 位數刻意跨 1/2/3 位(`1`、`22`、`333`):題號**有缺口**是本專案的實情
+#: (`solvable: false` 會被濾掉,收第二本書之後更明顯),而位數全部相同的夾具
+#: 對「左對齊還是右對齊」完全不敏感 —— 兩者畫出來一模一樣。
+ALIGNMENT_SAMPLES: list[dict[str, Any]] = [
+    {"id": 1, "title": "一個標籤", "difficulty": 1, "tags": ["連將殺"],
+     "source": "適情雅趣"},
+    {"id": 22, "title": "三個標籤", "difficulty": 2, "tags": ["雙馬", "連將殺", "鬥快"],
+     "source": "適情雅趣"},
+    {"id": 333, "title": "沒有標籤", "difficulty": 3, "tags": [], "source": "適情雅趣"},
+]
+
+
+def text_boxes(page, selector: str) -> dict[str, dict[str, float]]:
+    """每一列中某一格**文字本身**的邊界盒,不是那一格的邊界盒。
+
+    量的是 `Range.getBoundingClientRect()` —— 格子本身是 grid item,寬度由欄寬決定,
+    左右緣不論怎麼對齊都一樣;能分辨對齊方式的只有文字實際落在哪裡。
+    """
+    return page.evaluate(
+        """(sel) => Object.fromEntries(
+          [...document.querySelectorAll('#positions > li')].map((li) => {
+            const cell = li.querySelector(sel);
+            const range = document.createRange();
+            range.selectNodeContents(cell);
+            const text = range.getBoundingClientRect();
+            const box = cell.getBoundingClientRect();
+            return [
+              li.dataset.id,
+              {
+                textLeft: text.left,
+                textRight: text.right,
+                cellLeft: box.left,
+                cellRight: box.right,
+              },
+            ];
+          }),
+        )""",
+        selector,
+    )
+
+
+def test_the_row_numbers_are_right_aligned(list_page) -> None:
+    """題號右對齊 —— 那一排點連成一條直線,局名的起點固定。
+
+    量的是**文字自己的邊界盒**(`Range`),不是格子的:格子是 grid item,寬度由欄寬
+    決定,左右緣不論怎麼對齊都相同,只驗格子等於什麼都沒驗。
+
+    兩個方向都要斷言:
+
+    - 位數不同的三題,文字**右緣相同** —— 這是右對齊成立的直接後果;
+    - 它們的文字**左緣互不相同** —— 這條擋掉「三個題號碰巧一樣寬」這種讓上一條自動
+      成立的情形(例如有人把 `text-align` 拿掉又順手把欄寬縮到剛好貼齊)。
+
+    刻意不驗 `text-align: right` 的字面值:那個屬性可以被 `direction`、`justify-self`
+    或行內樣式繞過,而畫面上的結果才是使用者看到的東西。
+    """
+    list_page.set_viewport_size({"width": 1280, "height": 900})
+    open_list(list_page, ALIGNMENT_SAMPLES)
+
+    boxes = text_boxes(list_page, ".position-id")
+    assert sorted(boxes) == ["1", "22", "333"]
+
+    rights = {row_id: box["textRight"] for row_id, box in boxes.items()}
+    lefts = {row_id: box["textLeft"] for row_id, box in boxes.items()}
+
+    assert max(rights.values()) - min(rights.values()) < 0.5, (
+        f"位數不同的題號右緣沒有對齊(那一排點不成直線):{rights}"
+    )
+    assert len(set(round(value, 1) for value in lefts.values())) == 3, (
+        f"三個題號的左緣相同 —— 它們一樣寬,右緣對齊這件事因此什麼也沒證明:{lefts}"
+    )
+    # 題號欄仍是獨立一欄:文字不得溢出格子,也不得跑進局名那一欄。
+    for row_id, box in boxes.items():
+        assert box["textLeft"] >= box["cellLeft"] - 0.5, f"第 {row_id} 題的題號溢出欄外:{box}"
+        assert box["textRight"] <= box["cellRight"] + 0.5, f"第 {row_id} 題的題號溢出欄外:{box}"
 
 
 def test_the_list_shows_neither_source_nor_description(list_page) -> None:
@@ -723,6 +808,108 @@ def test_the_id_and_title_read_as_the_primary_identifiers(list_page) -> None:
     secondary = max(sizes["difficulty"], sizes["tag"])
     assert sizes["id"] > secondary, f"題號不比難度與標籤突出:{sizes}"
     assert sizes["title"] > secondary, f"局名不比難度與標籤突出:{sizes}"
+
+
+# --- 欄序與對齊 ---------------------------------------------------------
+#
+# 左到右:題號、局名、標籤(靠右)、難度、完成標記。
+#
+# **難度緊鄰完成標記**,不在局名旁邊。標籤是全列最不可預測的一項(數量與長度都
+# 不定),夾在局名與難度之間,右側那兩欄才連成固定的兩直欄。
+
+
+#: 欄序:選擇器由左到右。DOM 順序也必須是這個順序(理由見完成標記那一節)。
+COLUMN_ORDER = [
+    ".position-id",
+    ".position-title",
+    ".position-tags",
+    ".position-difficulty",
+    ".position-toggle",
+]
+
+
+def test_the_columns_run_id_title_tags_difficulty_toggle(list_page) -> None:
+    """五欄由左到右是題號、局名、標籤、難度、完成標記。
+
+    畫面位置**與** DOM 順序兩者都驗:只驗畫面的話,一組 `order` 就能把欄序搬成別的
+    樣子而測試全綠,而 Tab 與螢幕閱讀器仍走 DOM 順序;只驗 DOM 的話則反過來。
+
+    這條同時釘住「難度不在局名旁邊」—— 難度移回原位(局名之後)會讓它與標籤的
+    左緣順序倒過來。
+    """
+    list_page.set_viewport_size({"width": 1280, "height": 900})
+    open_list(list_page)
+
+    layout = list_page.evaluate(
+        """(selectors) => [...document.querySelectorAll('#positions > li')].map((li) => ({
+          id: li.dataset.id,
+          lefts: selectors.map(
+            (sel) => li.querySelector(sel).getBoundingClientRect().left,
+          ),
+          domOrder: selectors.map((sel) =>
+            [...li.children].indexOf(li.querySelector(sel)),
+          ),
+        }))""",
+        COLUMN_ORDER,
+    )
+
+    assert [entry["id"] for entry in layout] == LISTED_IDS
+    for entry in layout:
+        assert entry["lefts"] == sorted(entry["lefts"]), (
+            f"第 {entry['id']} 題的欄序不是 {COLUMN_ORDER}:各欄左緣為 {entry['lefts']}"
+        )
+        assert entry["domOrder"] == [0, 1, 2, 3, 4], (
+            f"第 {entry['id']} 題的 DOM 順序與畫面欄序對不上 —— Tab 會亂跳:"
+            f"{entry['domOrder']}"
+        )
+
+
+def test_the_tags_are_flushed_right_so_the_difficulty_never_drifts(list_page) -> None:
+    """標籤欄靠右對齊,難度與完成標記因此在每一列都落在同一個位置。
+
+    這條有實質作用而不只是美觀:標籤靠左的話,空隙落在標籤與難度**之間**,而每一列
+    空隙的寬度都不同 —— 難度看起來就像浮在一片寬度不定的空白右邊。靠右之後空隙移到
+    標籤左側,標籤、難度、完成標記三者在右緣連成三條直欄。
+
+    三層斷言,少一層就漏得掉一種寫法:
+
+    1. **難度欄的左緣在三列上相同** —— 這是使用者真正在意的結果。
+    2. **標籤文字的右緣在三列上相同** —— 只有第 1 條的話,靠左照樣全綠(欄是 `fr`,
+       邊界本來就不隨內容動);這一條才真的在驗對齊方向。
+    3. **標籤文字的左緣互不相同** —— 擋掉「三列標籤碰巧一樣寬」讓第 2 條自動成立。
+
+    夾具的三列標籤數各為 1、3、0,寬度必不相同。
+    """
+    list_page.set_viewport_size({"width": 1280, "height": 900})
+    open_list(list_page, ALIGNMENT_SAMPLES)
+
+    # 標籤沒有折行,否則「右緣」指的是最後一行的右緣,三列不再可比。
+    wrapped = list_page.evaluate(
+        """() => [...document.querySelectorAll('#positions > li')].map((li) => {
+          const tops = [...li.querySelectorAll('.position-tags > *')].map(
+            (chip) => Math.round(chip.getBoundingClientRect().top),
+          );
+          return new Set(tops).size;
+        })"""
+    )
+    assert all(count <= 1 for count in wrapped), f"夾具的標籤折行了,右緣不再可比:{wrapped}"
+
+    difficulty = text_boxes(list_page, ".position-difficulty")
+    tags = text_boxes(list_page, ".position-tags")
+
+    left_edges = {row_id: box["cellLeft"] for row_id, box in difficulty.items()}
+    assert max(left_edges.values()) - min(left_edges.values()) < 0.5, (
+        f"標籤多寡讓難度欄左右浮動:{left_edges}"
+    )
+
+    tag_rights = {row_id: box["textRight"] for row_id, box in tags.items()}
+    tag_lefts = {row_id: box["textLeft"] for row_id, box in tags.items()}
+    assert max(tag_rights.values()) - min(tag_rights.values()) < 0.5, (
+        f"標籤沒有靠右對齊(右緣不齊):{tag_rights}"
+    )
+    assert len(set(round(value, 1) for value in tag_lefts.values())) == 3, (
+        f"三列的標籤一樣寬 —— 右緣對齊這件事因此什麼也沒證明:{tag_lefts}"
+    )
 
 
 # --- 難度是三色標籤 -----------------------------------------------------

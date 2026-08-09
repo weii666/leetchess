@@ -154,7 +154,12 @@ function difficultyCell(value) {
 /**
  * 一列(1.2、1.3)。
  *
- * 四項的順序即掃視的順序:題號、局名在前(它們是主要識別),難度與標籤在後。
+ * 欄序:**題號、局名、標籤、難度、完成標記**。前兩項是主要識別,故在左;標籤與
+ * 難度是次要資訊,故在右。**難度緊鄰完成標記**,兩者因此在整份列表上連成固定的
+ * 兩直欄 —— 標籤是全列最不可預測的一項(數量、長度都不定),把它夾在局名與難度
+ * 之間,難度才不會跟著標籤多寡左右浮動。`list.css` 讓標籤欄靠右對齊,空隙因此落在
+ * 標籤**左**側而不是右側。
+ *
  * **完成標記在最右**,與題庫類產品的慣例一致:左緣留給題號那一欄,一路往下掃的是
  * 題號而不是勾選框。
  *
@@ -183,11 +188,14 @@ function row(position) {
   toggle.setAttribute('aria-label', toggleLabel(title));
   toggle.addEventListener('change', () => mark(position.id));
 
-  // 題號就是一欄數字,不加「第…題」:那三個字每一列重複一次,而一整欄數字對齊
-  // 之後,「第幾題」本來就是那一欄在說的事(參照形態:leetcode problemset)。
+  // 題號是「數字 + 點」,不加「第…題」(參照形態:leetcode 的 `1. Two Sum`)。
+  // **點是分隔符而不是贅字** —— 它把題號與局名分開,而題號欄本身仍是獨立一欄。
+  //
+  // 右對齊由 `list.css` 負責,理由寫在那裡:本專案的題號**有缺口**,左對齊會讓那
+  // 一排點跟著數字位數跑成參差的一排。
   const id = document.createElement('span');
   id.className = 'position-id';
-  id.textContent = String(position.id);
+  id.textContent = `${position.id}.`;
 
   // 局名即進入該題的入口(4.1)。**用真的 `<a href>`** —— 中鍵開新分頁、右鍵複製
   // 網址、Enter 鍵、上一頁全部隨之而來,自己攔 click 再改 `location` 則要一一重做,
@@ -221,7 +229,7 @@ function row(position) {
   // 完成標記排在最後 —— **DOM 順序即視覺順序**,不靠 `order` 或 `direction` 之類的
   // 純視覺搬移:那些手法只挪畫面,Tab 與螢幕閱讀器仍照 DOM 走,兩者一旦分家,
   // 鍵盤使用者的行進順序就與眼睛看到的對不上。
-  item.append(id, name, difficulty, tags, toggle);
+  item.append(id, name, tags, difficulty, toggle);
   return item;
 }
 
