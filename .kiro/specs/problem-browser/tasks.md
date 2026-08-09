@@ -36,14 +36,19 @@
 ## 3. 列表頁
 
 - [ ] 3.1 建立列表頁骨架並讓出入口
-  - 建立 `web/list.html` 的骨架:題目列表容器、完成計數、空狀態與錯誤提示區
+  - **將既有的 `web/index.html`(對局頁)改名為 `web/play.html`**。**內容一字不動** —— 題號本來就由 `?id=` 從外部傳入
+  - **新建的列表頁就叫 `web/index.html`**,不叫 `list.html`
+  - 骨架含:題目列表容器、完成計數、空狀態與錯誤提示區
   - **不放篩選區** —— 篩選互動已移入 Backlog,先擺一個不能用的空殼比沒有更糟
-  - **將 `web/index.html` 改名為 `web/play.html`**,使 `/` 讓給列表頁。**對局介面的內容一字不動** —— 題號本來就由 `?id=` 從外部傳入
-  - 既有測試中引用 `index.html` 之處一併更新
-  - 完成狀態:開啟服務的入口位址看到的是列表頁骨架而非棋盤;`/play.html?id=1` 仍是可用的對局介面;既有 608 個測試不退化
+  - 既有測試中引用 `index.html` 之處一併更新為 `play.html`。**不可全域取代** —— 純資料層測試(`test_web_catalog.py`、`test_web_progress.py`)提到的頁面只是承載 `page.evaluate()` 的空殼,與對局頁無關,改錯會讓它們悄悄開始依賴一個不存在的頁面
+  - 完成狀態:開啟服務的入口位址(`/`)看到的是列表頁骨架而非棋盤;`/play.html?id=1` 仍是可用的對局介面;既有測試零退化
   - _Depends: 1.1_
   - _Requirements: 1.1, 6.2_
-  - _Boundary: web/list.html, web/index.html, tests/_
+  - _Boundary: web/index.html, web/play.html, tests/_
+
+  > **為什麼列表頁叫 `index.html` 而不是 `list.html`**:`service/main.py:461` 以 `StaticFiles(html=True)` 掛在 `/`,根路徑是靠**目錄下的 `index.html`** 解析的。若新頁面叫 `list.html`,`/` 會直接 404,得回頭改 `main.py` 加一條根路由 —— 那既在本任務 boundary 外,也讓入口多一層沒必要的間接。沿用 `index.html` 則 `/` 自動就是列表頁,`service/` 一個字都不用動。
+  >
+  > 注意 `web/list.js` 與 `web/list.css`(任務 3.2)**維持原名**:模組名不必跟著頁面名走,而 `index.js` 這種名字反而說不出它是什麼。
 
 - [ ] 3.2 呈現列表與完成標記
   - `web/list.js`:把索引畫成列表,每列顯示題號、局名、難度、標籤、出處;題號與局名為主要識別
