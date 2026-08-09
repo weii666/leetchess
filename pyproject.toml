@@ -16,6 +16,10 @@ dev = [
     # 改用 httpx2 才不會在每次 TestClient 匯入時發出 StarletteDeprecationWarning。
     "httpx2>=2.9",
     "playwright>=1.62.0",
+    # `dev.sh` 的自動重啟。**沒有它,uvicorn 的 --reload-include 完全無效** ——
+    # 會退回只看 *.py 的 StatReload,改題目檔不重啟,而那正是 dev.sh 要解的事。
+    # uvicorn 只在啟動時印一行 WARNING 說明,漏裝很容易被當成「reload 壞了」。
+    "watchfiles>=1.2.0",
 ]
 
 [tool.pytest.ini_options]
