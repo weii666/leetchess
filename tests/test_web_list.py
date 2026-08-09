@@ -51,6 +51,11 @@
 合成索引裡的描述與出處因此刻意與局名、標籤沒有任何共同字串,「有沒有畫出去」才驗
 得出來。
 
+出處在**對局介面**畫出來(4.5),描述則**兩頁都不畫** —— 4.2 曾把它加進對局介面,
+使用者看過實際畫面後拿掉了:真實題庫的描述是「出處 + 局號 + 局名」的串接,與 `h1`
+的局名和它下面那一行的出處完全重複。同一份夾具因此同時是「不得出現在列表上」與
+「不得出現在對局介面上」的來源。
+
 ## 4.1 為什麼連對局頁的回應也要合成
 
 「載入的**確實是那一題**」只有在題目端點按題號給出**不同的**局名時才驗得出來 ——
@@ -67,6 +72,7 @@ from urllib.parse import urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 from service.main import create_app
 from test_web_page import SIMPLIFIED_ONLY_CHARACTERS
@@ -265,6 +271,8 @@ CONTENT_TYPES = {
 #: 五題涵蓋了本節要分辨的每一種情形:
 #:
 #: - 難度有 3、3、5、1、**0** 四種值;標籤「連將殺」橫跨多題,第 1 題帶兩個標籤
+#:   —— 上架的四題裡有兩題(5 與 0)**落在 schema 的 1–3 之外**,退路因此在每一條
+#:   用到這份夾具的測試裡都被走到,不必特地去湊
 #: - `solvable`:1 為 `True`、2 為 `None`、3 完全沒有這個欄位、4 明確為 `False`
 #: - 第 5 題**沒有標籤**,那一欄的佔位路徑因此也會被走到
 #: - **描述與出處與局名、標籤沒有任何共同字串** —— 列表若把它們畫出去,一比對就抓得到
@@ -340,6 +348,22 @@ NEVER_ON_THE_LIST = [entry["description"] for entry in CATALOG] + [
     "殘局存疑",
 ]
 
+#: 難度分級到說法的對照(`.kiro/steering/structure.md` 的題目 schema:1–3)。
+#: 列表上的難度是**文字標籤**而非數字 —— 「困難」比「難度 3」少一次心算。
+DIFFICULTY_LABELS = {1: "簡單", 2: "中等", 3: "困難"}
+
+
+def difficulty_text(value: Any) -> str:
+    """某個難度值在列上該顯示的字。
+
+    合法分級顯示說法,其餘一律**原樣顯示**(`None` 顯示佔位符號)—— 這是超範圍值的
+    退路,而不是「認不得就不畫」。
+    """
+    if value in DIFFICULTY_LABELS:
+        return DIFFICULTY_LABELS[value]
+    return "—" if value is None else str(value)
+
+
 #: 一份形狀認不得的索引回應 —— 對 `catalog.js` 而言是失敗,不是「題庫沒有題目」。
 BROKEN_INDEX = {"items": []}
 
@@ -371,12 +395,20 @@ SHARED_CUSTOM_PROPERTIES = [
 # 列的結構契約(由 `web/list.js` 產生、`web/list.css` 據以上色):
 #
 #   <li class="position" data-id="<題號>" [data-completed]>
+#     <span class="position-id">
+#     <a class="position-title" href="./play.html?id=<題號>">
+#     <span class="position-difficulty" [data-level="1|2|3"]>
+#     <span class="position-tags">
 #     <input type="checkbox" class="position-toggle">
-#     <span class="position-id">      <span class="position-title">
-#     <span class="position-difficulty">  <span class="position-tags">
 #
-# `data-id` 是列與題號的對應,`data-completed` 是完成狀態的呈現掛勾;兩者都不是
-# 測試專用的鉤子,列表本身要靠它們才畫得出樣式與導航(4.1)。
+# `data-id` 是列與題號的對應,`data-completed` 是完成狀態的呈現掛勾,`data-level`
+# 是難度標籤的上色掛勾;三者都不是測試專用的鉤子,列表本身要靠它們才畫得出樣式與
+# 導航(4.1)。
+#
+# **完成標記排在最後,而且是 `<li>` 的直接子節點** —— 它與 `<a>` 平行而非在其中,
+# 「按標記不會跳進對局頁」(4.1)因此是結構的結果。欄序改過一次(標記自最左移到
+# 最右,使用者看過實際畫面後的意見),改的是 `append` 的順序而不是 CSS 的 `order`:
+# 純視覺搬移會讓 Tab 順序與眼睛看到的分家。
 
 
 @pytest.fixture
@@ -509,6 +541,52 @@ def rows(page) -> list[dict[str, Any]]:
     )
 
 
+def open_list_expecting_rows(page, positions: list[dict[str, Any]]) -> None:
+    """開啟列表,並在列**根本沒畫出來**時說出是哪一份資料害的。
+
+    `open_list` 的等待逾時收場只會說「在等 `#positions > li`」—— 而「一筆認不得的
+    難度讓整份列表消失」正是本節要抓的失效模式,那句話說不出成因。這裡把它翻成一句
+    自己的斷言,順帶把當下的錯誤與畫面狀態一併帶出來。
+    """
+    errors: list[str] = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    route_catalog(page, [catalog_of(positions)])
+    page.goto(f"{ORIGIN}/")
+    try:
+        page.wait_for_selector("#positions > li", timeout=3000)
+    except PlaywrightTimeoutError:
+        pytest.fail(
+            f"這份索引畫不出任何一列:{positions}\n"
+            f"頁面錯誤:{errors or '(無)'}\n"
+            f"列表容器:{page.evaluate('() => document.getElementById(\"positions\").innerHTML')!r}"
+        )
+
+
+def difficulty_cells(page) -> dict[str, dict[str, Any]]:
+    """每一列的難度那一格:看得到的字、上色掛勾,以及實際算出來的兩個顏色。
+
+    顏色讀的是 `getComputedStyle` 而非樣式表的字面值 —— 規則被更晚的規則蓋掉、
+    選擇器打錯字之類的退化,只有算出來的值抓得到。
+    """
+    return page.evaluate(
+        """() => Object.fromEntries(
+          [...document.querySelectorAll('#positions > li')].map((li) => {
+            const cell = li.querySelector('.position-difficulty');
+            const style = cell && getComputedStyle(cell);
+            return [
+              li.dataset.id,
+              {
+                text: cell?.textContent.trim() ?? null,
+                level: cell?.dataset.level ?? null,
+                color: style?.color ?? null,
+                background: style?.backgroundColor ?? null,
+              },
+            ];
+          }),
+        )"""
+    )
+
+
 def counts(page) -> list[str]:
     """畫面上的「已完成 X / 總共 Y 題」兩個數字。"""
     return page.evaluate(
@@ -548,7 +626,12 @@ def test_the_list_shows_one_row_per_listable_position(list_page) -> None:
 
 
 def test_every_row_shows_its_id_title_difficulty_and_tags(list_page) -> None:
-    """1.2:一列要有題號、局名、難度與標籤四項,缺一不可。"""
+    """1.2:一列要有題號、局名、難度與標籤四項,缺一不可。
+
+    難度那一項比對的是**分級的說法**(「困難」)而不是數字 —— 使用者看過實際畫面後
+    改成了 leetcode 式的三色標籤,數字只在認不得的值上才會原樣出現。難度那一格另有
+    專門的一節(下方「難度是三色標籤」)驗顏色與退路,這裡只確認四項都在。
+    """
     open_list(list_page)
 
     drawn = {row["id"]: row["text"] for row in rows(list_page)}
@@ -559,13 +642,46 @@ def test_every_row_shows_its_id_title_difficulty_and_tags(list_page) -> None:
         text = drawn[str(entry["id"])]
         assert str(entry["id"]) in text, f"第 {entry['id']} 題:列上看不到題號"
         assert entry["title"] in text, f"第 {entry['id']} 題:列上看不到局名"
-        assert str(entry["difficulty"]) in text, f"第 {entry['id']} 題:列上看不到難度"
+        assert difficulty_text(entry["difficulty"]) in text, (
+            f"第 {entry['id']} 題:列上看不到難度"
+        )
         for tag in entry["tags"]:
             assert tag in text, f"第 {entry['id']} 題:列上看不到標籤「{tag}」"
 
 
+def test_the_row_number_is_just_the_number(list_page) -> None:
+    """題號那一欄就是一個數字,不加「第…題」。
+
+    參照形態是 leetcode 的 problemset:題號是一整欄對齊的數字,「第」與「題」在每一
+    列各重複一次,而那一欄本來就在說「第幾題」。
+
+    斷言分兩層:那一格**恰好等於**題號的字串(只驗「數字在裡面」的話,「第 3 題」
+    照樣全綠),以及那兩個字在整列的可見文字中一次都沒出現(避免只把字搬到別欄)。
+    """
+    open_list(list_page)
+
+    cells = list_page.evaluate(
+        """() => Object.fromEntries(
+          [...document.querySelectorAll('#positions > li')].map((li) => [
+            li.dataset.id,
+            {
+              id: li.querySelector('.position-id')?.textContent.trim() ?? null,
+              row: li.innerText,
+            },
+          ]),
+        )"""
+    )
+
+    assert sorted(cells) == sorted(LISTED_IDS)
+    for row_id, cell in cells.items():
+        assert cell["id"] == row_id, f"第 {row_id} 題的題號欄不是純數字:{cell['id']!r}"
+        assert "第" not in cell["row"] and "題" not in cell["row"], (
+            f"第 {row_id} 題的列上仍留著「第…題」的字樣:{cell['row']!r}"
+        )
+
+
 def test_the_list_shows_neither_source_nor_description(list_page) -> None:
-    """1.2:出處與描述**不在列表呈現** —— 兩者已移到對局介面(4.5)。
+    """1.2:出處與描述**不在列表呈現**(出處已移到對局介面,見 4.5;描述兩頁都不畫)。
 
     列是掃視用的,每列擠進越多欄位越難掃。索引照常帶著這兩個欄位(日後收錄第二本
     書時列表要靠出處分辨同名排局),前端只是拿了不畫。
@@ -607,6 +723,190 @@ def test_the_id_and_title_read_as_the_primary_identifiers(list_page) -> None:
     secondary = max(sizes["difficulty"], sizes["tag"])
     assert sizes["id"] > secondary, f"題號不比難度與標籤突出:{sizes}"
     assert sizes["title"] > secondary, f"局名不比難度與標籤突出:{sizes}"
+
+
+# --- 難度是三色標籤 -----------------------------------------------------
+#
+# 使用者看過實際畫面後的意見:「難度 3」這種字樣改成 leetcode 式的三色方框標籤 ——
+# 1 簡單(綠)、2 中等(橙)、3 困難(紅)。分級的定義補進了
+# `.kiro/steering/structure.md` 的題目 schema(它原先只寫「數字|是|難度分級」)。
+#
+# 本節分成兩層:
+#
+# 1. **說法與顏色**:三級各自的字、以及三者的顏色**彼此不同**。比的是「互不相同」
+#    而不是寫死的色碼字面值 —— 後者每次微調配色都要跟著改,而它其實只在防「三級
+#    同色」這一種退化,那正是互不相同這條在防的。
+# 2. **超出 1–3 的值有退路**:0、4、負數、`null`、欄位不存在,一律原樣顯示、吃中性
+#    色,而且**那一列照樣畫得出來**。`service/positions.py` 的 `_read_int` 對難度
+#    沒有下界,0 是真的進得來的值。
+
+
+#: 三個合法分級各一題,外加一題超出範圍 —— 一份夾具走完全部四條路徑。
+DIFFICULTY_SAMPLES: list[dict[str, Any]] = [
+    {"id": 11, "title": "入門局", "difficulty": 1, "tags": [], "source": "適情雅趣"},
+    {"id": 12, "title": "進階局", "difficulty": 2, "tags": [], "source": "適情雅趣"},
+    {"id": 13, "title": "刁鑽局", "difficulty": 3, "tags": [], "source": "適情雅趣"},
+    {"id": 14, "title": "離譜局", "difficulty": 9, "tags": [], "source": "適情雅趣"},
+]
+
+
+def test_each_difficulty_reads_as_a_word_not_a_number(list_page) -> None:
+    """1 / 2 / 3 分別畫成「簡單」「中等」「困難」。"""
+    open_list(list_page, DIFFICULTY_SAMPLES)
+
+    cells = difficulty_cells(list_page)
+
+    assert {row_id: cell["text"] for row_id, cell in cells.items()} == {
+        "11": "簡單",
+        "12": "中等",
+        "13": "困難",
+        # 超出範圍:原樣顯示那個數字,不是空白、不是猜一個分級。
+        "14": "9",
+    }
+
+
+def test_the_three_difficulties_do_not_share_a_colour(list_page) -> None:
+    """三級的顏色彼此不同 —— 三個標籤同色的話,顏色這個線索等於沒有。
+
+    底色與文字色**兩者都要**分得開:leetcode 式的標籤是「淡底色 + 同色系文字」,
+    只換其中一個,另一個就成了三級共用的死值,而深色底上單靠文字色的差異在餘光裡
+    很容易糊成一片。
+
+    比的是彼此相異而非某個色碼字面值:配色微調不該讓測試轉紅,而「三級同色」這種
+    真正的退化逃不掉。順帶要求它們與中性色(超出範圍那一題)也不同,否則三級全部
+    退回中性灰照樣算「彼此不同」—— 那是最容易發生的一種:選擇器打錯字。
+    """
+    open_list(list_page, DIFFICULTY_SAMPLES)
+
+    cells = difficulty_cells(list_page)
+    graded = ["11", "12", "13"]
+
+    for channel in ("color", "background"):
+        seen = [cells[row_id][channel] for row_id in graded]
+        assert len(set(seen)) == 3, f"三個難度的 {channel} 沒有分開:{seen}"
+        assert cells["14"][channel] not in seen, (
+            f"合法分級的 {channel} 與中性色相同,規則沒有生效:{seen} 對 "
+            f"{cells['14'][channel]}"
+        )
+
+    # 上色掛勾本身也釘住:樣式表靠它挑規則,改名會讓上面那條靜默退回中性色。
+    assert [cells[row_id]["level"] for row_id in graded] == ["1", "2", "3"]
+    assert cells["14"]["level"] is None, "超出範圍的難度不該掛上分級的上色掛勾"
+
+
+@pytest.mark.parametrize("row_id", ["11", "12", "13", "14"])
+def test_the_difficulty_tag_is_a_box_not_bare_text(list_page, row_id) -> None:
+    """標籤是**方框**,不是一行變了顏色的字。
+
+    底色與圓角是它之所以讀起來像個標籤的全部理由;只上文字色的話,在一整片深灰
+    背景上那就只是三個顏色略有不同的詞。
+
+    底色不能只比 `backgroundColor`:那個屬性在完全透明時照樣回報一個顏色值
+    (`rgba(…, 0)`),整條 `background` 被刪掉也看不出來。因此連 alpha 一起要求。
+    (tasks 3.2 在 `borderLeftColor` 上踩過同一個坑。)
+
+    **四題全驗,超出範圍那一題(14)尤其要驗。** 三個合法分級各自宣告了自己的底色,
+    只驗它們的話,基底規則那條中性底色被刪掉照樣全綠 —— 而那正是超出範圍的值唯一的
+    底色來源,它一沒了,那一格就從方框退回一行灰字。突變實測過:只驗第 13 題時,
+    刪掉基底的 `background` 是**存活的**。
+    """
+    open_list(list_page, DIFFICULTY_SAMPLES)
+
+    box = list_page.evaluate(
+        """(rowId) => {
+          const cell = document.querySelector(
+            `#positions > li[data-id="${rowId}"] .position-difficulty`,
+          );
+          const style = getComputedStyle(cell);
+          const rect = cell.getBoundingClientRect();
+          const row = cell.closest('li').getBoundingClientRect();
+          return {
+            background: style.backgroundColor,
+            radius: parseFloat(style.borderTopLeftRadius) || 0,
+            padding: parseFloat(style.paddingLeft) || 0,
+            width: rect.width,
+            rowWidth: row.width,
+          };
+        }""",
+        row_id,
+    )
+
+    alpha = box["background"].startswith("rgba(") and box["background"].endswith(", 0)")
+    assert not alpha, (
+        f"第 {row_id} 題的難度標籤底色是全透明的,畫面上看不到方框:{box}"
+    )
+    assert box["radius"] > 0, f"難度標籤沒有圓角,不像個標籤:{box}"
+    assert box["padding"] > 0, f"難度標籤沒有左右留白,字會貼著框邊:{box}"
+    # 只有內容那麼寬:撐滿整欄的話「困難」與「簡單」的框一樣長,框寬這個線索就沒了。
+    assert box["width"] < box["rowWidth"] / 4, f"難度標籤撐得太寬:{box}"
+
+
+@pytest.mark.parametrize(
+    ("difficulty", "shown"),
+    [
+        # 0 是 `_read_int` 收得進來的下界,也是最容易被 falsy 判斷吃掉的值。
+        (0, "0"),
+        # 分級的上界之外。
+        (4, "4"),
+        (-1, "-1"),
+    ],
+)
+def test_a_difficulty_outside_the_scale_still_draws_its_row(
+    list_page, difficulty, shown
+) -> None:
+    """1–3 之外的值原樣顯示,而且**那一列照樣完整**。
+
+    schema 說難度是 1–3,但沒有任何一層在執行期強制它。認不得的值若讓那一格丟例外,
+    整份列表會跟著消失 —— 一題資料失準不該把題庫從畫面上抹掉。
+
+    開啟用的是 `open_list_expecting_rows`:那個失效模式下 `open_list` 只會以「在等
+    某個選擇器」逾時收場,說不出成因(tasks 5.2 記過同一件事)。
+    """
+    open_list_expecting_rows(
+        list_page, [{**DIFFICULTY_SAMPLES[0], "difficulty": difficulty}]
+    )
+
+    cells = difficulty_cells(list_page)
+
+    assert cells["11"]["text"] == shown, f"難度 {difficulty} 沒有原樣顯示:{cells}"
+    assert cells["11"]["level"] is None
+    # 那一列的其餘部分沒有被連累。
+    drawn = rows(list_page)
+    assert len(drawn) == 1 and DIFFICULTY_SAMPLES[0]["title"] in drawn[0]["text"]
+
+
+@pytest.mark.parametrize("missing", [{"difficulty": None}, {}])
+def test_a_position_without_a_difficulty_falls_back_to_the_placeholder(
+    list_page, missing
+) -> None:
+    """難度為 `null` 或欄位不存在時留佔位符號,不是空白也不是「簡單」。
+
+    參數化的兩種形狀是不同的東西:`null` 是「填了但沒有值」,欄位不存在是「這份
+    索引根本沒帶」。前端對兩者的回答該一樣,而只測其中一種漏得掉另一種。
+    """
+    entry = {k: v for k, v in DIFFICULTY_SAMPLES[0].items() if k != "difficulty"}
+    open_list_expecting_rows(list_page, [{**entry, **missing}])
+
+    cells = difficulty_cells(list_page)
+
+    assert cells["11"]["text"] == "—", f"難度缺值時的說法不對:{cells}"
+    assert cells["11"]["level"] is None
+    assert len(rows(list_page)) == 1, "難度缺值讓那一列畫不出來"
+
+
+def test_a_difficulty_of_the_wrong_type_does_not_impersonate_a_grade(list_page) -> None:
+    """字串型的 `"1"` 不得被當成分級 1。
+
+    索引的難度一路是數字(`service/positions.py` 的 `_read_int`),字串進得來就表示
+    上游出了事;此時原樣顯示、吃中性色,比默默當成「簡單」誠實。物件字面值查表會把
+    `1` 與 `"1"` 混為一談,`Map` 不會 —— 這條就是釘住那個選擇。
+    """
+    open_list(list_page, [{**DIFFICULTY_SAMPLES[0], "difficulty": "1"}])
+
+    cells = difficulty_cells(list_page)
+
+    assert cells["11"]["text"] == "1"
+    assert cells["11"]["level"] is None, "型別不對的難度卻拿到了分級的上色掛勾"
 
 
 # --- 1.4:不可解的題目不列入,空值仍須列出 ------------------------------
@@ -661,6 +961,82 @@ def test_every_row_offers_a_completion_toggle(list_page) -> None:
 
     assert [row["checked"] for row in drawn] == [False] * len(LISTED_IDS)
     assert [row["marked"] for row in drawn] == [False] * len(LISTED_IDS)
+
+
+def test_the_completion_toggle_sits_at_the_far_right_of_the_row(list_page) -> None:
+    """完成標記畫在一列的**最右**(使用者看過實際畫面後的意見)。
+
+    三層都要:
+
+    1. **畫面上真的在最右** —— 它的左緣在同列其餘每一格的右緣之外。只驗 DOM 順序的
+       話,一條 `order: -1` 就能把它搬回最左而測試全綠。
+    2. **DOM 順序與它一致**(它是 `<li>` 的最後一個子節點)—— 只驗畫面位置的話,
+       用 `order` 純視覺搬移照樣全綠,而 Tab 與螢幕閱讀器仍走 DOM 順序,鍵盤使用者
+       的行進順序會與眼睛看到的分家。
+    3. **它仍在連結之外** —— 見下一條。
+
+    第 1 條刻意不用「它是最後一個 grid item」之類的說法:那和第 2 條是同一件事,
+    量不到畫面。
+    """
+    open_list(list_page)
+
+    geometry = list_page.evaluate(
+        """() => [...document.querySelectorAll('#positions > li')].map((li) => {
+          const box = li.querySelector('.position-toggle');
+          const others = [...li.children].filter((node) => node !== box);
+          return {
+            id: li.dataset.id,
+            last: li.lastElementChild === box,
+            left: box.getBoundingClientRect().left,
+            othersRight: Math.max(
+              ...others.map((node) => node.getBoundingClientRect().right),
+            ),
+          };
+        })"""
+    )
+
+    assert [entry["id"] for entry in geometry] == LISTED_IDS
+    for entry in geometry:
+        assert entry["left"] >= entry["othersRight"], (
+            f"第 {entry['id']} 題的完成標記不在最右:{entry}"
+        )
+        assert entry["last"], (
+            f"第 {entry['id']} 題的完成標記在畫面上靠右,但 DOM 順序不是最後一個 ——"
+            f" Tab 順序會與眼睛看到的對不上:{entry}"
+        )
+
+
+def test_the_completion_toggle_stays_outside_the_link(list_page) -> None:
+    """完成標記在**結構上**就落在連結之外,不論它畫在哪一欄。
+
+    這是 4.1「按完成標記不會跳進對局頁」成立的**唯一理由** —— 不靠
+    `stopPropagation`、不靠 z-index 疊放。那兩種補救擋不住鍵盤的 Enter 與中鍵,而
+    真正的結構保證擋得住。
+
+    完成標記自最左移到最右時,最省事的寫法是把它塞進那個撐滿整格的 `<a>` 裡;
+    `test_marking_a_position_complete_does_not_open_it` 會抓到,但那條要等 300ms 且
+    說出來的是「離開了列表頁」。這一條直接說出成因。
+    """
+    open_list(list_page)
+
+    structure = list_page.evaluate(
+        """() => [...document.querySelectorAll('#positions > li')].map((li) => {
+          const box = li.querySelector('.position-toggle');
+          return {
+            id: li.dataset.id,
+            insideAnchor: box.closest('a') !== null,
+            childOfRow: box.parentElement === li,
+          };
+        })"""
+    )
+
+    for entry in structure:
+        assert not entry["insideAnchor"], (
+            f"第 {entry['id']} 題的完成標記被放進了連結裡 —— 按它會跳進對局頁:{entry}"
+        )
+        assert entry["childOfRow"], (
+            f"第 {entry['id']} 題的完成標記不是列的直接子節點:{entry}"
+        )
 
 
 def test_toggling_a_position_marks_it_immediately(list_page) -> None:
@@ -1374,10 +1750,11 @@ def test_marking_a_position_complete_does_not_open_it(list_page) -> None:
 #    的 —— 只有在同一個 origin 底下開列表、標記、進對局、再按返回,才驗得到「返回
 #    後標記仍在」。`test_web_play.py` 另有自己的 origin,在那裡只讀得到一次儲存區,
 #    證明不了往返;而「只讀一次儲存區」的測試連返回途徑根本不存在都抓不到。
-# 2. **出處與描述是自列表移過來的**(1.2 / 4.5)。同一份 `CATALOG` 夾具既是
-#    「不得出現在列表上」那批字串的來源(`NEVER_ON_THE_LIST`),也是「必須出現在
-#    對局介面上」的來源 —— 兩邊比對同一批字串,搬家有沒有搬到位一眼看得出來。
-#    分兩個檔各寫一份夾具,兩份遲早各自漂移。
+# 2. **出處是自列表移過來的**(1.2 / 4.5)。同一份 `CATALOG` 夾具既是「不得出現在
+#    列表上」那批字串的來源(`NEVER_ON_THE_LIST`),也是「必須出現在對局介面上」的
+#    來源 —— 兩邊比對同一批字串,搬家有沒有搬到位一眼看得出來。分兩個檔各寫一份
+#    夾具,兩份遲早各自漂移。**描述則是兩頁都不畫**(4.5 修訂後),同一份夾具因此
+#    也是「兩邊都找不到」的來源。
 
 #: 列表頁的位址。返回的落點就是它。
 LIST_PATH = "/index.html"
@@ -1389,8 +1766,8 @@ BACK_LINK_ID = "back-to-list"
 #: 題號到出處的對照。夾具橫跨兩本書,「一律顯示某一本」的寫法因此躲不掉。
 SOURCES = {str(entry["id"]): entry["source"] for entry in CATALOG}
 
-#: 題號到描述的對照。每一題的描述與它的局名沒有共同字串,「把局名再印一次」
-#: 冒充不了描述。
+#: 題號到描述的對照。每一題的描述與它的局名沒有共同字串,因此「描述不該出現」那幾條
+#: 不會被局名誤觸。4.5 修訂後這份對照的用途反了過來:它現在是**不得出現**的那一批。
 DESCRIPTIONS = {str(entry["id"]): entry["description"] for entry in CATALOG}
 
 
@@ -1398,8 +1775,11 @@ def play_view(page) -> dict[str, Any]:
     """對局介面畫出來之後的題目資訊與返回途徑。
 
     `bodyText` 取的是 `innerText` 而非 `innerHTML`:4.5 要的是使用者**看得到**
-    出處與描述,而 `display: none` 的節點仍留在 DOM 裡 —— 讀 HTML 的話,一個看
-    不見的節點也算數。(tasks 3.2 在反方向踩過同一個坑。)
+    出處,而 `display: none` 的節點仍留在 DOM 裡 —— 讀 HTML 的話,一個看不見的
+    節點也算數。(tasks 3.2 在反方向踩過同一個坑。)
+
+    `description` 照樣讀:4.5 修訂後那個節點應該**根本不存在**,而這裡回 `None`
+    正是驗它不在的方式。
     """
     page.wait_for_selector("#board svg .piece")
     return page.evaluate(
@@ -1571,7 +1951,11 @@ def test_the_marks_survive_a_round_trip_through_a_game(list_page) -> None:
     assert served["positions"] == ["3"], f"中途載入的不是所選的那一題:{served}"
 
 
-# --- 4.5:對局介面顯示該題的出處與描述 ----------------------------------
+# --- 4.5(修訂後):對局介面顯示該題的出處,描述兩頁都不畫 ---------------
+#
+# 4.5 原本要求對局介面顯示出處**與描述**。使用者看過實際畫面後推翻了描述那一半:
+# 真實題庫的 `description` 是「出處 + 局號 + 局名」的串接,與 `h1` 的局名和它下面
+# 那一行的出處完全重複。requirements.md 4.5 與 tasks.md 4.2 皆已隨之修訂。
 
 
 @pytest.mark.parametrize("position_id", ["1", "3", "5"])
@@ -1599,33 +1983,39 @@ def test_the_play_page_shows_the_source_of_that_very_position(
 
 
 @pytest.mark.parametrize("position_id", ["1", "3", "5"])
-def test_the_play_page_shows_the_description_of_that_very_position(
-    list_page, position_id
-) -> None:
-    """4.5:描述同樣要看得見,而且是那一題的。
+def test_the_play_page_does_not_repeat_the_description(list_page, position_id) -> None:
+    """4.5(修訂後):描述**兩頁都不畫**。
 
-    夾具裡每一題的描述與它的局名沒有任何共同字串(同一批字串正是
-    `NEVER_ON_THE_LIST` 的來源),因此「把局名再印一次」冒充不了描述,「一律顯示
-    第一題的描述」也躲不掉。
+    4.2 才剛把描述加進對局介面,現在整條拿掉 —— 這是刻意的,不是漏改。理由是使用者
+    看過實際畫面之後說的那句「文字累贅」:真實題庫的 `description` 就是「出處 +
+    局號 + 局名」的串接,而局名已經在 `h1`、出處就在它下面一行,同樣的字讀三遍。
+
+    斷言分兩層:那個節點不存在(沒有被藏起來而已),以及那串字在使用者看得到的
+    文字裡一次都沒出現(沒有換個地方再畫一次)。夾具裡每一題的描述與它的局名沒有
+    共同字串,因此第二層不會被局名誤觸。
     """
     open_list_that_can_be_played(list_page)
     open_position(list_page, position_id)
 
     view = play_view(list_page)
-    expected = DESCRIPTIONS[position_id]
 
-    assert view["description"] == expected, (
-        f"第 {position_id} 題的描述不對:{view['description']}"
+    assert view["description"] is None, (
+        f"對局介面又長出了描述節點:{view['description']!r}"
     )
-    assert expected in view["bodyText"], "描述在 DOM 裡,但使用者看不到"
+    assert DESCRIPTIONS[position_id] not in view["bodyText"], (
+        f"第 {position_id} 題的描述又跑回對局介面上了"
+    )
+    assert "描述" not in view["bodyText"], "側欄還留著「描述」這個名目"
 
 
-def test_the_source_and_description_moved_rather_than_multiplied(list_page) -> None:
-    """出處與描述是**自列表移到對局介面**(1.2 / 4.5),不是兩邊都畫。
+def test_the_source_moved_rather_than_multiplied(list_page) -> None:
+    """出處是**自列表移到對局介面**(1.2 / 4.5),不是兩邊都畫。
 
     這一條與 `test_the_list_shows_neither_source_nor_description` 是同一件事的兩半:
     那一條釘住「列表上找不到」,這一條釘住「對局介面上找得到」。只寫前者的話,
-    把兩個欄位一起弄丟也是全綠的。
+    把出處整個弄丟也是全綠的。
+
+    描述則是**兩頁都不畫**(見上一條),故這裡順帶釘住它在列表那一側也沒有回來。
     """
     open_list_that_can_be_played(list_page)
     listed = list_page.evaluate("() => document.getElementById('positions').innerHTML")
@@ -1634,4 +2024,44 @@ def test_the_source_and_description_moved_rather_than_multiplied(list_page) -> N
     played = play_view(list_page)["bodyText"]
 
     assert SOURCES["1"] not in listed and DESCRIPTIONS["1"] not in listed
-    assert SOURCES["1"] in played and DESCRIPTIONS["1"] in played
+    assert SOURCES["1"] in played
+    assert DESCRIPTIONS["1"] not in played
+
+
+def test_the_source_and_mate_distance_share_a_single_line(list_page) -> None:
+    """出處與最長殺著併成一行(使用者看過實際畫面後的意見)。
+
+    「精簡」在畫面上是有形的:兩者的基線相同,亦即它們排在同一行文字上,而不是各佔
+    一行 —— 只比對文字內容的話,拆回兩行照樣全綠。
+
+    `#puzzle-source` 與 `#puzzle-max-dtm` 兩個 id **保留**:既有測試與
+    web-play-runtime 都依賴它們,併行只動外層排版。形態取自 `poc/index.html:69`
+    的單行 meta。
+    """
+    open_list_that_can_be_played(list_page)
+    open_position(list_page, 1)
+    list_page.wait_for_selector("#board svg .piece")
+
+    line = list_page.evaluate(
+        """() => {
+          const box = (id) => document.getElementById(id).getBoundingClientRect();
+          const source = box('puzzle-source');
+          const dtm = box('puzzle-max-dtm');
+          return {
+            sourceTop: source.top,
+            dtmTop: dtm.top,
+            sourceRight: source.right,
+            dtmLeft: dtm.left,
+            meta: document.getElementById('puzzle-meta')?.innerText.trim() ?? null,
+          };
+        }"""
+    )
+
+    assert abs(line["sourceTop"] - line["dtmTop"]) < 1, (
+        f"出處與最長殺著不在同一行上:{line}"
+    )
+    assert line["dtmLeft"] > line["sourceRight"], f"最長殺著沒有排在出處之後:{line}"
+    # 那一行讀起來就是「出處 · 最長殺著 N」,沒有「出處:」「距離:」這些名目。
+    assert line["meta"] is not None, "側欄沒有那一行 meta"
+    assert line["meta"].startswith(SOURCES["1"]), f"那一行不是以出處開頭:{line}"
+    assert "出處" not in line["meta"], f"那一行還留著「出處」這個名目:{line}"

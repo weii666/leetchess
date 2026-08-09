@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>象棋排局挑戰</title>
+<link rel="icon" href="./favicon.svg">
 <link rel="stylesheet" href="./style.css">
 </head>
 <body>
@@ -17,8 +18,17 @@
 <aside id="sidebar">
   <section id="puzzle-info">
     <h1 id="puzzle-title">載入中…</h1>
-    <p>出處:<span id="puzzle-source">—</span></p>
-    <p>最長殺著距離:<span id="puzzle-max-dtm">—</span></p>
+    <!--
+      出處與最長殺著併成一行(problem-browser 4.5,使用者看過實際畫面後的決定)。
+      原本三行「出處:…／描述:…／最長殺著距離:…」裡,描述是「出處 + 局號 + 局名」
+      的串接,與上面的 h1 和出處完全重複,同樣的字讀三遍 —— 描述那一行因此整條移除。
+      形態沿用 `poc/index.html:69` 的單行 meta。
+
+      `#puzzle-source` 與 `#puzzle-max-dtm` 兩個 id **保留** —— web-play-runtime 的
+      `app.js` 與既有測試都依賴它們,併行只動外層排版。名目移到 span 之外,值那一格
+      才只剩值本身。
+    -->
+    <p id="puzzle-meta"><span id="puzzle-source">—</span> <span class="puzzle-meta-sep" aria-hidden="true">·</span> 最長殺著 <span id="puzzle-max-dtm">—</span></p>
   </section>
 
   <!-- 當前輪方須對使用者可辨識(8.4)。 -->

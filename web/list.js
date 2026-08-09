@@ -14,7 +14,8 @@
  * 它只在每一列上放一個 `<a href>`,剩下的交給瀏覽器。這不只是省事:中鍵開新分頁、
  * 右鍵複製網址、Enter 鍵、上一頁,全部是真連結免費附帶而攔 click 改 `location`
  * 要一一重做的東西。連結只包住局名,完成標記在結構上就落在連結之外,「按標記不會
- * 跳走」因此是版面的結果,不是靠事件處理器裡的補救。
+ * 跳走」因此是版面的結果,不是靠事件處理器裡的補救。**這一點與完成標記畫在哪一欄
+ * 無關**,但也因此:換位置時只能動 DOM 順序,不得把它挪進 `<a>` 裡面。
  *
  * ## 只有一條寫進畫面的路徑
  *
@@ -62,10 +63,26 @@ const BLANK = '—';
 /** 局名為空時的說法 —— 題目一定有題號,但局名可能缺。 */
 const UNTITLED = '(未命名)';
 
-/** 難度欄的前綴。四項各自帶著自己的名目,列表因此不需要一列表頭。 */
-const DIFFICULTY_PREFIX = '難度';
+/**
+ * 難度分級的說法(1–3)。分級的定義在 `.kiro/steering/structure.md` 的題目 schema
+ * ——**這裡不是它的出處**,改動要從那裡改起。
+ *
+ * 用 `Map` 而不是物件字面值有兩個實質理由:
+ *
+ * 1. **鍵是數字而非字串。** 索引的 `difficulty` 一路是數字(`service/positions.py`
+ *    的 `_read_int`),物件的鍵會把 `1` 與 `"1"` 混為一談;`Map.get('1')` 認不得,
+ *    因而落到下面那條退路 —— 一個型別不對的值不會偽裝成一個合法的分級。
+ * 2. 物件字面值查得到 `constructor`、`toString` 這些原型上的東西,`difficulty`
+ *    只要是那幾個字串就會拿到一個函式當標籤。`Map` 結構上就沒有這個面。
+ */
+const DIFFICULTY_LABELS = new Map([
+  [1, '簡單'],
+  [2, '中等'],
+  [3, '困難'],
+]);
 
-/** 對局介面的位址。題號經 `?id=` 交接(3.1 定案的契約,`web/app.js:173` 讀它)。 */
+/** 對局介面的位址。題號經 `?id=` 交接(3.1 定案的契約,`web/app.js` 的
+ * `readPositionId()` 讀它 —— 指函式而非行號:行號會在對方改動時靜默過期)。 */
 const PLAY_PAGE = './play.html';
 
 /**
@@ -102,10 +119,49 @@ let failed = false;
 let loading = false;
 
 /**
+ * 難度那一格(1.2)。
+ *
+ * 1–3 畫成帶顏色的標籤,顏色由 `list.css` 依 `data-level` 上色 —— **本檔不碰顏色**,
+ * 呈現層裡的顏色屬樣式表。
+ *
+ * ## 認不得的值一定有退路
+ *
+ * schema 說難度是 1–3,但**沒有任何一層在執行期強制它**:`service/positions.py`
+ * 的 `_read_int` 對難度沒有下界,`0` 收得進來,`4`、`-1`、`null`、欄位不存在同理。
+ * 這些值一律**原樣顯示、不上 `data-level`**(於是吃中性色),而不是丟一個例外或
+ * 畫不出那一格 —— 一題資料失準不該讓整份列表消失。
+ *
+ * 判空以 `!= null` 而非 falsy:`0` 是一個真的值,雖然不是合法分級,使用者仍該看見
+ * 它,才知道是資料有問題而不是欄位漏填。tasks 2.1 與 3.2 都在這個 falsy 陷阱上被
+ * 抓過。
+ */
+function difficultyCell(value) {
+  const cell = document.createElement('span');
+  cell.className = 'position-difficulty';
+
+  const label = DIFFICULTY_LABELS.get(value);
+  if (label !== undefined) {
+    // 上色的掛勾。與 `data-completed` 同性質:是樣式要用的結構契約,不是測試鉤子。
+    cell.dataset.level = String(value);
+    cell.textContent = label;
+    return cell;
+  }
+
+  cell.textContent = value != null ? String(value) : BLANK;
+  return cell;
+}
+
+/**
  * 一列(1.2、1.3)。
  *
  * 四項的順序即掃視的順序:題號、局名在前(它們是主要識別),難度與標籤在後。
- * 完成標記放在最左 —— 那一欄要能一路往下掃,看出練到哪裡了。
+ * **完成標記在最右**,與題庫類產品的慣例一致:左緣留給題號那一欄,一路往下掃的是
+ * 題號而不是勾選框。
+ *
+ * 完成標記在**結構上就落在 `<a>` 之外**(它是 `<li>` 的直接子節點,與連結平行),
+ * 「按標記不會跳進對局頁」(4.1)因此是版面的結果。移動它的位置**只能動 DOM 順序
+ * 或視覺順序** —— 一旦被塞進連結裡,那條保證就得改由 `stopPropagation` 之類的補救
+ * 維持,而那種補救擋不住鍵盤與中鍵。
  */
 function row(position) {
   const item = document.createElement('li');
@@ -127,9 +183,11 @@ function row(position) {
   toggle.setAttribute('aria-label', toggleLabel(title));
   toggle.addEventListener('change', () => mark(position.id));
 
+  // 題號就是一欄數字,不加「第…題」:那三個字每一列重複一次,而一整欄數字對齊
+  // 之後,「第幾題」本來就是那一欄在說的事(參照形態:leetcode problemset)。
   const id = document.createElement('span');
   id.className = 'position-id';
-  id.textContent = `第 ${position.id} 題`;
+  id.textContent = String(position.id);
 
   // 局名即進入該題的入口(4.1)。**用真的 `<a href>`** —— 中鍵開新分頁、右鍵複製
   // 網址、Enter 鍵、上一頁全部隨之而來,自己攔 click 再改 `location` 則要一一重做,
@@ -140,13 +198,7 @@ function row(position) {
   name.href = playHref(position.id);
   name.textContent = title;
 
-  // 難度以 `!= null` 判斷而非 falsy:這個欄位可能是 0,而 0 是一個真的難度。
-  const difficulty = document.createElement('span');
-  difficulty.className = 'position-difficulty';
-  difficulty.textContent =
-    position.difficulty != null
-      ? `${DIFFICULTY_PREFIX} ${position.difficulty}`
-      : `${DIFFICULTY_PREFIX} ${BLANK}`;
+  const difficulty = difficultyCell(position.difficulty);
 
   const tags = document.createElement('span');
   tags.className = 'position-tags';
@@ -166,7 +218,10 @@ function row(position) {
     }
   }
 
-  item.append(toggle, id, name, difficulty, tags);
+  // 完成標記排在最後 —— **DOM 順序即視覺順序**,不靠 `order` 或 `direction` 之類的
+  // 純視覺搬移:那些手法只挪畫面,Tab 與螢幕閱讀器仍照 DOM 走,兩者一旦分家,
+  // 鍵盤使用者的行進順序就與眼睛看到的對不上。
+  item.append(id, name, difficulty, tags, toggle);
   return item;
 }
 

@@ -123,9 +123,6 @@ const LIST_PAGE = './index.html';
 /** 返回途徑的文字。使用者可見文字一律繁體中文(requirements 8.3)。 */
 const BACK_TO_LIST_TEXT = '返回題庫列表';
 
-/** 描述那一行的名目。出處那一行的名目寫在骨架裡,這一行的則由本檔生出來。 */
-const DESCRIPTION_LABEL = '描述:';
-
 /**
  * 三態諮詢信號的說法(requirements 4.1)。
  *
@@ -197,36 +194,14 @@ function mountBackLink() {
   return link;
 }
 
-/**
- * 題目描述的填入處(problem-browser 的 requirements 4.5)。
- *
- * 描述與出處**已自列表移到這裡**(problem-browser 的 1.2):列是掃視用的,每列
- * 擠進越多欄位越難掃,而使用者選定一題之後才真正需要讀這兩項。出處的容器骨架裡
- * 本來就有(`#puzzle-source`),描述沒有,故由本檔補上。
- *
- * 結構刻意與骨架裡出處那一行一致 —— `<p>名目:<span>值</span></p>` 落在
- * `#puzzle-info` 內,`style.css` 既有的 `#puzzle-info p` / `#puzzle-info span`
- * 兩條規則因此原樣適用,不必動樣式表(它屬 web-play-runtime,不在本任務的
- * boundary 內)。位置在局名之後、出處之前:描述是局名的展開,兩者要相鄰。
- */
-function mountDescription() {
-  const line = document.createElement('p');
-  line.className = 'puzzle-description';
-  const value = document.createElement('span');
-  value.id = 'puzzle-description';
-  value.textContent = BLANK;
-  line.append(DESCRIPTION_LABEL, value);
-  elements.title.after(line);
-  return value;
-}
-
-// 兩個節點都由本檔動態建出而不是寫進 `play.html` —— 那個檔屬 web-play-runtime,
-// 不在 problem-browser 的 boundary 內。代價只有上面那幾行。
+// 返回的連結由本檔動態建出而不是寫進 `play.html`,代價只有上面那幾行。進 DOM 之後
+// 就不再需要參照:它是一條靜態連結,不隨對局狀態變動。
 //
-// 返回的連結進 DOM 之後就不再需要參照:它是一條靜態連結,不隨對局狀態變動。
-// 描述則相反,`renderPuzzleInfo` 每次重畫都要寫它,故留在 `elements` 裡。
+// 這裡原本還掛著一個 `#puzzle-description`(problem-browser 的 4.2)。**已移除** ——
+// 真實題庫的 `description` 就是「出處 + 局號 + 局名」的串接,與 `#puzzle-title` 和
+// `#puzzle-source` 完全重複,側欄因此把同樣的字說了三遍。使用者看過實際畫面後決定
+// 拿掉,requirements 4.5 已隨之修訂。
 mountBackLink();
-elements.description = mountDescription();
 
 /** 選中的格,例如 `'d8'`;沒有選子時為 `null`。**唯一存在呈現層的狀態。** */
 let selected = null;
@@ -269,24 +244,25 @@ function noPuzzleTitle(state) {
  * 最長殺著距離是**條件式**的(1.3 的 Where):沒有這項資訊時留佔位符號,
  * 不得憑空生一個數字。以 `!= null` 判斷而非 falsy —— 這個欄位可能是 0。
  *
- * 描述來自 problem-browser 的 requirements 4.5,與出處同樣**取自
- * `GET /api/positions/{id}` 的回應**(`service/models.py` 的 `PositionResponse`
- * 兩個欄位都有),不另打 `/api/catalog`:為一個字串多一次往返之外,兩個端點對
- * 同一題給出不同內容時,列表與對局介面會各說各話。
+ * 兩者併成骨架裡的一行 meta(`#puzzle-meta`),名目寫在 span 之外,故這裡填的是
+ * **純值** —— `maxDtm` 不再自帶「步」那個字:那一行已經有「最長殺著」在說它是什麼,
+ * 單位再說一次就是同一件事講兩遍,而側欄的累贅正是本輪要拆的東西。
+ *
+ * `state.position.description` 刻意**不取用**。它在回應裡照常存在(後端一個字沒
+ * 改),但真實題庫的描述是「出處 + 局號 + 局名」的串接,畫出來就是把上面兩行再說
+ * 一次。
  */
 function renderPuzzleInfo(state) {
   if (!state.position) {
     elements.title.textContent = noPuzzleTitle(state);
-    elements.description.textContent = BLANK;
     elements.source.textContent = BLANK;
     elements.maxDtm.textContent = BLANK;
     return;
   }
-  const { title, description, source, max_dtm: maxDtm } = state.position;
+  const { title, source, max_dtm: maxDtm } = state.position;
   elements.title.textContent = title || '(未命名)';
-  elements.description.textContent = description || BLANK;
   elements.source.textContent = source || BLANK;
-  elements.maxDtm.textContent = maxDtm != null ? `${maxDtm} 步` : BLANK;
+  elements.maxDtm.textContent = maxDtm != null ? String(maxDtm) : BLANK;
 }
 
 /**

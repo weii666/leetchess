@@ -26,6 +26,19 @@
  * 一列是一個五欄 grid,欄寬固定,整份列表置中並給一個最大寬度 —— 桌面上寬螢幕
  * 若讓列拉到滿版,題號與標籤會被扯到視野兩端,眼睛得橫向掃過整個螢幕才讀得完一列。
  *
+ * **欄序即 DOM 序**(題號、局名、難度、標籤、完成標記),本檔一律不用 `order` 去搬
+ * 位置:那只挪畫面,Tab 與螢幕閱讀器仍照 DOM 走,兩者分家之後鍵盤的行進順序就與
+ * 眼睛看到的對不上。要換欄序,改 `list.js` 那一行 `append`。
+ *
+ * ## 難度是三色標籤
+ *
+ * 1 / 2 / 3 分別為簡單(綠)、中等(橙)、困難(紅),由 `list.js` 掛在
+ * `data-level` 上。取的是**淡底色配同色系文字**而非飽和純色:整頁是深色底,
+ * 純紅純綠會亮得跳出畫面,而難度是次要資訊,搶不得局名的注意力。
+ *
+ * `data-level` 之外的一切(0、4、`null`、欄位不存在)吃基底那條規則的中性灰 ——
+ * **沒有任何一種難度值會讓那一格畫不出來**。
+ *
  * **行動裝置適配不在本輪範圍**(Backlog,6.1)。屆時可借鑑 `style.css` 那一輪的
  * 教訓,但注意**不要連同它的成因一起抄**:那裡被寫進註解的 `min-width: 0` 經突變
  * 證實完全無作用,真正生效的是 `width: 100%`。
@@ -44,6 +57,23 @@
   --text-dim: #8d8d8d;
   --accent: #ffd479;
   --line: #6b5433;
+
+  /*
+   * 難度三色。**只有這一頁用得到,故不列入與 `style.css` 比對的共用清單**
+   * (`tests/test_web_list.py` 的 `SHARED_CUSTOM_PROPERTIES`)—— 對局頁沒有難度欄。
+   *
+   * 每一組都是「深底 + 亮字」,亮度刻意壓在局名(`--text`)之下:難度是次要資訊。
+   */
+  --difficulty-easy-bg: #1f3d31;
+  --difficulty-easy-text: #6fdcad;
+  /*
+   * 中等刻意偏橙而非偏金:`--accent`(#ffd479)是題號與計數的顏色,兩者若同色系,
+   * 同一列上會出現兩個亮金的東西而分不出哪個是難度。實測過 #ffbe5c,太靠近了。
+   */
+  --difficulty-medium-bg: #43300f;
+  --difficulty-medium-text: #ff9f43;
+  --difficulty-hard-bg: #4d2320;
+  --difficulty-hard-text: #ff9b91;
 
   --gap: 24px;
   --radius: 8px;
@@ -109,12 +139,15 @@ h1 {
 }
 
 /*
- * 完成標記、題號、局名、難度、標籤。局名吃掉多餘的寬度,標籤次之 —— 那兩欄的
+ * 題號、局名、難度、標籤、完成標記。局名吃掉多餘的寬度,標籤次之 —— 那兩欄的
  * 內容長度最不可預測。
+ *
+ * 題號那一欄只放數字,3em 容得下四位數(等寬數字約 0.6em 一位);「第 N 題」時代
+ * 的 5.5em 是那三個字撐出來的。
  */
 .position {
   display: grid;
-  grid-template-columns: auto 5.5em minmax(6em, 1fr) 5em minmax(0, 1.2fr);
+  grid-template-columns: 3em minmax(6em, 1fr) 5em minmax(0, 1.2fr) auto;
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
@@ -180,11 +213,40 @@ h1 {
   border-radius: 4px;
 }
 
-/* 難度與標籤是次要資訊:字級小、顏色淡。 */
+/*
+ * 難度與標籤是次要資訊:字級小、顏色淡。
+ *
+ * 這條是**基底兼退路**:認不得的難度(0、4、`null`、欄位不存在)只走到這裡,拿到
+ * 中性灰的方框與原樣數值。三個合法分級各自在下面覆寫顏色。
+ *
+ * `justify-self: start` 讓方框只有內容那麼寬,不撐滿整欄 —— 撐滿的話「困難」與
+ * 「簡單」的框一樣長,顏色以外的第二個線索(框寬)就沒了。
+ */
 .position-difficulty {
-  font-size: 13px;
+  justify-self: start;
+  padding: 1px 8px;
+  border-radius: 6px;
+  background: var(--chip-bg);
   color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
   font-variant-numeric: tabular-nums;
+}
+
+/* 1 = 簡單、2 = 中等、3 = 困難(`.kiro/steering/structure.md` 的題目 schema)。 */
+.position-difficulty[data-level="1"] {
+  background: var(--difficulty-easy-bg);
+  color: var(--difficulty-easy-text);
+}
+
+.position-difficulty[data-level="2"] {
+  background: var(--difficulty-medium-bg);
+  color: var(--difficulty-medium-text);
+}
+
+.position-difficulty[data-level="3"] {
+  background: var(--difficulty-hard-bg);
+  color: var(--difficulty-hard-text);
 }
 
 .position-tags {

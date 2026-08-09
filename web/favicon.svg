@@ -1,0 +1,25 @@
+<!--
+  分頁圖示:一枚紅方的「帥」。
+
+  使用者執紅,這是他自己的將帥 —— 分頁列上一眼認得出是哪個站。用 SVG 而非 .ico:
+  單檔、可縮放、進版本庫時是純文字可讀可 diff。
+
+  瀏覽器在沒有 `<link rel="icon">` 時會自己去要 `/favicon.ico`,那是 `service/main.py`
+  的靜態掛載找不到的路徑,於是每次開頁都留下一筆 404。兩個頁面都接上本檔即可。
+
+  色值與 `style.css` 的 `--red` 同源,但**刻意複製而非引用** —— SVG 是獨立檔案,
+  拿不到 CSS 變數。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="象棋排局">
+  <circle cx="32" cy="32" r="30" fill="#f7ecd0" stroke="#c0392b" stroke-width="4" />
+  <text
+    x="32"
+    y="33"
+    fill="#c0392b"
+    font-family="PingFang TC, Microsoft JhengHei, serif"
+    font-size="38"
+    font-weight="700"
+    text-anchor="middle"
+    dominant-baseline="central"
+  >帥</text>
+</svg>

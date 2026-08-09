@@ -94,7 +94,10 @@ requires_real_engine = pytest.mark.skipif(
 PUZZLE_ID = 1
 PUZZLE_TITLE = "盡善克終"
 PUZZLE_SOURCE = "適情雅趣"
-PUZZLE_MAX_DTM_TEXT = "16 步"
+#: 最長殺著那一格現在只放**值**:名目「最長殺著」寫在骨架的那一行 meta 裡,
+#: 單位「步」隨側欄精簡一併拿掉(problem-browser 4.5 修訂,形態取自
+#: `poc/index.html:69`)—— 那一行已經有「最長殺著」在說它是什麼。
+PUZZLE_MAX_DTM_TEXT = "16"
 PUZZLE_FEN = "3ak4/3RaR3/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 w - - 0 1"
 
 #: 本地引擎(只用來替紅方挑殺著)的參數。節點數與服務的預設值相同。
@@ -664,7 +667,12 @@ def test_a_position_is_picked_from_the_list_played_and_returned_from(
     # 載入的**確實是那一題**:題目資訊全部取自真實題庫,不是本檔寫死的常數。
     assert text_of(page, "#puzzle-title") == chosen["title"]
     assert text_of(page, "#puzzle-source") == chosen["source"]
-    assert text_of(page, "#puzzle-description") == chosen["description"]
+    # 描述**不再呈現**(problem-browser 4.5 修訂):真實題庫的 description 就是
+    # 「出處 + 局號 + 局名」的串接,與上面兩行完全重複。這裡以真實題庫自己的那串字
+    # 反驗它沒有回來 —— 寫死一個字串的話,題庫改了描述就抓不到。
+    assert chosen["description"] not in page.locator("#sidebar").inner_text(), (
+        "描述又跑回對局介面上了"
+    )
 
     # --- 走一手,真實引擎應手 -------------------------------------------
     board = pieces(page)
