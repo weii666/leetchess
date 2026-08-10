@@ -63,14 +63,62 @@
   --difficulty-hard-text: #ff6363; /* 3.91:1 */
 
   /*
-   * 標籤 chip 的底色與字級,**同樣與 `list.css` 共用**。取值的理由(要同時對付一般
-   * 列底與已完成列底兩個背景、上界由文字對比決定)寫在 `list.css`,那裡是主要出處。
+   * 標籤 chip 的底色,**與 `list.css` 共用**。取值的理由(要同時對付一般列底與已完成
+   * 列底兩個背景、上界由文字對比決定)寫在 `list.css`,那裡是主要出處。
+   *
+   * **字級不共用。** `list.css` 的 `--chip-font-size` 是 12.5px,那是密集掃視表格裡
+   * 一列塞五欄的尺度;側欄是詳情面板,同一個值在這裡明顯偏小。共用的是顏色與形狀
+   * (同一個 chip 的長相),不是尺寸 —— 尺寸該由所在的版面決定。
    */
   --tag-bg: #616161;
-  --chip-font-size: 12.5px;
 
   --gap: 24px;
   --radius: 8px;
+
+  /*
+   * 側欄的垂直節奏,**只有兩個值**:同一組之內 8px、組與組之間 16px。
+   *
+   * 側欄是一疊高矮不一的東西(返回連結、標題、題目資訊、輪方、信號、控制項、著法
+   * 記錄),而它們原本各自帶 margin 再互相 collapse —— 實測間隙是 12 / 6 / 2 / 12 /
+   * 12 / 12 / 16 五種值,頂部三塊尤其亂(出處到難度只有 2px,幾乎黏在一起)。
+   *
+   * **間距一律由容器的 `gap` 統籌,元素自己不帶 margin。** margin collapse 的規則
+   * (相鄰取大值、父子穿透)正是「改一個地方影響到另一處」的來源;`gap` 沒有這個面,
+   * 一個容器的間距就只由那一條 `gap` 決定。這兩個值因此是整個側欄間距的唯一出處,
+   * 要調鬆調緊改這裡就好。
+   *
+   * 取 8 / 16 而不是先前的 6 / 12:規則統一之後畫面仍偏緊,實測 6 / 12 側欄總高
+   * 352px、8 / 16 為 378px、10 / 20 為 404px。10 / 20 太鬆 —— 側欄會比棋盤高出一截,
+   * 而「輪到你」與信號兩張卡片離得太開,反而不像同一組。
+   *
+   * 行高不在這個節奏裡:20.8 / 25.6 / 28 三種值是字級乘以比例的必然結果(13/16/20px
+   * 各自的 1.6、1.6、1.4),那是正常的排版層級,不是要消滅的不一致。
+   */
+  --stack-tight: 8px;
+  --stack: 16px;
+
+  /*
+   * 字體尺度,**只有三級**。依角色分配,不依位置:
+   *
+   *   lg    標題
+   *   base  內容與控制項(輪方、信號讀數、難度、標籤、著法、錯誤、按鈕)
+   *   sm    註腳與區塊標籤(返回連結、出處、「著法記錄」小標)
+   *
+   * 原本是 20 / 16 / 15 / 14 / 13 五級。**15 距 16 只有 1px、14 距 13 也只有 1px,
+   * 而 1px 的差別肉眼看不出來** —— 那不是層級,是不一致:畫面上其實只有三個看得出
+   * 來的層級,卻用五個數值去表達,於是新增元素時沒人知道該挑哪一個,五個值就這樣
+   * 各自長出來。三級之間是 1.23 與 1.25 倍,每一階都看得出來。
+   *
+   * 按鈕歸在 `base` 而不是 `sm`:它們是使用者要點的東西,不是註腳,字大一點連帶
+   * 點擊區域也好按。
+   *
+   * `sm` 取 14px 而不是 13px:階距因此自 1.23 倍收窄為 1.14 倍(註腳與內容的層級差
+   * 變小),換來的是**中文在 14px 下明顯比 13px 好讀** —— 這一級承載的是出處那種真的
+   * 中文字串,不是英數縮寫。可讀性優先於階距的漂亮。
+   */
+  --text-lg: 20px;
+  --text-base: 16px;
+  --text-sm: 14px;
 
   /* 盤面的 `viewBox` 寬度 —— 放大超過原尺寸只會讓線條變糊。 */
   --board-max-width: 576px;
@@ -96,7 +144,7 @@ body {
   color: var(--text);
   font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC",
     sans-serif;
-  font-size: 16px;
+  font-size: var(--text-base);
   line-height: 1.6;
 
   display: flex;
@@ -168,6 +216,14 @@ body {
 /* --- 側欄 ------------------------------------------------------------- */
 
 #sidebar {
+  /*
+   * 組與組之間的間距由這一條 `gap` 統籌,子元素一律不帶 margin(見 `--stack`)。
+   * 原本每一塊各自寫 `margin-bottom`,相鄰時 collapse 的結果散在 12 / 16 之間。
+   */
+  display: flex;
+  flex-direction: column;
+  gap: var(--stack);
+
   flex: 1 1 var(--sidebar-basis);
   /* 同 `#board`:防禦性的空操作,非適配解法。 */
   min-width: 0;
@@ -179,8 +235,8 @@ body {
    唯一的藍紫,看起來像沒接上樣式。 */
 .back-to-list {
   display: inline-block;
-  margin: 0 0 12px;
-  font-size: 13px;
+  margin: 0;
+  font-size: var(--text-sm);
   color: var(--text-muted);
   text-decoration: none;
 }
@@ -195,19 +251,22 @@ body {
   outline-offset: 2px;
 }
 
+/* 題目資訊是一組:標題、出處、難度與標籤。組內用較緊的節奏。 */
 #puzzle-info {
-  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--stack-tight);
 }
 
 #puzzle-title {
-  margin: 0 0 6px;
-  font-size: 20px;
+  margin: 0;
+  font-size: var(--text-lg);
   line-height: 1.4;
 }
 
 #puzzle-info p {
-  margin: 2px 0;
-  font-size: 13px;
+  margin: 0;
+  font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
@@ -216,16 +275,35 @@ body {
 }
 
 /*
- * 題目資訊是三行:`#puzzle-meta`(出處)、`#puzzle-difficulty`、`#puzzle-tags`。
+ * 題目資訊是兩行:`#puzzle-meta`(出處)自成一行,`#puzzle-attrs`(難度、展開按鈕、
+ * 標籤)為第二行。
  *
- * **各佔一行,沒有分隔點。** 中途試過「出處 · 難度」併成一行,但三者都是長度不定的
- * 東西(標籤尤其:數量與字數都不定),在窄側欄裡會折行,而折行後的分隔點會落在行首,
- * 看起來像沒寫完的句子。
+ * 出處**不與難度併行**:中途試過「出處 · 難度」加一個分隔點,但兩者都是長度不定的
+ * 東西,窄側欄裡會折行,而折行後的分隔點會落在行首,看起來像沒寫完的句子。
  *
  * 這裡原本還有最長殺著距離,已整組移除 —— **不是精簡版面,是它對使用者劇透**:
- * 預告這題幾步殺得完,而排局練習的價值在於自己找出殺法。難度與標籤不同,它們在列表
- * 上每一列都看得到,是選題的依據而非答案的一部分。
+ * 預告這題幾步殺得完,而排局練習的價值在於自己找出殺法。標籤(殺法名)同樣是劇透,
+ * 故預設收著、按一下才展開;難度不是,它是選題的依據而非答案的一部分。
  */
+
+/*
+ * 難度、展開按鈕、標籤同一行,由左至右。
+ *
+ * `flex-wrap` 是必要的而不是保險:側欄最窄是 300px(`--sidebar-basis`),而這一行
+ * 在標籤展開後可能是「Medium + 隱藏標籤 + 兩三個 chip」,必然放不下。折行後每一段
+ * 仍是完整的一塊,不會斷在字中間。
+ *
+ * `align-items: center` 讓按鈕(有內距、比較高)與難度、chip 對齊中線 —— 靠基線
+ * 對齊的話,按鈕的邊框會比旁邊的文字低半個字身。
+ */
+#puzzle-attrs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  /* 橫向 8px 是同一行上不同性質的東西(難度、按鈕、chip)的呼吸;縱向沿用組內節奏。 */
+  column-gap: 8px;
+  row-gap: var(--stack-tight);
+}
 
 /*
  * 難度是**一個帶顏色的詞**,與列表同一個形態:沒有底色、沒有圓角,顏色由
@@ -237,7 +315,15 @@ body {
  * `#puzzle-info p`(前者 (1,0,0),後者 (1,0,1)),寫了也不生效。三個合法分級因為
  * 多了屬性選擇器((1,1,0))才蓋得過去。
  */
+/*
+ * 字級與 `#turn`(輪到誰走)同為 16px,而不是繼承 `#puzzle-info p` 的 13px。
+ *
+ * 難度與標籤講的是**這一題是什麼**,與出處(它從哪本書來)不同層級 —— 13px 是給
+ * 出處那種註腳性質的東西用的。使用者看過實際畫面後指出這兩者偏小,而基準就是側欄
+ * 上最該一眼看到的那一行。
+ */
 #puzzle-difficulty {
+  font-size: var(--text-base);
   font-weight: 600;
 }
 
@@ -258,10 +344,12 @@ body {
  * 標籤那一行。殺法名是這個服務最獨特的部分,故與列表一樣做成有底色的 chip 而不是
  * 一串逗號分隔的字。
  *
- * chip 的**外觀必須與列表的 `.position-tag` 一致** —— 同一題在兩頁長得不一樣的話,
- * 使用者會以為自己點錯了題。底色與字級走共用的自訂屬性(`--tag-bg`、
- * `--chip-font-size`,由 `tests/test_web_list.py` 的 `SHARED_CUSTOM_PROPERTIES`
- * 比對兩頁的值);圓角與內距則是兩份樣式表各寫一次的字面值,改動時**兩邊都要改**。
+ * chip 的**顏色與形狀必須與列表的 `.position-tag` 一致** —— 同一題在兩頁長得不一樣
+ * 的話,使用者會以為自己點錯了題。底色走共用的自訂屬性(`--tag-bg`,由
+ * `tests/test_web_list.py` 的 `SHARED_CUSTOM_PROPERTIES` 比對兩頁的值);圓角與內距
+ * 是兩份樣式表各寫一次的字面值,改動時**兩邊都要改**。
+ *
+ * **字級刻意不同**:列表 12.5px、這裡 16px。尺寸由所在的版面決定,見 `--tag-bg`。
  *
  * class 名刻意不同(`.puzzle-tag` 對 `.position-tag`):列表的 chip 是列的一部分,
  * 這裡是側欄的一行,兩者的容器與間距規則本來就不一樣,共用 class 只會讓其中一頁的
@@ -270,24 +358,83 @@ body {
  * `#puzzle-tags .puzzle-tag` 的 id 前綴是為了優先度:單靠 `.puzzle-tag`((0,1,0))
  * 蓋不過 `#puzzle-info p`((1,0,1))的字級與次要色。
  */
+/*
+ * 展開標籤的按鈕。**做成次要控制項的樣子**:它與「重來」不同層級 —— 重來會改變
+ * 對局,這一顆只是掀開一段本來就有的資訊,不該在側欄裡搶到同樣的份量。故字級與
+ * 難度同一級、底色比列底只高一階、沒有粗體。
+ *
+ * 字面說的是**按下去會發生什麼**(「顯示標籤」/「隱藏標籤」),目前的狀態由
+ * `aria-expanded` 表達,兩者方向相反且都必要,見 `app.js` 的 `renderTags`。
+ */
+#toggle-tags {
+  font: inherit;
+  /*
+   * 與「重來」「下一題」同為 `--text-base`。**按鈕依角色定尺寸,不依所在的那一行**:
+   * 三顆按鈕長得一樣大,使用者才讀得出「這些是可以按的東西」。
+   */
+  font-size: var(--text-base);
+  padding: 3px 10px;
+  border: none;
+  border-radius: 6px;
+  background: var(--panel-bg);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+#toggle-tags:hover {
+  background: var(--panel-bg-strong);
+  color: var(--text);
+}
+
+#toggle-tags:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/*
+ * 展開後的標籤**自成一行**,不排在按鈕右邊。
+ *
+ * `flex-basis: 100%` 讓它在 `#puzzle-attrs` 這個 flex 容器裡獨佔一整行 —— 節點仍在
+ * 同一個容器內,`aria-controls` 指到的東西與畫面上的關係因此沒有變。**要改成排在
+ * 按鈕右邊,刪掉這一行 `flex-basis` 即可**,其餘一個字都不必動。
+ *
+ * 為什麼不排在右邊:
+ *
+ * 1. **行數會隨題庫成長而悄悄改變。** 沒有這條 `flex-basis` 時,`#puzzle-tags` 是
+ *    `#puzzle-attrs` 的一個 flex item,放得下就貼在按鈕右邊、放不下就**整塊**掉到
+ *    下一行(flex item 的換行是全有全無,不會前兩個留在上面、其餘掉下去)。於是同
+ *    一頁在 2 個標籤時是一行、3 個標籤時可能是兩行 —— 版面隨題庫收錄的標籤數而變,
+ *    而沒有任何測試會提醒你。這一頁對版面跳動特別敏感:`#waiting` 整組被拿掉就是
+ *    因為它每走一手推動一次底下的著法記錄,`test_web_layout.py` 至今還有測試在守。
+ * 2. 排在右邊時,第一個標籤的起點取決於難度字的寬度(實測 `Hard` 30px、
+ *    `Medium` 50px),換一題就差 20px。列表那邊要求標籤靠左對齊,要避的正是這件事。
+ * 3. 按鈕是 disclosure(`aria-expanded` + `aria-controls`),內容出現在觸發器下方
+ *    與螢幕閱讀器宣告的順序一致。
+ *
+ * 代價是固定多一行(實測 24px → 56px)。現有題目最多 2 個標籤,排在右邊在測到的每
+ * 一種側欄寬度下都放得進一行 —— 也就是說這一行是**現在**就付、換取版面不隨資料變動。
+ */
 #puzzle-tags {
   display: flex;
   flex-wrap: wrap;
+  flex-basis: 100%;
   gap: 6px;
 }
 
 #puzzle-tags .puzzle-tag {
-  padding: 2px 8px;
+  /* 內距隨字級一起放大,否則 16px 的字擠在 12.5px 時代的留白裡會顯得緊。 */
+  padding: 2px 10px;
   border-radius: 6px;
   background: var(--tag-bg);
   color: var(--text);
-  font-size: var(--chip-font-size);
+  /* 與難度同級(見 `#puzzle-difficulty`)—— 兩者是同一組資訊。 */
+  font-size: var(--text-base);
   line-height: 1.6;
 }
 
 /* 當前輪方(requirements 8.4)—— 側欄裡最該一眼看到的一行。 */
 #turn {
-  margin: 0 0 12px;
+  margin: 0;
   padding: 10px 14px;
   border-radius: var(--radius);
   background: var(--panel-bg);
@@ -306,7 +453,7 @@ body {
  */
 #signal {
   display: block;
-  margin: 0 0 12px;
+  margin: 0;
   padding: 10px 14px;
   border-radius: var(--radius);
   border-left: 3px solid var(--text-dim);
@@ -315,7 +462,7 @@ body {
 
 .signal-reading {
   margin: 0;
-  font-size: 15px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--text);
   font-variant-numeric: tabular-nums;
@@ -339,7 +486,7 @@ body {
   border-radius: var(--radius);
   background: #5c2a24;
   color: #ffd6d0;
-  font-size: 14px;
+  font-size: var(--text-base);
 }
 
 /* --- 重來與下一題 ----------------------------------------------------- */
@@ -365,7 +512,7 @@ body {
  */
 #reset {
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-base);
   padding: 8px 16px;
   border: none;
   border-radius: 6px;
@@ -397,7 +544,7 @@ body {
   display: inline-flex;
   align-items: center;
   font: inherit;
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 700;
   padding: 8px 16px;
   border: none;
@@ -421,12 +568,12 @@ body {
 /* --- 歷史著法(requirements 8.1)-------------------------------------- */
 
 #moves-panel {
-  margin-top: 16px;
+  margin: 0;
 }
 
 #moves-panel h2 {
   margin: 0 0 6px;
-  font-size: 14px;
+  font-size: var(--text-sm);
   font-weight: 700;
   letter-spacing: 1px;
   color: var(--text-muted);
@@ -441,7 +588,7 @@ body {
   padding-left: 2.4em;
   max-height: 260px;
   overflow-y: auto;
-  font-size: 15px;
+  font-size: var(--text-base);
   color: #dddddd;
 }
 

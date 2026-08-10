@@ -390,9 +390,12 @@ SHARED_CUSTOM_PROPERTIES = [
     "--difficulty-easy-text",
     "--difficulty-medium-text",
     "--difficulty-hard-text",
-    # 標籤 chip 的底色與字級。同上:兩頁都畫標籤之後才進這份清單。
+    # 標籤 chip 的底色。同上:兩頁都畫標籤之後才進這份清單。
+    #
+    # **字級刻意不在這裡。** 列表的 chip 是 12.5px(密集掃視表格裡一列塞五欄的尺度),
+    # 對局頁的是 16px(詳情面板,與「輪到你」同級)。共用的是顏色與形狀 —— 同一個
+    # chip 的長相 —— 而不是尺寸,尺寸該由所在的版面決定。
     "--tag-bg",
-    "--chip-font-size",
 ]
 
 
@@ -2238,56 +2241,120 @@ def test_the_source_moved_rather_than_multiplied(list_page) -> None:
     assert DESCRIPTIONS["1"] not in played
 
 
-def test_the_puzzle_info_is_source_difficulty_and_tags_each_on_its_own_line(
-    list_page,
-) -> None:
-    """題目資訊是三行:出處、難度、標籤,**各自獨立一行**。
+#: 讀出對局頁題目資訊的當下狀態。
+_PUZZLE_INFO = """() => {
+  const text = (id) => document.getElementById(id)?.innerText.trim() ?? null;
+  const shown = (id) => {
+    const el = document.getElementById(id);
+    return el != null && !el.hidden;
+  };
+  const top = (id) => {
+    const el = document.getElementById(id);
+    if (el == null || el.hidden) return null;
+    const box = el.getBoundingClientRect();
+    return { top: Math.round(box.top), bottom: Math.round(box.bottom) };
+  };
+  return {
+    meta: text('puzzle-meta'),
+    source: text('puzzle-source'),
+    difficulty: text('puzzle-difficulty'),
+    toggle: text('toggle-tags'),
+    toggleShown: shown('toggle-tags'),
+    expanded: document.getElementById('toggle-tags')?.getAttribute('aria-expanded'),
+    tagsShown: shown('puzzle-tags'),
+    tags: [...document.querySelectorAll('#puzzle-tags .puzzle-tag')].map(
+      (chip) => chip.textContent.trim(),
+    ),
+    dtm: document.getElementById('puzzle-max-dtm') !== null,
+    boxes: {
+      meta: top('puzzle-meta'),
+      difficulty: top('puzzle-difficulty'),
+      toggle: top('toggle-tags'),
+      tags: top('puzzle-tags'),
+    },
+  };
+}"""
+
+
+def _on_the_same_line(one: dict | None, other: dict | None) -> bool:
+    """兩個框是否在同一行 —— 以**垂直範圍重疊**判定,不是上緣相等。
+
+    上緣相等太嚴:按鈕有內距因而比旁邊的文字高,`align-items: center` 對齊的是中線,
+    兩者的上緣本來就差一兩個 px。重疊與否才是「看起來在同一行」的定義。
+    """
+    if one is None or other is None:
+        return False
+    return one["top"] < other["bottom"] and other["top"] < one["bottom"]
+
+
+def test_the_puzzle_info_keeps_the_tags_behind_a_toggle(list_page) -> None:
+    """題目資訊:出處一行,難度與標籤同一行,而**標籤預設收在按鈕後面**。
 
     這一條的歷史說明了它在守什麼。原本叫
     `test_the_source_and_mate_distance_share_a_single_line`,驗出處與最長殺著併在
     同一行;**最長殺著整組移除**(它對使用者劇透,預告這題幾步殺得完)之後改成驗
-    那一行從頭到尾就是出處;難度與標籤加進來之後又改成現在這樣。
+    那一行從頭到尾就是出處;難度與標籤加進來之後又改了一次。
 
-    **不變的是要擋掉的東西:最長殺著不得回到題目資訊裡。** 因此仍以列舉的方式比對
-    每一行的字面,而不是 `in` 或 `startswith` —— 後者對「適情雅趣 · 最長殺著 9」
-    照樣成立,而那正是要擋掉的形態。
+    **要擋掉的東西一路沒變:劇透不得出現在對局頁上。** 標籤(殺法名)是同一類東西 ——
+    「雙馬」「連將殺」等於告訴使用者這題怎麼殺,故預設不畫,要按一下才展開。因此這
+    一條同時驗兩件事:一開始標籤真的不在畫面上,以及按下去之後它確實出得來。
 
-    「各自獨立一行」以**三者的上緣互不相同**來驗:比對字面只能說出內容對不對,說不出
-    它們是不是被併回同一行(併行時三段字面照樣各自正確)。
+    「同一行」以上緣相同來驗,「兩行」以上緣不同來驗:比對字面只能說出內容對不對,
+    說不出它們排在哪裡(併行或分行時每一段字面都照樣正確)。
     """
     open_list_that_can_be_played(list_page)
     open_position(list_page, 1)
     list_page.wait_for_selector("#board svg .piece")
 
-    info = list_page.evaluate(
-        """() => {
-          const text = (id) =>
-            document.getElementById(id)?.innerText.trim() ?? null;
-          const top = (id) => {
-            const el = document.getElementById(id);
-            return el ? Math.round(el.getBoundingClientRect().top) : null;
-          };
-          return {
-            meta: text('puzzle-meta'),
-            source: text('puzzle-source'),
-            difficulty: text('puzzle-difficulty'),
-            tags: [...document.querySelectorAll('#puzzle-tags .puzzle-tag')].map(
-              (chip) => chip.textContent.trim(),
-            ),
-            dtm: document.getElementById('puzzle-max-dtm') !== null,
-            tops: [top('puzzle-meta'), top('puzzle-difficulty'), top('puzzle-tags')],
-          };
-        }"""
-    )
+    before = list_page.evaluate(_PUZZLE_INFO)
 
     expected_difficulty = DIFFICULTY_LABELS[CATALOG[0]["difficulty"]]
-    assert info["source"] == SOURCES["1"], f"出處不對:{info}"
-    # 出處那一行**只有出處** —— 難度或標籤被併回去的話這一條就會轉紅。
-    assert info["meta"] == SOURCES["1"], f"出處那一行不只有出處:{info}"
-    assert info["difficulty"] == expected_difficulty, f"難度不對:{info}"
-    assert info["tags"] == CATALOG[0]["tags"], f"標籤不對:{info}"
-    assert not info["dtm"], "最長殺著那一格還在"
-    assert len(set(info["tops"])) == 3, f"三者不在各自的一行上:{info['tops']}"
+    assert before["source"] == SOURCES["1"], f"出處不對:{before}"
+    # 出處那一行**只有出處** —— 難度被併回去的話這一條就會轉紅。
+    assert before["meta"] == SOURCES["1"], f"出處那一行不只有出處:{before}"
+    assert before["difficulty"] == expected_difficulty, f"難度不對:{before}"
+    assert not before["dtm"], "最長殺著那一格還在"
+
+    # 標籤是劇透:預設不得出現在畫面上,連字都不該在 DOM 裡。
+    assert not before["tagsShown"], f"標籤預設就展開了 —— 那是劇透:{before}"
+    assert before["tags"] == [], f"標籤收著卻仍留在 DOM 裡:{before}"
+    assert before["toggleShown"], f"沒有展開標籤的按鈕:{before}"
+    assert before["toggle"] == "顯示標籤", f"按鈕的字不對:{before}"
+    assert before["expanded"] == "false", f"aria-expanded 與畫面不符:{before}"
+
+    boxes = before["boxes"]
+    assert not _on_the_same_line(boxes["meta"], boxes["difficulty"]), (
+        f"出處與難度被併成同一行:{boxes}"
+    )
+    assert _on_the_same_line(boxes["difficulty"], boxes["toggle"]), (
+        f"難度與展開按鈕不在同一行:{boxes}"
+    )
+
+    list_page.locator("#toggle-tags").click()
+    after = list_page.evaluate(_PUZZLE_INFO)
+
+    assert after["tags"] == CATALOG[0]["tags"], f"展開後的標籤不對:{after}"
+    assert after["tagsShown"], f"按了卻沒展開:{after}"
+    assert after["toggle"] == "隱藏標籤", f"按鈕的字沒有跟著換:{after}"
+    assert after["expanded"] == "true", f"aria-expanded 與畫面不符:{after}"
+    # 標籤自成一行,不排在按鈕右邊(理由見 `style.css` 的 `#puzzle-tags`)。
+    grown = after["boxes"]
+    assert not _on_the_same_line(grown["tags"], grown["toggle"]), (
+        f"標籤排在按鈕右邊而不是自成一行:{grown}"
+    )
+    assert grown["tags"]["top"] >= grown["toggle"]["bottom"] - 1, (
+        f"標籤沒有落在按鈕那一行的下方:{grown}"
+    )
+    assert _on_the_same_line(grown["difficulty"], grown["toggle"]), (
+        f"展開之後難度與按鈕被拆開了:{grown}"
+    )
+
+    # 再按一次收回去 —— 按鈕的字說的是「按下去會發生什麼」,兩個方向都要成立。
+    list_page.locator("#toggle-tags").click()
+    again = list_page.evaluate(_PUZZLE_INFO)
+    assert not again["tagsShown"], f"再按一次沒有收回去:{again}"
+    assert again["toggle"] == "顯示標籤", f"收回後按鈕的字不對:{again}"
+    assert again["expanded"] == "false", f"aria-expanded 與畫面不符:{again}"
 
 
 # =======================================================================

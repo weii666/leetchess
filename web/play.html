@@ -31,24 +31,37 @@
       corpus-verification 要回填它),只是前端不再顯示。
     -->
     <!--
-      題目資訊是三行:出處、難度、標籤。**各佔一行,不以分隔點併行** —— 三者都是
-      長度不定的東西(標籤尤其:數量與字數都不定),併成一行會在窄側欄裡折行,而
-      折行後的分隔點會落在行首,看起來像沒寫完的句子。
+      題目資訊是兩行:出處自成一行,難度與標籤同一行。
 
-      難度與標籤都是使用者在列表上選題時就看到的東西,進了對局頁卻消失的話,會讓人
-      以為自己點錯了題。標籤(殺法名)更是這個服務最獨特的部分。
+      ## 標籤預設隱藏,要按一下才展開
+
+      **殺法名是劇透。** 「雙馬飲泉」「鐵門栓」「小鬼坐龍廷」等於直接告訴使用者這一
+      題的解法,而排局練習的價值正在於自己找出殺法 —— 與最長殺著距離被整組移除的理由
+      完全相同(見上方 `#puzzle-meta` 那段)。差別只在最長殺著沒有任何使用情境,而
+      標籤在卡住時是有用的提示,故保留但**要使用者主動要求**。
+
+      因此:**不要因為「資料都有了」就把它改成預設展開。** 那不是精簡點擊數,是把
+      這一頁的價值拿掉。
+
+      展開狀態**刻意不做持久化**(不存 localStorage):它是提示而不是偏好設定,上一題
+      按過展開,不該讓下一題一開啟就洩題。每一題都從隱藏開始。
+
+      沒有標籤的題目連按鈕都不出現 —— 按下去什麼都沒有的按鈕比沒有按鈕更難解釋。
+
+      ## 共用
 
       說法、顏色與 chip 外觀都與列表共用:`web/difficulty.js` 出難度的說法與退路,
-      `style.css` 與 `list.css` 共用難度三色與 `--tag-bg`、`--chip-font-size`
-      (`tests/test_web_list.py` 的 `SHARED_CUSTOM_PROPERTIES` 比對兩頁的值)。
-      同一題在兩頁必須長得一樣。
-
-      沒有難度或沒有標籤時整行 `hidden`,不留空行也不填佔位符號 —— 側欄是直向堆疊的,
-      一個空行只會讓下面的東西無故往下掉一格。
+      `style.css` 與 `list.css` 共用難度三色與 `--tag-bg`(`tests/test_web_list.py`
+      的 `SHARED_CUSTOM_PROPERTIES` 比對兩頁的值)。**字級不共用** —— 列表是密集的
+      掃視表格,側欄是詳情面板,同一個尺寸在兩邊不會都對。
     -->
     <p id="puzzle-meta"><span id="puzzle-source">—</span></p>
-    <p id="puzzle-difficulty" hidden></p>
-    <p id="puzzle-tags" hidden></p>
+    <p id="puzzle-attrs">
+      <span id="puzzle-difficulty" hidden></span>
+      <button id="toggle-tags" type="button" aria-expanded="false"
+              aria-controls="puzzle-tags" hidden>顯示標籤</button>
+      <span id="puzzle-tags" hidden></span>
+    </p>
   </section>
 
   <!--

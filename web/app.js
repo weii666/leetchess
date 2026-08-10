@@ -259,6 +259,7 @@ const elements = {
   source: document.getElementById('puzzle-source'),
   difficulty: document.getElementById('puzzle-difficulty'),
   tags: document.getElementById('puzzle-tags'),
+  toggleTags: document.getElementById('toggle-tags'),
   turn: document.getElementById('turn'),
   signal: document.getElementById('signal'),
   error: document.getElementById('error'),
@@ -320,7 +321,13 @@ function mountNextLink() {
 
 const nextLink = mountNextLink();
 
-/** 選中的格,例如 `'d8'`;沒有選子時為 `null`。**唯一存在呈現層的狀態。** */
+/**
+ * 選中的格,例如 `'d8'`;沒有選子時為 `null`。
+ *
+ * 呈現層只有兩個這樣的狀態,另一個是 `tagsRevealed`(標籤展開與否)。兩者的共同點
+ * 是**與對局的進度無關**:走子、重來、獲勝都不改變它們,故不進 `game`。任何與進度
+ * 有關的東西都不得在這裡多開一份。
+ */
 let selected = null;
 
 /**
@@ -401,10 +408,11 @@ function renderPuzzleInfo(state) {
   if (!state.position) {
     elements.title.textContent = noPuzzleTitle(state);
     elements.source.textContent = BLANK;
-    // 兩行整條收起來,不填佔位符號:側欄是直向堆疊的,一個只有「—」的空行只會讓
-    // 下面的東西無故往下掉一格。
+    // 整格收起來,不填佔位符號:側欄是直向堆疊的,一個只有「—」的空行只會讓下面的
+    // 東西無故往下掉一格。按鈕同理 —— 沒有題目就沒有標籤可展開。
     hideLine(elements.difficulty);
     hideLine(elements.tags);
+    elements.toggleTags.hidden = true;
     return;
   }
   const { id, title, source, difficulty, tags } = state.position;
@@ -414,11 +422,27 @@ function renderPuzzleInfo(state) {
   renderTags(tags);
 }
 
-/** 清空一行題目資訊並收起來。 */
+/** 清空一格題目資訊並收起來。 */
 function hideLine(line) {
   line.replaceChildren();
   line.hidden = true;
 }
+
+/**
+ * 標籤此刻是否展開。**呈現層的狀態,不進 `game`** —— 它與對局的進度無關,重來、
+ * 走子、獲勝都不該改變它。
+ *
+ * 不做持久化(不存 localStorage)是刻意的:標籤是**提示**而不是偏好設定,上一題按過
+ * 展開,不該讓下一題一開啟就洩題。每一次載入頁面都從隱藏開始。理由見 `play.html`
+ * 那段註解 —— 殺法名等於這一題的解法。
+ */
+let tagsRevealed = false;
+
+/** 展開與收合的說法 —— 按鈕上寫的是**按下去會發生什麼**,不是目前的狀態。 */
+const TAGS_TOGGLE_LABELS = Object.freeze({
+  show: '顯示標籤',
+  hide: '隱藏標籤',
+});
 
 /**
  * 難度那一行(與列表同一組說法與顏色)。
@@ -447,22 +471,46 @@ function renderDifficulty(value) {
 }
 
 /**
- * 標籤那一行 —— 殺法名(「臥槽馬」「雙馬飲泉」),這個服務最獨特的部分。
+ * 標籤與它的展開按鈕 —— 殺法名(「臥槽馬」「雙馬飲泉」),這個服務最獨特的部分,
+ * 同時也是這一題的**劇透**,故預設收著(見 `play.html`)。
  *
  * chip 的外觀與列表一致(`--tag-bg`、`--chip-font-size` 是兩頁共用的自訂屬性),
- * 但 class 名不同:列表的 `.position-tag` 是列的一部分,這裡是側欄的一行,兩份
+ * 但 class 名不同:列表的 `.position-tag` 是列的一部分,這裡是側欄的一格,兩份
  * 樣式表各自持有自己的規則。
  *
- * 沒有標籤時整行收起來。列表在那種情形下留一個「—」,因為那一欄空掉會讓整列看起來
- * 少一項;側欄沒有這個問題,一行「—」反而像資料壞了。
+ * ## 沒有標籤時連按鈕都收起來
+ *
+ * 按下去什麼都不會發生的按鈕比沒有按鈕更難解釋。列表在那種情形下留一個「—」,因為
+ * 那一欄空掉會讓整列看起來少一項;側欄沒有這個問題。
+ *
+ * ## `aria-expanded` 不是裝飾
+ *
+ * 按鈕的字面(「顯示標籤」/「隱藏標籤」)說的是**按下去會發生什麼**,而
+ * `aria-expanded` 說的是**目前的狀態**。兩者方向相反且都必要:只有字面的話,螢幕
+ * 閱讀器的使用者聽到「隱藏標籤」無從得知標籤此刻是不是已經展開了。
  */
 function renderTags(tags) {
   const line = elements.tags;
+  const button = elements.toggleTags;
   const labels = Array.isArray(tags) ? tags : [];
+
   if (labels.length === 0) {
+    hideLine(line);
+    button.hidden = true;
+    return;
+  }
+
+  button.hidden = false;
+  button.textContent = tagsRevealed
+    ? TAGS_TOGGLE_LABELS.hide
+    : TAGS_TOGGLE_LABELS.show;
+  button.setAttribute('aria-expanded', String(tagsRevealed));
+
+  if (!tagsRevealed) {
     hideLine(line);
     return;
   }
+
   line.replaceChildren(
     ...labels.map((label) => {
       const chip = document.createElement('span');
@@ -822,6 +870,15 @@ elements.reset.addEventListener('click', () => {
     return;
   }
   game.reset();
+});
+
+// 展開/收合標籤。**與畫面上其他每一件事走同一條路徑**:改一個狀態,然後整份重畫
+// (本檔開頭的「只有一條寫進畫面的路徑」)—— 不在這裡順手動 `hidden` 或改按鈕的字。
+//
+// 「重來」刻意**不**重置這個狀態:重來是重走這一局,不是收回使用者已經看過的提示。
+elements.toggleTags.addEventListener('click', () => {
+  tagsRevealed = !tagsRevealed;
+  render();
 });
 
 render();
