@@ -36,6 +36,16 @@
 
 本模組只讀不寫。`max_dtm` 由 corpus-verification 日後回填,現階段可為空,
 **不得視為必填** —— 把它當必填等於要求驗證工具先跑完才能啟動服務。
+
+## 候選題目
+
+收題工具要在寫入題庫**之前**就判斷一題合不合格,而那個判準只能是這裡的判準:
+放行的題目一旦進了題庫,下次啟動就得載得起來。因此本模組另開一個公開入口
+`validate_position()`,驗證一份還不在任何檔案裡的候選題目。
+
+它是 `_read_position()` 的**薄包裝**,不複製也不擴充任何規則 —— 兩份規則遲早分岔,
+而分岔的下場是收題工具說可以、服務啟動時說不行。唯讀契約不因這個入口改變:它只
+判定並回傳 `Position`,不碰檔案系統。
 """
 
 from __future__ import annotations
@@ -47,7 +57,7 @@ from typing import Any
 from service.errors import PositionNotFoundError
 from service.types import Position, Side
 
-__all__ = ["PositionRepository"]
+__all__ = ["PositionRepository", "validate_position"]
 
 
 #: 人工編輯、必填的欄位(structure.md 的題目 schema)。
@@ -190,6 +200,27 @@ class PositionRepository:
         for position_id in sorted(conflicts):
             lines.append(f"  題號 {position_id}:{'、'.join(conflicts[position_id])}")
         return "\n".join(lines)
+
+
+# --- 候選題目的 schema 驗證 ---------------------------------------------
+
+
+#: `validate_position()` 出錯時指路用的說法。載入路徑指得出「哪一檔第幾題」,候選題目
+#: 還不在任何檔案裡,只能以它的身分自稱。
+CANDIDATE_WHERE = "候選題目"
+
+
+def validate_position(raw: Any) -> Position:
+    """驗證一份**還不在題庫裡**的候選題目,合格時回傳對應的 `Position`。
+
+    供收題工具在寫入前取得權威判定(見模組說明的「候選題目」)。判準與 `load()`
+    逐字相同:兩者走的是同一個 `_read_position()`,本函式只固定了指路的說法。
+
+    不合格時拋出 `ValueError`,與載入路徑同一個錯誤型別 —— 「這一題不合格」是驗證
+    的**結果**而非服務失敗,呼叫端據此組出自己的回應形狀,`errors.py` 的七種錯誤
+    類別(對外 HTTP 契約)不為此擴充。
+    """
+    return _read_position(CANDIDATE_WHERE, raw)
 
 
 # --- 單一題目的讀取與驗證 -----------------------------------------------
