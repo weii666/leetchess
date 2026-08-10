@@ -40,7 +40,7 @@
   - _Requirements: 4.7, 4.10_
   - _Depends: 2.1_
 
-- [ ] 2.4 驗證端點與服務組裝
+- [x] 2.4 驗證端點與服務組裝
   - 新增候選題目的驗證端點,接受候選題目、回傳驗證結果;啟動掛鉤建立驗證服務
   - **驗證未通過是「結果」而非「錯誤」**:以成功狀態碼回傳含未通過項目的結果,既有的七種錯誤類別碼不為此擴充
   - 既有錯誤類別碼只用於真正的服務失敗:引擎池滿、搜尋逾時、未預期失敗;FEN 字元不合格是唯一的例外,它在更早的一層以格式錯誤表達
@@ -184,6 +184,8 @@
 - **2.3(實測,勿再重查)**:真實 Pikafish **不會**被畸形 FEN 弄死。已量測 11 列(真實局面加一列 → 44 個著法)、11 列全空、3 列、每列超寬、九個帥、欄位不足、fullmove 0 —— 七種輸入之後 `is_healthy()` 全為 True。曾有一份實作報告宣稱 11 列 FEN 會讓引擎靜默退出並毒掉池槽,**該說法不成立**,程式與測試都沒有依賴它。`engine/pool.py::_release()` 不檢查健康是既有缺口(engine-service 任務 2.5,其筆記第 222 行已載),corpus-editor **並未**讓它變得可觸發。
 - **2.3**:候選題目有多個 schema 問題時只回傳**一個** issue(`validate_position` 遇到第一個就拋)。`缺少必填欄位:id、title` 只歸屬到 `id`。2.4 與前端不得假設逐欄位窮舉回報。
 - **2.3**:欄位歸屬是對 `positions.py` 錯誤訊息的正則比對,只會退化成 `None`,不會錯歸(抽出的名字必須在 `KNOWN_FIELDS` 內)。措辭漂移會讓 `FIELD_ATTRIBUTION` 表轉紅。
+- **2.4**:`tests/fakes/fake_engine.py` **無法**表達「引擎健康但這個 FEN 載不進去」—— 它的 `displayed_fen()` 對畸形 FEN 直接 `int(fields[5])` 而崩潰,那是「確認未能完成」,語意剛好相反。要測那個分支必須另建能容忍畸形 FEN 的替身。
+- **最終驗證待辦(review 提出,皆非本任務範圍)**:(a) `service/main.py:4` 與 `tests/test_module_boundaries.py:3` 的依賴方向文字仍寫 `game -> models -> main`,漏了 `editor`;(b) design 禁止路由寫成 `async def`,但**沒有任何測試守住這條**,把新舊五個路由改成 `async def` 全都不會轉紅;(c) `tests/test_editor_endpoint.py:257` 的「指令記錄裡沒有 quit」目前非空是靠引擎池建構時就握手,建議加一行 `assert service.engine_commands()` 釘住前提。
 
 ## 刻意接受的覆蓋缺口
 

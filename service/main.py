@@ -1,4 +1,4 @@
-"""FastAPI 應用的組裝:四個端點、前端靜態檔的掛載、啟動與關閉掛鉤、`ServiceError`
+"""FastAPI 應用的組裝:五個端點、前端靜態檔的掛載、啟動與關閉掛鉤、`ServiceError`
 的錯誤映射。
 
 依賴方向為 `types / errors -> config -> positions / engine -> game -> models -> main`,
@@ -70,6 +70,31 @@
 
 設計的錯誤類別表沒有 422 這一列,API Contract 也只允許 400/404/409/503/504 —— 因此
 結構性錯誤必須落在既有的七種之內,見 `_structural_error()` 的分流理由。
+
+## 候選題目的驗證:未通過是「結果」,不是錯誤
+
+`POST /api/editor/validate` **恆以 200 回答判定**:候選題目不合格時回 `valid: false`
+與 `issues`,而不是任何一種錯誤類別碼。理由與上一段同源 —— 七種類別碼是對外契約
+(5.1),沒有一種誠實描述「這一題的難度欄位型別不對」,要正確表達就得新增第八種,
+那是 design 層級的決定。而它其實**不必**被表達成錯誤:請求本身完全合法,服務也順利
+完成了被要求做的事(判定),只是判定結果為否。
+
+**真正的服務失敗不在此列。** 池滿(503)、逾時(504)、未預期(500)一律沿用既有的
+三個處理器與同一個 `{code, message}` 出口。`EditorService` 為此把兩者分得很開 ——
+不合格以回傳值表達,確認**未能完成**則原樣往上拋;本模組的路由因此**不攔任何例外**,
+攔了就會讓忙碌的服務長得像一份壞掉的題目,而那份題目可能完全沒問題
+(corpus-editor 4.9)。
+
+FEN 字元不合格是唯一的例外,它以 `INVALID_MOVE_FORMAT`(400)表達 —— 那不是「這一題
+不合格」的判定,而是這個請求根本不該被處理,與著法格式不合法完全是同一件事,也攔在
+同一個位置(請求模型上,見 `models.py`)。
+
+### 回應模型定義在此而非 `models.py`
+
+同 `CatalogEntry` 的理由(boundary),再加一條:design 的 Modified Files 只把**請求**
+模型交給 `models.py` —— 它必須與 FEN 字元把關住在一起,那是它存在的全部理由。判定的
+回應形狀則是本模組的組裝物,與四個既有端點的回應由 `models.py` 提供不同,那些是
+領域物件的對外投影,而 `valid` / `issues` 不對應任何領域型別。
 """
 
 from __future__ import annotations
@@ -92,6 +117,7 @@ from starlette.routing import Match, Mount
 from starlette.types import Scope
 
 from service.config import Settings, load_settings
+from service.editor import EditorService, ValidationIssue
 from service.engine.pool import EnginePool
 from service.errors import (
     InternalError,
@@ -102,6 +128,7 @@ from service.errors import (
 from service.game import GameService
 from service.models import (
     BlackMoveResponse,
+    CandidatePositionRequest,
     ErrorResponse,
     GameStateResponse,
     MoveSequenceRequest,
@@ -118,6 +145,8 @@ __all__ = [
     "WEB_DIR",
     "CatalogEntry",
     "CatalogResponse",
+    "ValidationIssueEntry",
+    "CandidateValidationResponse",
     "threadpool_capacity",
     "create_app",
     "app",
@@ -160,11 +189,22 @@ def _repository(request: Request) -> PositionRepository:
     return request.app.state.repository
 
 
+def _editor(request: Request) -> EditorService:
+    """取用啟動掛鉤建好的候選題目驗證服務。
+
+    與 `_service` 分開是刻意的:兩者同層、互不匯入(見 `editor.py` 的模組說明),
+    對局不該因為收題工具的存在而多背一份協作者。
+    """
+    return request.app.state.editor
+
+
 Service = Annotated[GameService, Depends(_service)]
 Repository = Annotated[PositionRepository, Depends(_repository)]
+Editor = Annotated[EditorService, Depends(_editor)]
 
-#: 四個端點共用的路徑前綴。前端靜態檔掛在根路徑上,因此這個前綴同時也是
-#: 「靜態檔看不見的範圍」,見 `_WebFiles`。
+#: 全部端點共用的路徑前綴。前端靜態檔掛在根路徑上,因此這個前綴同時也是
+#: 「靜態檔看不見的範圍」,見 `_WebFiles`。收題頁不需要為此加任何規則 —— 它是
+#: 普通靜態內容,只有它呼叫的驗證端點落在這個前綴底下。
 API_PREFIX = "/api"
 
 router = APIRouter(prefix=API_PREFIX)
@@ -247,6 +287,65 @@ def _catalog_entries(repository: PositionRepository) -> list[CatalogEntry]:
     ]
 
 
+# --- 候選題目驗證的回應形狀 ---------------------------------------------
+
+
+class ValidationIssueEntry(BaseModel):
+    """一項未通過的驗證。`editor.ValidationIssue` 的對外投影。
+
+    欄位與收題頁淺層檢查的 `CheckIssue` 同形(design 的 Error Categories and
+    Responses),呈現層因此不必分辨這一項是前端自己檢出的還是服務端判定的 —— 兩者
+    要做的事完全一樣:指到那一格欄位。
+    """
+
+    field: str | None = Field(
+        description=(
+            "題目 schema 的欄位名;`None` 表示歸不到任何一格表單(例如候選題目根本"
+            "不是物件,或多了一個 schema 以外的欄位)。**欄位恆存在**,空值時仍出現"
+            "於 JSON,前端不必分辨「沒有這個欄位」與「值為空」。"
+        )
+    )
+    message: str = Field(
+        description="未通過的說法,原樣取自題目 schema 的判定,可直接顯示給維護者。"
+    )
+
+    @classmethod
+    def from_domain(cls, issue: ValidationIssue) -> ValidationIssueEntry:
+        """由驗證服務的一項判定建出對外的一列。"""
+        return cls(field=issue.field, message=issue.message)
+
+
+class CandidateValidationResponse(BaseModel):
+    """候選題目的驗證結果。**這是判定,不是錯誤** —— 狀態碼恆為 200(4.7、4.8)。
+
+    包成物件而不是裸的 issue 陣列,與其餘端點的回應形狀一致;`valid` 也因此有地方
+    可放,前端不必自己以「陣列是不是空的」推論結論。
+    """
+
+    valid: bool = Field(
+        description="候選題目是否合格。由 `issues` 導出,兩者不可能互相矛盾。"
+    )
+    issues: list[ValidationIssueEntry] = Field(
+        description=(
+            "未通過的項目,每一項盡可能定位到欄位;合格時為**空陣列而非省略**。"
+            "同一份候選題目可能只回報一項 —— schema 驗證遇到第一個問題就停,"
+            "呼叫端不得假設這是逐欄位窮舉的清單。"
+        )
+    )
+
+    @classmethod
+    def from_issues(cls, issues: list[ValidationIssue]) -> CandidateValidationResponse:
+        """由驗證服務的判定建出回應。
+
+        `valid` **由 `issues` 導出**,不接受呼叫端另行賦值:兩者若能各自給值,遲早
+        出現 `valid: true` 卻帶著 issues(或反之)的回應,而前端只會信其中一個。
+        """
+        return cls(
+            valid=not issues,
+            issues=[ValidationIssueEntry.from_domain(issue) for issue in issues],
+        )
+
+
 # --- 端點 ---------------------------------------------------------------
 
 
@@ -306,6 +405,28 @@ def read_black_move(body: MoveSequenceRequest, service: Service) -> BlackMoveRes
     return BlackMoveResponse.from_domain(
         service.black_reply(body.position_id, body.moves)
     )
+
+
+@router.post("/editor/validate")
+def validate_candidate(
+    body: CandidatePositionRequest, editor: Editor
+) -> CandidateValidationResponse:
+    """候選題目的權威驗證:題目 schema 與引擎可載入性(corpus-editor 4.7、4.8)。
+
+    **回應恆為 200**,不合格以 `valid: false` 與 `issues` 表達 —— 見模組說明的
+    「未通過是『結果』,不是錯誤」。
+
+    本函式**刻意不攔任何例外**:池滿、逾時、引擎崩潰由 `EditorService` 原樣往上拋,
+    交給既有的 `_handle_service_error` 回既有的 `{code, message}` 形狀。收斂成
+    `valid: false` 等於誣賴一份可能完全沒問題的題目,收斂成 `valid: true` 則會讓
+    一份根本沒驗過的題目直接被寫進題庫(4.9)。
+
+    `body` 宣告為**主體參數**,FEN 的字元把關因此在本函式被呼叫**之前**就跑完了 ——
+    到得了這一行的 FEN 都已經跳不出那一行 UCI 指令,連「借一個引擎」都沒機會被不
+    合格的輸入觸發(9.1)。候選題目的**欄位**則原樣傳下去:schema 的權威在題庫模組,
+    此處一個欄位也不看。
+    """
+    return CandidateValidationResponse.from_issues(editor.validate(body.position))
 
 
 # --- 錯誤映射 -----------------------------------------------------------
@@ -476,7 +597,7 @@ def _configure_threadpool(pool_size: int) -> CapacityLimiter:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """啟動掛鉤建立題庫索引與引擎池,關閉掛鉤釋放全部引擎進程。
+    """啟動掛鉤建立題庫索引、引擎池與兩個服務,關閉掛鉤釋放全部引擎進程。
 
     題庫掃描與引擎啟動都是阻塞操作,此處直接同步執行:啟動期間尚無請求可服務,
     讓它們阻塞事件迴圈沒有代價,而任一失敗都應該直接使服務拒絕啟動(題庫 schema
@@ -500,6 +621,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.repository = repository
     app.state.pool = pool
     app.state.service = GameService(repository, pool, settings)
+    # 驗證服務與對局服務共用**同一個**引擎池:池是本服務唯一的併發閘門,收題若另
+    # 開一池,忙碌的語意就分裂成兩套,而 `SERVICE_BUSY` 只描述得了其中一套。它不
+    # 持有題庫 —— 候選題目還不在任何檔案裡,驗證只看送進來的那一份。
+    app.state.editor = EditorService(pool, settings)
     app.state.threadpool_limiter = _configure_threadpool(settings.pool_size)
     try:
         yield
@@ -523,6 +648,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.repository = None
     app.state.pool = None
     app.state.service = None
+    app.state.editor = None
     app.state.threadpool_limiter = None
 
     app.include_router(router)
