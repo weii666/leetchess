@@ -151,6 +151,20 @@
   --gap: 24px;
   --radius: 8px;
 
+  /*
+   * 小元件的圓角(標籤 chip 與各種按鈕),**與另一頁共用**
+   * (`tests/test_web_list.py` 的 `SHARED_CUSTOM_PROPERTIES` 比對兩頁的值)。
+   *
+   * 與 `--radius`(8px,卡片與面板)成對:大塊用 8、小元件用 6。原本六處各寫一次
+   * `6px` 字面 —— 標籤 chip 是同一個東西在兩頁上的兩份實作,調了一邊而忘了另一邊,
+   * 同一題在列表與對局頁就會長得不一樣,而那正是沒有測試會自然抓到的一種錯。
+   *
+   * **內距不在共用之列,而且刻意不同**:列表 12.5px 的字配 `2px 8px`,對局頁 16px
+   * 的字配 `2px 10px`。內距跟著字級走是對的,強制一致會重蹈 `--chip-font-size` 的
+   * 覆轍(見 `--tag-bg`)。圓角是形狀語言,不隨字級變 —— 兩者性質不同。
+   */
+  --radius-sm: 6px;
+
   /* 一列讀得完的寬度上界。超過這個寬度,兩端的欄位就離得太遠了。 */
   --list-max-width: 880px;
 }
@@ -441,7 +455,7 @@ h1 {
  */
 .position-tag {
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--tag-bg);
   color: var(--text);
   font-size: var(--chip-font-size);
@@ -489,7 +503,7 @@ h1 {
   font-size: 14px;
   padding: 8px 16px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--chip-bg);
   color: var(--text);
   cursor: pointer;

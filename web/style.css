@@ -76,6 +76,20 @@
   --radius: 8px;
 
   /*
+   * 小元件的圓角(標籤 chip 與各種按鈕),**與另一頁共用**
+   * (`tests/test_web_list.py` 的 `SHARED_CUSTOM_PROPERTIES` 比對兩頁的值)。
+   *
+   * 與 `--radius`(8px,卡片與面板)成對:大塊用 8、小元件用 6。原本六處各寫一次
+   * `6px` 字面 —— 標籤 chip 是同一個東西在兩頁上的兩份實作,調了一邊而忘了另一邊,
+   * 同一題在列表與對局頁就會長得不一樣,而那正是沒有測試會自然抓到的一種錯。
+   *
+   * **內距不在共用之列,而且刻意不同**:列表 12.5px 的字配 `2px 8px`,對局頁 16px
+   * 的字配 `2px 10px`。內距跟著字級走是對的,強制一致會重蹈 `--chip-font-size` 的
+   * 覆轍(見 `--tag-bg`)。圓角是形狀語言,不隨字級變 —— 兩者性質不同。
+   */
+  --radius-sm: 6px;
+
+  /*
    * 側欄的垂直節奏,**只有兩個值**:同一組之內 8px、組與組之間 16px。
    *
    * 側欄是一疊高矮不一的東西(返回連結、標題、題目資訊、輪方、信號、控制項、著法
@@ -345,11 +359,12 @@ body {
  * 一串逗號分隔的字。
  *
  * chip 的**顏色與形狀必須與列表的 `.position-tag` 一致** —— 同一題在兩頁長得不一樣
- * 的話,使用者會以為自己點錯了題。底色走共用的自訂屬性(`--tag-bg`,由
- * `tests/test_web_list.py` 的 `SHARED_CUSTOM_PROPERTIES` 比對兩頁的值);圓角與內距
- * 是兩份樣式表各寫一次的字面值,改動時**兩邊都要改**。
+ * 的話,使用者會以為自己點錯了題。底色與圓角都走共用的自訂屬性(`--tag-bg`、
+ * `--radius-sm`,由 `tests/test_web_list.py` 的 `SHARED_CUSTOM_PROPERTIES` 比對兩頁
+ * 的值),漂了會轉紅。
  *
- * **字級刻意不同**:列表 12.5px、這裡 16px。尺寸由所在的版面決定,見 `--tag-bg`。
+ * **字級與內距刻意不同**:列表 12.5px 的字配 `2px 8px`,這裡 16px 的字配 `2px 10px`。
+ * 尺寸由所在的版面決定,理由見 `--tag-bg` 與 `--radius-sm`。
  *
  * class 名刻意不同(`.puzzle-tag` 對 `.position-tag`):列表的 chip 是列的一部分,
  * 這裡是側欄的一行,兩者的容器與間距規則本來就不一樣,共用 class 只會讓其中一頁的
@@ -375,7 +390,7 @@ body {
   font-size: var(--text-base);
   padding: 3px 10px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--panel-bg);
   color: var(--text-muted);
   cursor: pointer;
@@ -424,7 +439,7 @@ body {
 #puzzle-tags .puzzle-tag {
   /* 內距隨字級一起放大,否則 16px 的字擠在 12.5px 時代的留白裡會顯得緊。 */
   padding: 2px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--tag-bg);
   color: var(--text);
   /* 與難度同級(見 `#puzzle-difficulty`)—— 兩者是同一組資訊。 */
@@ -515,7 +530,7 @@ body {
   font-size: var(--text-base);
   padding: 8px 16px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: #4a4a4a;
   color: var(--text);
   cursor: pointer;
@@ -548,7 +563,7 @@ body {
   font-weight: 700;
   padding: 8px 16px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--accent);
   color: var(--page-bg);
   text-decoration: none;
