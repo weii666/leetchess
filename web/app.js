@@ -39,6 +39,7 @@
 
 import { renderBoard } from './board.js';
 import { loadCatalog } from './catalog.js';
+import { readDifficulty } from './difficulty.js';
 import { applyMove, parseFen } from './fen.js';
 import { createGame } from './game.js';
 import { uci2cn } from './notation.js';
@@ -183,8 +184,32 @@ const MATE_OUTCOMES = Object.freeze({
  */
 const GAME_OVER_READING = '對局結束';
 
-/** 還沒有任何一手應手時的信號 —— 這不是「未知」,是根本還沒問過。 */
-const NO_SIGNAL_YET = '尚未取得';
+/**
+ * 還沒有任何一手應手時的信號。
+ *
+ * **刻意與 `SIGNAL_LABELS.unknown` 是同一個字串**,而且是同一個值而非兩個相同的
+ * 字面 —— 兩者在程式上確實是兩種狀態(那個是引擎答了但沒給 mate,這個是還沒問過),
+ * 但對使用者都是「現在沒有讀數」,沒有理由用兩種說法。寫成兩個字面的話,改其中
+ * 一個就會讓畫面上出現兩句意思相同、字卻差一點的話,那讀起來像錯字。
+ *
+ * ## 為什麼是「未知」而不是「未明」或「難料」
+ *
+ * 三者都比原本的「尚未取得」好 —— 那句講的是**取資料**這件事(取得了沒?),是給
+ * 工程師看請求狀態的話,不是給使用者看盤面的話。但三者不等價:
+ *
+ * - 「難料」說的是這個局面**不好判斷**;
+ * - 「未明」說的是勝負**還沒分出來**;
+ * - 「未知」說的是**我們不知道**。
+ *
+ * 前兩者都在陳述局面的性質,而排局的勝負**早就是定的** —— 一題 mate in 16 的殺局,
+ * 紅方的勝負在出題時就已經確定,只是我們還沒算。對這樣的局面說「勝負未明」或
+ * 「難料」是不實的;只有「未知」講的是我們這一端的無知,那才永遠為真。
+ *
+ * 同理**不能寫成「各有千秋」「勢均力敵」**:那是斷言雙方相當,而這裡連問都還沒問過。
+ * steering 的第二個不可動搖約束要求信號寧可誠實地說不知道,也不得從 `cp` 推斷勝負
+ * 傾向;無中生有地說「相當」比據 `cp` 推斷走得更遠。
+ */
+const NO_SIGNAL_YET = SIGNAL_LABELS.unknown;
 
 /**
  * 信號區的註記,讓使用者辨識它是**參考資訊而非勝負判決**(requirements 4.4)。
@@ -232,6 +257,8 @@ const elements = {
   sidebar: document.getElementById('sidebar'),
   title: document.getElementById('puzzle-title'),
   source: document.getElementById('puzzle-source'),
+  difficulty: document.getElementById('puzzle-difficulty'),
+  tags: document.getElementById('puzzle-tags'),
   turn: document.getElementById('turn'),
   signal: document.getElementById('signal'),
   error: document.getElementById('error'),
@@ -341,6 +368,25 @@ function noPuzzleTitle(state) {
 }
 
 /**
+ * 側欄標題的字面:「題號 + 點 + 空格 + 局名」,例如 `21. 盡善克終`。
+ *
+ * 與列表同一個形態(`web/list.js` 的 `${position.id}.` 加局名),使用者從列表點進來
+ * 看到的是同一個字串,一眼就確認自己開對了題。**點是分隔符而不是贅字。**
+ *
+ * 列表把題號與局名切成兩欄(那裡要讓一整排的點對齊成直線),這裡只有一行,故直接
+ * 串成一個字串,不另立元素 —— `#puzzle-title` 是頁面唯一的 `<h1>`,拆成兩個節點
+ * 只會讓螢幕閱讀器把標題唸成兩段。
+ *
+ * 題號缺漏時只給局名,不畫出「undefined.」或一個孤零零的點。實務上不會發生
+ * (`GET /api/positions/{id}` 一定帶 `id`),但標題是這一頁最顯眼的一行,寧可少一
+ * 個題號也不要在上面印出一個壞掉的字串。
+ */
+function puzzleHeading(id, title) {
+  const name = title || '(未命名)';
+  return id != null ? `${id}. ${name}` : name;
+}
+
+/**
  * 側欄的題目資訊(requirements 1.2)。**現在只有局名與出處。**
  *
  * `state.position.max_dtm` 刻意**不取用**。它在回應裡照常存在(後端一個字沒改,
@@ -355,11 +401,77 @@ function renderPuzzleInfo(state) {
   if (!state.position) {
     elements.title.textContent = noPuzzleTitle(state);
     elements.source.textContent = BLANK;
+    // 兩行整條收起來,不填佔位符號:側欄是直向堆疊的,一個只有「—」的空行只會讓
+    // 下面的東西無故往下掉一格。
+    hideLine(elements.difficulty);
+    hideLine(elements.tags);
     return;
   }
-  const { title, source } = state.position;
-  elements.title.textContent = title || '(未命名)';
+  const { id, title, source, difficulty, tags } = state.position;
+  elements.title.textContent = puzzleHeading(id, title);
   elements.source.textContent = source || BLANK;
+  renderDifficulty(difficulty);
+  renderTags(tags);
+}
+
+/** 清空一行題目資訊並收起來。 */
+function hideLine(line) {
+  line.replaceChildren();
+  line.hidden = true;
+}
+
+/**
+ * 難度那一行(與列表同一組說法與顏色)。
+ *
+ * `data-level` 是上色的掛勾,**本檔不碰顏色** —— 與列表同樣的分工(`web/list.js`
+ * 的 `difficultyCell`),呈現層裡的顏色屬樣式表。認不得的值(0、4、`null`、欄位
+ * 不存在)一律原樣顯示、不上 `data-level`,理由見 `difficulty.js`。
+ *
+ * 值不存在時整行收起來,而不是顯示佔位符號:列表上難度是固定的一欄,空了會讓那一列
+ * 看起來少一項,故留佔位;側欄沒有欄的概念,收起來就好。
+ */
+function renderDifficulty(value) {
+  const line = elements.difficulty;
+  if (value == null) {
+    hideLine(line);
+    return;
+  }
+  const { text, level } = readDifficulty(value, BLANK);
+  if (level !== null) {
+    line.dataset.level = level;
+  } else {
+    delete line.dataset.level;
+  }
+  line.textContent = text;
+  line.hidden = false;
+}
+
+/**
+ * 標籤那一行 —— 殺法名(「臥槽馬」「雙馬飲泉」),這個服務最獨特的部分。
+ *
+ * chip 的外觀與列表一致(`--tag-bg`、`--chip-font-size` 是兩頁共用的自訂屬性),
+ * 但 class 名不同:列表的 `.position-tag` 是列的一部分,這裡是側欄的一行,兩份
+ * 樣式表各自持有自己的規則。
+ *
+ * 沒有標籤時整行收起來。列表在那種情形下留一個「—」,因為那一欄空掉會讓整列看起來
+ * 少一項;側欄沒有這個問題,一行「—」反而像資料壞了。
+ */
+function renderTags(tags) {
+  const line = elements.tags;
+  const labels = Array.isArray(tags) ? tags : [];
+  if (labels.length === 0) {
+    hideLine(line);
+    return;
+  }
+  line.replaceChildren(
+    ...labels.map((label) => {
+      const chip = document.createElement('span');
+      chip.className = 'puzzle-tag';
+      chip.textContent = label;
+      return chip;
+    }),
+  );
+  line.hidden = false;
 }
 
 /**

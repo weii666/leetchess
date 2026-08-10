@@ -318,10 +318,14 @@ def wait_for_reply(page) -> None:
 
 
 def test_the_title_and_source_are_shown(play_page) -> None:
-    """載入完成後顯示局名與出處(1.2)。"""
+    """載入完成後顯示題號、局名與出處(1.2)。
+
+    標題的字面是「題號 + 點 + 空格 + 局名」,與列表同一個形態 —— 從列表點進來看到
+    的是同一個字串,一眼就確認自己開對了題。
+    """
     open_game(play_page)
 
-    assert text_of(play_page, "#puzzle-title") == "適情雅趣 第 21 局"
+    assert text_of(play_page, "#puzzle-title") == "1. 適情雅趣 第 21 局"
     assert "適情雅趣" in text_of(play_page, "#puzzle-source")
 
 

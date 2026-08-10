@@ -30,7 +30,25 @@
       後端**沒有改**:`GET /api/positions/{id}` 照常回 `max_dtm`(那是資料契約,
       corpus-verification 要回填它),只是前端不再顯示。
     -->
+    <!--
+      題目資訊是三行:出處、難度、標籤。**各佔一行,不以分隔點併行** —— 三者都是
+      長度不定的東西(標籤尤其:數量與字數都不定),併成一行會在窄側欄裡折行,而
+      折行後的分隔點會落在行首,看起來像沒寫完的句子。
+
+      難度與標籤都是使用者在列表上選題時就看到的東西,進了對局頁卻消失的話,會讓人
+      以為自己點錯了題。標籤(殺法名)更是這個服務最獨特的部分。
+
+      說法、顏色與 chip 外觀都與列表共用:`web/difficulty.js` 出難度的說法與退路,
+      `style.css` 與 `list.css` 共用難度三色與 `--tag-bg`、`--chip-font-size`
+      (`tests/test_web_list.py` 的 `SHARED_CUSTOM_PROPERTIES` 比對兩頁的值)。
+      同一題在兩頁必須長得一樣。
+
+      沒有難度或沒有標籤時整行 `hidden`,不留空行也不填佔位符號 —— 側欄是直向堆疊的,
+      一個空行只會讓下面的東西無故往下掉一格。
+    -->
     <p id="puzzle-meta"><span id="puzzle-source">—</span></p>
+    <p id="puzzle-difficulty" hidden></p>
+    <p id="puzzle-tags" hidden></p>
   </section>
 
   <!--
@@ -48,8 +66,12 @@
     三態諮詢信號。它是參考資訊而非勝負判決(4.4),故標為 note 而非 status:
     對局是否結束只看後端回應,信號為任何值都不得使對局提早停下。
     **`role` 不得改成 `status`** —— 4.4 的語意層就靠這一個屬性。
+
+    靜態初值原本是 POC 沿用下來的「勝負難料」,已改為與 `app.js` 一致的「勝負未知」。
+    那一格在 JS 接手前就會被使用者看見(載入題目的那段時間),兩處用詞不同的話,
+    畫面會在無人操作的情況下自己換一次說法。用詞的取捨見 `app.js` 的 `NO_SIGNAL_YET`。
   -->
-  <section id="signal" role="note">勝負難料</section>
+  <section id="signal" role="note">勝負未知</section>
 
   <!--
     這裡曾有一個 `<p id="waiting" hidden>引擎思考中…</p>`。**已整條移除**(使用者
@@ -84,8 +106,17 @@
     <button id="reset" type="button">重來</button>
   </div>
 
+  <!--
+    標題是「著法記錄」而不是「歷史著法」。後者的「歷史」是名詞修飾,讀起來像「古代
+    的著法」,而這一區其實是「本局走過的著法」。「著法」是象棋對一步棋的正式說法,
+    「記錄」點出它是一份逐手的清單。
+
+    **規格文件仍以「歷史著法」稱呼這一區**(`.kiro/specs/web-play-runtime/` 與
+    `problem-browser/` 共七份,程式與測試的註解亦然)。那是功能的名字,這裡改的只是
+    使用者看到的標籤 —— 兩者不必同名,但看到這行差異時不必懷疑是誰漏改了。
+  -->
   <section id="moves-panel">
-    <h2>歷史著法</h2>
+    <h2>著法記錄</h2>
     <ol id="moves"></ol>
   </section>
 </aside>

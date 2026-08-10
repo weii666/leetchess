@@ -48,6 +48,27 @@
   --accent: #ffd479;
   --line: #6b5433;
 
+  /*
+   * 難度三色。**與 `list.css` 共用**(`tests/test_web_list.py` 的
+   * `SHARED_CUSTOM_PROPERTIES` 會比對兩頁的值)—— 同一題在列表與對局頁必須是同一
+   * 個顏色,否則使用者會以為自己點錯了題。
+   *
+   * 色相取自 leetcode 的青 / 琥珀 / 紅,但**不能照抄它的色碼**:那是白底的,同一組
+   * 色搬到深色底會整體偏暗。三色都沿原色相往上提亮到「還看得出是那個顏色」為止,
+   * 括號裡是對列底 `--panel-bg` 的實測對比。困難是唯一低於 AA 的一個,取捨的理由
+   * 寫在 `list.css`(那裡是這三個值的主要出處)。
+   */
+  --difficulty-easy-text: #3fd0c9; /* 6.00:1 */
+  --difficulty-medium-text: #ffc01e; /* 6.94:1 */
+  --difficulty-hard-text: #ff6363; /* 3.91:1 */
+
+  /*
+   * 標籤 chip 的底色與字級,**同樣與 `list.css` 共用**。取值的理由(要同時對付一般
+   * 列底與已完成列底兩個背景、上界由文字對比決定)寫在 `list.css`,那裡是主要出處。
+   */
+  --tag-bg: #616161;
+  --chip-font-size: 12.5px;
+
   --gap: 24px;
   --radius: 8px;
 
@@ -195,13 +216,74 @@ body {
 }
 
 /*
- * `#puzzle-meta` 那一行現在**只剩出處**,不再需要任何自己的規則 —— 上面兩條
- * (`#puzzle-info p` 的字級與 `#puzzle-info span` 的亮色)就是它的全部樣式。
+ * 題目資訊是三行:`#puzzle-meta`(出處)、`#puzzle-difficulty`、`#puzzle-tags`。
  *
- * 這裡原本還有 `.puzzle-meta-sep`(出處與最長殺著之間那個分隔點)。最長殺著整組
- * 移除之後,分隔點與它的規則一起消失 —— **不是精簡版面,是它對使用者劇透**:
- * 預告這題幾步殺得完,而排局練習的價值在於自己找出殺法。
+ * **各佔一行,沒有分隔點。** 中途試過「出處 · 難度」併成一行,但三者都是長度不定的
+ * 東西(標籤尤其:數量與字數都不定),在窄側欄裡會折行,而折行後的分隔點會落在行首,
+ * 看起來像沒寫完的句子。
+ *
+ * 這裡原本還有最長殺著距離,已整組移除 —— **不是精簡版面,是它對使用者劇透**:
+ * 預告這題幾步殺得完,而排局練習的價值在於自己找出殺法。難度與標籤不同,它們在列表
+ * 上每一列都看得到,是選題的依據而非答案的一部分。
  */
+
+/*
+ * 難度是**一個帶顏色的詞**,與列表同一個形態:沒有底色、沒有圓角,顏色由
+ * `data-level` 決定。說法(`Easy` / `Medium` / `Hard`)出自 `web/difficulty.js`,
+ * 兩頁共用。
+ *
+ * **沒有基底的顏色規則** —— 認不得的難度(0、4)走的是上面 `#puzzle-info p` 的
+ * 次要色,那正是要的結果。多寫一條 `#puzzle-difficulty { color: … }` 反而會輸給
+ * `#puzzle-info p`(前者 (1,0,0),後者 (1,0,1)),寫了也不生效。三個合法分級因為
+ * 多了屬性選擇器((1,1,0))才蓋得過去。
+ */
+#puzzle-difficulty {
+  font-weight: 600;
+}
+
+/* 1 = 簡單、2 = 中等、3 = 困難(`.kiro/steering/structure.md` 的題目 schema)。 */
+#puzzle-difficulty[data-level='1'] {
+  color: var(--difficulty-easy-text);
+}
+
+#puzzle-difficulty[data-level='2'] {
+  color: var(--difficulty-medium-text);
+}
+
+#puzzle-difficulty[data-level='3'] {
+  color: var(--difficulty-hard-text);
+}
+
+/*
+ * 標籤那一行。殺法名是這個服務最獨特的部分,故與列表一樣做成有底色的 chip 而不是
+ * 一串逗號分隔的字。
+ *
+ * chip 的**外觀必須與列表的 `.position-tag` 一致** —— 同一題在兩頁長得不一樣的話,
+ * 使用者會以為自己點錯了題。底色與字級走共用的自訂屬性(`--tag-bg`、
+ * `--chip-font-size`,由 `tests/test_web_list.py` 的 `SHARED_CUSTOM_PROPERTIES`
+ * 比對兩頁的值);圓角與內距則是兩份樣式表各寫一次的字面值,改動時**兩邊都要改**。
+ *
+ * class 名刻意不同(`.puzzle-tag` 對 `.position-tag`):列表的 chip 是列的一部分,
+ * 這裡是側欄的一行,兩者的容器與間距規則本來就不一樣,共用 class 只會讓其中一頁的
+ * 版面規則洩到另一頁。
+ *
+ * `#puzzle-tags .puzzle-tag` 的 id 前綴是為了優先度:單靠 `.puzzle-tag`((0,1,0))
+ * 蓋不過 `#puzzle-info p`((1,0,1))的字級與次要色。
+ */
+#puzzle-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#puzzle-tags .puzzle-tag {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--tag-bg);
+  color: var(--text);
+  font-size: var(--chip-font-size);
+  line-height: 1.6;
+}
 
 /* 當前輪方(requirements 8.4)—— 側欄裡最該一眼看到的一行。 */
 #turn {

@@ -45,6 +45,8 @@ REQUIRED_ELEMENT_IDS = [
     "board",  # 盤面(3.1、3.2)
     "puzzle-title",  # 局名(4.3)
     "puzzle-source",  # 出處(4.3)
+    "puzzle-difficulty",  # 難度,與列表同一組說法與顏色
+    "puzzle-tags",  # 標籤(殺法名),chip 外觀與列表一致
     # `puzzle-max-dtm` **已移除**:最長殺著距離對使用者是劇透,見 requirements 1.3。
     "turn",  # 當前輪方,8.4 要求可辨識(4.3)
     "signal",  # 三態諮詢信號(4.4)

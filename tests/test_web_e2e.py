@@ -452,7 +452,9 @@ def test_the_whole_puzzle_is_played_to_a_red_win_against_the_real_service(
     page.wait_for_selector("#board svg .piece")
 
     # 題目資訊來自真實題庫,不是夾具寫的常數。
-    assert text_of(page, "#puzzle-title") == PUZZLE_TITLE
+    # 標題是「題號 + 點 + 空格 + 局名」,與列表同一個形態(`web/app.js` 的
+    # `puzzleHeading`)—— 從列表點進來看到的是同一組資訊。
+    assert text_of(page, "#puzzle-title") == f"{PUZZLE_ID}. {PUZZLE_TITLE}"
     assert text_of(page, "#puzzle-source") == PUZZLE_SOURCE
     # 最長殺著距離**不得出現**(1.3 已推翻:那是劇透)。此刻 `#moves` 還是空的,
     # 側欄上除了題目資訊沒有別的數字,「16」出現就只可能是它。
@@ -741,7 +743,7 @@ def test_a_position_is_picked_from_the_list_played_and_returned_from(
     assert urlsplit(page.url).path == PLAY_PATH
     assert urlsplit(page.url).query == f"id={PUZZLE_ID}"
     # 載入的**確實是那一題**:題目資訊全部取自真實題庫,不是本檔寫死的常數。
-    assert text_of(page, "#puzzle-title") == chosen["title"]
+    assert text_of(page, "#puzzle-title") == f"{chosen['id']}. {chosen['title']}"
     assert text_of(page, "#puzzle-source") == chosen["source"]
     # 描述**不再呈現**(problem-browser 4.5 修訂):真實題庫的 description 就是
     # 「出處 + 局號 + 局名」的串接,與上面兩行完全重複。這裡以真實題庫自己的那串字
