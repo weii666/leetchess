@@ -31,7 +31,7 @@
   - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5_
   - _Boundary: service/models.py_
 
-- [ ] 2.3 候選題目的驗證服務
+- [x] 2.3 候選題目的驗證服務
   - 新增與對局服務同層的驗證服務,依序執行兩道檢查:題目 schema,而後向引擎確認該 FEN 可載入
   - schema 未通過時**不借引擎** —— 欄位都不對的題目沒有問到引擎的必要
   - 驗證結果以「未通過項目的清單」表達,每一項可定位到欄位;空清單代表合格
@@ -181,6 +181,9 @@
 - **2.2**:`fen` 缺欄位或非字串時,字元把關**刻意放行**,交由 `validate_position()` 以 schema 的說法回報。已驗證沒有任何路徑能讓非字串抵達引擎:`_read_str()` 與 `_check_fields()` 都在借引擎之前擋下,含 `{"fen": ["a\nquit"]}` 這種 f-string 插值會嵌入換行的形狀。
 - **2.2**:`validate_fen(value: str)` 的型別窄於 `validate_move(value: Any)`。目前唯一呼叫端有 `isinstance` 前置檢查所以不可達;**2.3 / 2.4 若新增呼叫端,非字串會走成 500 而非 400**,屆時要麼加 isinstance 要麼放寬簽章。
 - **2.4 待辦**:design 的 Testing Strategy Integration Test 1(引擎替身零次借用)歸屬 `tests/test_editor_endpoint.py`,本輪 2.2 未涵蓋,2.4 必須補。
+- **2.3(實測,勿再重查)**:真實 Pikafish **不會**被畸形 FEN 弄死。已量測 11 列(真實局面加一列 → 44 個著法)、11 列全空、3 列、每列超寬、九個帥、欄位不足、fullmove 0 —— 七種輸入之後 `is_healthy()` 全為 True。曾有一份實作報告宣稱 11 列 FEN 會讓引擎靜默退出並毒掉池槽,**該說法不成立**,程式與測試都沒有依賴它。`engine/pool.py::_release()` 不檢查健康是既有缺口(engine-service 任務 2.5,其筆記第 222 行已載),corpus-editor **並未**讓它變得可觸發。
+- **2.3**:候選題目有多個 schema 問題時只回傳**一個** issue(`validate_position` 遇到第一個就拋)。`缺少必填欄位:id、title` 只歸屬到 `id`。2.4 與前端不得假設逐欄位窮舉回報。
+- **2.3**:欄位歸屬是對 `positions.py` 錯誤訊息的正則比對,只會退化成 `None`,不會錯歸(抽出的名字必須在 `KNOWN_FIELDS` 內)。措辭漂移會讓 `FIELD_ATTRIBUTION` 表轉紅。
 
 ## 刻意接受的覆蓋缺口
 
