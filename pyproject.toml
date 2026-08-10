@@ -27,6 +27,12 @@ dev = [
 # 將專案根加入 sys.path,測試才能 `import service`。
 pythonpath = ["."]
 
+# `mutants/` 是 mutmut 產出的整份專案副本,裡面有一份 `tests/conftest.py` 的複本。
+# 不排除的話,跑完變異測試之後單純的 `uv run pytest` 會因為同一個 `--slow` 選項被
+# 註冊兩次而整個中止,錯誤訊息(`option names {'--slow'} already added`)完全看不出
+# 與 mutmut 有關。
+norecursedirs = ["mutants", ".venv", "web", "poc"]
+
 # 少數測試必須真的等滿某個逾時上界才有意義,無法靠縮短參數加速。它們在開發期
 # 每次跑都在浪費等待,故預設排除;上線前與 CI 以 `--slow` 跑完整套。
 #
@@ -36,6 +42,29 @@ addopts = "-m 'not slow'"
 markers = [
     "slow: 需要真的等滿逾時上界的測試,預設跳過,加 --slow 才跑",
 ]
+
+[tool.mutmut]
+# 變異測試:`tests/disabled.txt` 的進入判準就靠這個閘門產生。
+#
+#   uv run --with mutmut mutmut run        產生並執行全部變異體(約 30 分鐘)
+#   uv run --with mutmut mutmut results    列出存活(=沒有任何測試抓得到)的變異體
+#
+# mutmut 不列入 dev 依賴,以 `--with` 臨時取得 —— 它不是跑測試的必要條件,只在
+# 檢討測試強度時才用得到。
+#
+# `also_copy` 必須列出 positions/、engine/、web/:mutmut 把專案複製到 `mutants/`
+# 之後在該目錄下執行,而 `service/config.py` 的 PROJECT_ROOT 取自 `__file__`,
+# 因此解析到的是副本的根。少了任何一個,對應的測試會在副本裡整批失敗。
+#
+# `service/game.py` 排除在外的理由見下方註記。
+source_paths = ["service"]
+also_copy = ["positions", "engine", "web"]
+
+# 已知的測量誤差:`engine/pool.py` 與 `engine/process.py` 的逾時與併發測試對時序
+# 敏感,同一個變異體在不同次執行可能被判為殺或存活。實測誤差約 ±3 個變異體,而且
+# 出現過「測試變少反而多殺」這種邏輯上不可能的結果。這兩個模組的存活清單要當成
+# 有雜訊的量測,不是精確值;判斷某個變異體是否真的殺不掉,請用固定的
+# MUTANT_UNDER_TEST 單獨重跑確認,不要只看一次全量結果。
 
 [tool.uv]
 # 明確宣告非套件模式:uv sync 只安裝依賴,不建置本專案本身。
