@@ -157,6 +157,7 @@ service/
 └── editor.py                 # 候選題目的權威驗證。與 game.py 同層,唯讀
 
 tests/
+├── test_web_editor_page.py    # 收題頁可由網址取得,且既有頁面與端點不受影響
 ├── test_editor_service.py     # service/editor.py 與 validate_position()
 ├── test_editor_endpoint.py    # 驗證端點,含 FEN 字元把關的拒絕路徑
 ├── test_web_editor_pure.py    # check.js 與 corpus-file.js 的純函式,經 page.evaluate()

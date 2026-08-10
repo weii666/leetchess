@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>收題工具</title>
+<!--
+  圖示走 `../`:本頁比兩個產品頁**深一層**,`./favicon.svg` 在這裡指的是
+  `web/editor/favicon.svg`,那個檔案不存在。同一件事對後續任務同樣成立 ——
+  本目錄自己的 `editor.css` 與 `editor.js` 用 `./`,`web/` 底下的共用模組
+  (`board.js`、`fen.js`、`difficulty.js`、`api.js`)一律 `../`。
+-->
+<link rel="icon" href="../favicon.svg">
+</head>
+<body>
+<!--
+  收題工具的頁面。**這是題庫維護者的工具,不是產品功能。**
+
+  ## 為什麼是 `web/editor/index.html`
+
+  收題頁的檔案集中在這一個目錄裡(design 的 File Structure Plan):版面、樣式、
+  組裝與純函式全都住在此,與 `web/` 底下的產品頁面互不牽動。**服務端因此一個字
+  都不必改** —— `service/main.py` 以 `StaticFiles(html=True)` 把 `web/` 掛在根
+  路徑上,目錄請求會落到該目錄的 `index.html`,`/editor/` 這個位址完全由檔案佈局
+  決定。既有的靜態檔掛載規則(含 `_WebFiles` 對 `/api` 的遮蔽)一律不變:收題頁
+  是普通靜態內容,不需要任何特殊待遇。
+
+  換句話說,**把這個檔案搬走或改名,這個工具就消失了** —— 沒有任何一條路由指著
+  它。`tests/test_web_editor_page.py` 釘住的就是這件事。
+
+  ## 這一頁刻意沒有入口,也刻意沒有存取控制
+
+  題庫列表頁與對局頁**不得**加上任何指向本頁的連結、按鈕或其他入口(requirement
+  1.2,由 `tests/test_web_editor_entry.py` 反向釘住)。網址是唯一的到達方式,而
+  這正是要的:一般使用者不會在產品的導覽動線上誤入維護工具。
+
+  沒有入口**不等於**這是防護手段,兩者不可混為一談。本頁不設任何存取控制,理由是
+  它根本沒有能力可濫用:寫檔一律在瀏覽器端進行,寫得到的只有使用者自己以系統對話
+  框選定的本機目錄,**伺服器的題庫碰不到** —— 服務端不存在任何寫入題庫的程式碼
+  路徑,上線題庫只經由 git commit 進版本庫(design 的 Security Considerations)。
+  因此不要為了「保護」這一頁而回頭加開關或登入:那擋不到本來就不存在的能力,卻會
+  讓本機開發多一道沒有意義的手續。
+
+  ## 目前只有容器
+
+  版面(左盤右表單)、表單欄位、繪盤與寫入流程分屬後續任務,它們**都改得到本檔**,
+  故此處不預先擺出任何等著被填的空殼。同理不連上 `editor.css` 與 `editor.js` ——
+  兩者尚不存在,先寫上去只會讓每次載入都吞一個 404。
+-->
+<h1>收題工具</h1>
+<p>本頁供題庫維護者收題之用,不在產品的導覽動線上。</p>
+</body>
+</html>
