@@ -22,6 +22,17 @@ POC 的 `/api/state?moves=...` 在長局會使 URL 過長,這是本 spec 明列�
 `INVALID_MOVE_FORMAT`(400)拿不到。非這兩類的例外會原樣往外傳,交由任務 4.3 的
 全域例外處理器映射為錯誤類別碼。
 
+## 送往引擎的 FEN 只做字元把關,不做文法驗證
+
+`CandidatePositionRequest` 是專案中第一條**使用者文字進到引擎輸入**的路徑。引擎協定
+行導向,而 `engine/process.py` 的 `_position_command()` 是裸的字串插值 —— FEN 裡一個
+換行就能把一行指令變成兩行。把關因此與著法格式驗證同位置、同錯誤類別:寫在請求模型
+上,攔在路由函式之前(9.1–9.4)。
+
+把關**刻意止於「這個字串跳不出這一行指令」**:局面合不合法由引擎判定,在此重做一份
+FEN 文法只會製造第二個真相來源與誤擋(9.5)。通過側的正確性以題庫中每一個真實 FEN
+作為回歸樣本,見 `tests/test_models.py`。
+
 ## 空值一律保留欄位,不省略
 
 回應模型不設 `exclude_none`,任何可為空的欄位(`mate_in`、`winner`、`max_dtm`、
@@ -41,8 +52,12 @@ from service.types import BlackReply, GameState, Position, Side, Signal
 
 __all__ = [
     "UCI_MOVE_PATTERN",
+    "FEN_PATTERN",
+    "MAX_FEN_LENGTH",
     "validate_move",
+    "validate_fen",
     "MoveSequenceRequest",
+    "CandidatePositionRequest",
     "GameStateResponse",
     "BlackMoveResponse",
     "PositionResponse",
@@ -53,6 +68,24 @@ __all__ = [
 #: 例:炮二平五 = `h2e2`。見 `.kiro/steering/tech.md` 的「走法格式」。
 #: 象棋沒有升變也沒有王車易位,故著法恆為四個字元,不存在後綴。
 UCI_MOVE_PATTERN = re.compile(r"[a-i][0-9][a-i][0-9]")
+
+#: FEN 可出現的字元:英文字母、數字、`/`、空白、`-`。**不含任何控制字元** ——
+#: 引擎協定是行導向的,`engine/process.py` 的 `_position_command()` 又是裸的字串
+#: 插值(`f"position fen {fen}"`),FEN 裡一個換行就會讓一行指令變成兩行,而第二
+#: 行的內容由送出者決定。
+#:
+#: **這是字元集白名單,不是 FEN 文法**(9.5)。局面合不合法由引擎判定(見
+#: `.kiro/steering/tech.md` 的第二個不可動搖的約束),在此重做一份文法只會製造第二
+#: 個真相來源,而且訂得越緊、誤擋合法變體的機會越大。本層只保證一件事:**這個字串
+#: 跳不出這一行 UCI 指令**。
+FEN_PATTERN = re.compile(r"[A-Za-z0-9/ \-]+")
+
+#: FEN 的長度上限(9.3)。象棋盤 90 格全滿需 90 個字元加 9 個 `/`,再加走子方、
+#: 可著法、半手數與回合數四欄,任何真實 FEN 都在 120 字元以內(題庫現有的落在
+#: 57–65)。取 256 是刻意留兩倍餘裕:高到不可能誤擋任何真實局面,低到即使被大量
+#: 送出也構不成負擔。長度是**獨立**的一道 —— 全部由白名單字元組成的超長字串同樣
+#: 該被擋下,不必等到引擎那頭去承受。
+MAX_FEN_LENGTH = 256
 
 #: 錯誤訊息中回報不合法輸入的長度上限。訊息會原樣回給使用者,不設上限等於讓對方
 #: 決定回應大小 —— 指出是哪一手只需要看得出來,不需要完整回放。
@@ -72,6 +105,35 @@ def validate_move(value: Any) -> str:
     if isinstance(value, str) and UCI_MOVE_PATTERN.fullmatch(value):
         return value
     raise InvalidMoveFormatError(f"著法格式不合法:「{_summarize(value)}」")
+
+
+def validate_fen(value: str) -> str:
+    """確認 FEN 只由 FEN 表示法用得到的字元組成且長度在上限內,回傳原值(9.1–9.3)。
+
+    **局面合不合法不在此判定** —— 那由引擎回答(`tech.md` 的第二個不可動搖的約束)。
+    此處保證的只有一件事:這個字串送進 `position fen <fen>` 之後,仍然只是**一行**
+    指令。UCI 協定行導向,而指令是裸的字串插值,換行即可讓後半段變成另一道指令。
+
+    長度先於字元集判定:超長的輸入不必逐字掃過才知道要擋,而長度本身就是獨立的一
+    道 —— 全由白名單字元組成的超長字串同樣不該送往引擎(9.3)。
+
+    Raises:
+        InvalidMoveFormatError: 含集合外的字元(任何控制字元皆屬之),或超出長度
+            上限。錯誤類別與著法格式驗證相同(9.4)。
+    """
+    if len(value) <= MAX_FEN_LENGTH and FEN_PATTERN.fullmatch(value):
+        return value
+    raise InvalidMoveFormatError(f"FEN 格式不合法:「{_summarize(_printable(value))}」")
+
+
+def _printable(text: str) -> str:
+    """把不可列印的字元換成其跳脫寫法,供錯誤訊息使用。
+
+    被擋下的內容**不得原樣回到訊息裡**:訊息會流進日誌與畫面,把換行原樣送回去等
+    於在另一個行導向的介面上重演同一個問題。跳脫之後使用者仍看得出送了什麼
+    (`\\n` 比一個看不見的字元有用得多)。
+    """
+    return "".join(ch if ch.isprintable() else repr(ch)[1:-1] for ch in text)
 
 
 def _summarize(value: Any) -> str:
@@ -124,6 +186,56 @@ class MoveSequenceRequest(BaseModel):
         if not isinstance(value, (list, tuple)):
             return value
         return [validate_move(move) for move in value]
+
+
+class CandidatePositionRequest(BaseModel):
+    """`POST /api/editor/validate` 的請求主體:一份還不在任何檔案裡的候選題目。
+
+    `position` 刻意保留為**未經模型化的物件**:題目 schema 的權威在
+    `.kiro/steering/structure.md` 與 `service/positions.py`,此處若再宣告一次
+    `id`/`title`/`description`/`difficulty`/`tags`,就成了第二份規則 —— 兩邊對必填
+    欄位或難度值域的看法遲早分歧,而候選題目「合不合格」只該有一個答案。欄位的判定
+    因此完全交給 `positions.validate_position()`,本模型只負責**取出其中的 FEN 並對
+    字元把關**。
+
+    這是專案中第一條使用者文字進到引擎輸入的路徑,把關寫在請求模型上而非路由函式裡
+    是刻意的:請求主體的驗證發生在路由函式被呼叫**之前**,字元不合格的 FEN 因此連
+    「借一個引擎」那一步都沒有機會執行(9.1)。
+    """
+
+    #: 未知欄位一律拒絕,理由同 `MoveSequenceRequest`:`position` 拼錯若被靜默忽略,
+    #: 請求會變成「驗證一份空題目」,使用者拿到的是一串莫名其妙的欄位錯誤。
+    model_config = ConfigDict(extra="forbid")
+
+    position: dict[str, Any] = Field(
+        description=(
+            "候選題目,欄位依題目 schema。**本模型不宣告其欄位** —— schema 的權威"
+            "在題庫模組,此處只取出 `fen` 做字元把關。"
+        )
+    )
+
+    @field_validator("position", mode="before")
+    @classmethod
+    def _check_fen_characters(cls, value: Any) -> Any:
+        """取出候選題目的 FEN 並施加字元集與長度把關(9.1–9.3)。
+
+        值不是物件時原樣放行,交由 pydantic 回報結構錯誤:那是請求形狀的問題。
+
+        **`fen` 缺席或不是字串時同樣放行**,不在此判斷。那是「欄位不對」而非「字元
+        危險」,交由 `validate_position()` 以題目 schema 的說法回報,使用者才會看到
+        「缺少 fen 欄位」這種有用的訊息,而不是一句格式不合法。放行也不擴大攻擊面:
+        送進引擎的是一行文字,非字串根本走不到那裡,而 schema 未通過時服務層依約定
+        不借引擎。
+
+        回傳的是**原物件本身**,不做任何正規化 —— 寫入題庫的動作在瀏覽器端,服務端
+        驗過的內容必須與使用者要寫出去的那一份逐字相同。
+        """
+        if not isinstance(value, dict):
+            return value
+        fen = value.get("fen")
+        if isinstance(fen, str):
+            validate_fen(fen)
+        return value
 
 
 class GameStateResponse(BaseModel):

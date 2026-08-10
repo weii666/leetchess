@@ -21,7 +21,7 @@
   - _Requirements: 4.7_
   - _Boundary: service/positions.py_
 
-- [ ] 2.2 (P) 送往引擎的 FEN 字元把關
+- [x] 2.2 (P) 送往引擎的 FEN 字元把關
   - 在請求模型上新增驗證端點的請求形狀,並對其中的 FEN 施加**字元集白名單與長度上限**
   - 沿用既有著法格式驗證的形狀與錯誤類別,使不合格的請求**在路由函式被呼叫之前**就被擋下
   - 允許的是 FEN 表示法會用到的字元;**任何控制字元一律不在集合內** —— 引擎協定行導向,換行會讓一行指令變成兩行
@@ -178,6 +178,9 @@
 
 - **1.1**:`/editor/` 的網址完全由檔案位置決定,`StaticFiles(html=True)` 直接接手,`service/main.py` 不需要任何改動。既有端點是否仍被路由層接手,可用「方法不符 → 405」探測,不必啟動引擎。
 - **2.1**:`difficulty` 的 1/2/3 值域**執行期沒有任何一層強制**(`structure.md` 明載),後端不得補上 —— 補了會連帶改變 `PositionRepository.load()` 的行為。三選一只在前端(3.2 / 任務 4.3)。
+- **2.2**:`fen` 缺欄位或非字串時,字元把關**刻意放行**,交由 `validate_position()` 以 schema 的說法回報。已驗證沒有任何路徑能讓非字串抵達引擎:`_read_str()` 與 `_check_fields()` 都在借引擎之前擋下,含 `{"fen": ["a\nquit"]}` 這種 f-string 插值會嵌入換行的形狀。
+- **2.2**:`validate_fen(value: str)` 的型別窄於 `validate_move(value: Any)`。目前唯一呼叫端有 `isinstance` 前置檢查所以不可達;**2.3 / 2.4 若新增呼叫端,非字串會走成 500 而非 400**,屆時要麼加 isinstance 要麼放寬簽章。
+- **2.4 待辦**:design 的 Testing Strategy Integration Test 1(引擎替身零次借用)歸屬 `tests/test_editor_endpoint.py`,本輪 2.2 未涵蓋,2.4 必須補。
 
 ## 刻意接受的覆蓋缺口
 

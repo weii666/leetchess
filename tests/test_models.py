@@ -27,15 +27,18 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from service.config import Settings
+from service.config import DEFAULT_POSITIONS_DIR, Settings
 from service.errors import ErrorCode, InternalError, InvalidMoveFormatError
 from service.game import GameService
 from service.models import (
+    MAX_FEN_LENGTH,
     BlackMoveResponse,
+    CandidatePositionRequest,
     ErrorResponse,
     GameStateResponse,
     MoveSequenceRequest,
     PositionResponse,
+    validate_fen,
     validate_move,
 )
 from service.positions import PositionRepository
@@ -538,3 +541,259 @@ def test_repository_position_flows_into_the_response(tmp_path: pathlib.Path) -> 
     )
     assert response.model_dump(mode="json")["source"] == "適情雅趣"
     assert response.model_dump(mode="json")["fen"] == RED_FEN
+
+
+# --- 送往引擎的 FEN 字元把關(9.1–9.5)---------------------------------------
+#
+# 這是專案中**第一條使用者文字進到引擎輸入**的路徑。`engine/process.py` 的
+# `_position_command()` 是裸的字串插值(`f"position fen {fen}"`),而 UCI 協定行導向
+# —— FEN 裡一個換行就能把一行指令變成兩行,第二行由對方決定內容。
+#
+# 本節釘死的是**單一保證**:這個字串跳不出這一行指令。刻意**不驗 FEN 文法** ——
+# 局面合不合法由引擎判定(`tech.md` 第二條不可動搖約束),在此重做一份只會製造第二
+# 個真相來源與誤擋(9.5)。因此通過側的回歸網不是人工挑的樣本,而是**題庫裡現有的
+# 每一個 FEN**:字元集若訂得比真實 FEN 需要的窄,這裡會先紅,而不是等到某一題進不
+# 了庫才發現。
+
+
+def _corpus_fens() -> list[tuple[int, str]]:
+    """題庫中現有的每一個 (題號, FEN)。
+
+    走 `PositionRepository` 而不是自己剖 JSON,題庫長到 200 題、檔案改名或分卷時
+    這張回歸網都不必跟著改 —— 它問的一直是「現在庫裡有的那些」。
+    """
+    repository = PositionRepository(DEFAULT_POSITIONS_DIR)
+    repository.load()
+    return [(position.id, position.fen) for position in repository.all()]
+
+
+CORPUS_FENS = _corpus_fens()
+
+
+def test_the_corpus_regression_net_is_not_empty() -> None:
+    """題庫讀不到東西時,下面那條 parametrize 會變成零個案例並靜默全綠。
+
+    通過側的回歸網若能在「沒有樣本」的情況下通過,它就不再是回歸網。
+    """
+    assert CORPUS_FENS
+
+
+@pytest.mark.parametrize(
+    ("position_id", "fen"), CORPUS_FENS, ids=[str(pid) for pid, _ in CORPUS_FENS]
+)
+def test_fen_guard_accepts_every_fen_in_the_corpus(position_id: int, fen: str) -> None:
+    """既有題庫中的每一個 FEN 全數通過(design Testing Strategy 單元測試 5)。
+
+    字元集訂得過窄會誤擋合法題目,而誤擋的代價是「這一題進不了庫」。
+    """
+    assert validate_fen(fen) == fen
+
+
+@pytest.mark.parametrize(
+    ("label", "fen"),
+    [
+        ("換行", "9/9/9/9/9/9/9/9/9/9 w - - 0 1\nquit"),
+        ("歸位字元", "9/9/9/9/9/9/9/9/9/9 w - - 0 1\rgo infinite"),
+        ("tab", "9/9/9/9/9/9/9/9/9/9\tw - - 0 1"),
+        ("空位元組", "9/9/9/9/9/9/9/9/9/9 w - - 0 1\x00"),
+        ("垂直定位", "9/9/9/9/9/9/9/9/9/9 w - - 0 1\x0b"),
+        ("換頁", "9/9/9/9/9/9/9/9/9/9 w - - 0 1\x0c"),
+        ("跳脫字元", "9/9/9/9/9/9/9/9/9/9 w - - 0 1\x1b[2J"),
+        ("單獨的換行", "\n"),
+    ],
+)
+def test_fen_guard_rejects_control_characters(label: str, fen: str) -> None:
+    """控制字元一律不在集合內(9.1)。
+
+    換行與歸位字元是**唯一真正能改變指令結構**的兩個,其餘控制字元一起擋掉是因為
+    白名單的邊界要說得清楚 —— 「FEN 用得到的字元」比「已知有害的字元」好維護。
+    """
+    with pytest.raises(InvalidMoveFormatError):
+        validate_fen(fen)
+
+
+@pytest.mark.parametrize(
+    "fen",
+    [
+        "3ak1b2/4a4/4b4/9/9/9/9/4B4/4A4/2BAK1R2 w - - 0 1; go infinite",
+        "3ak1b2/4a4/4b4/9/9/9/9/4B4/4A4/2BAK1R2 w - - 0 1 | quit",
+        "9/9 w - - 0 1\u2028position startpos",  # Unicode 行分隔符
+        "9/9 w - - 0 1\x85go infinite",  # NEL,某些讀取器視為換行
+        "9/9/9/9/9/9/9/9/9/9 w - - 0 1\u00a0",  # 不換行空白,不是 ASCII 空白
+        "ＲＮＢ/9 w - - 0 1",  # 全形拉丁字母
+        "炮二平五",  # 中文記譜:顯示層的表示法,不得進入服務
+        "fen $(rm -rf /)",
+    ],
+)
+def test_fen_guard_rejects_characters_outside_the_notation(fen: str) -> None:
+    """FEN 表示法用不到的字元一律拒絕(9.2)。"""
+    with pytest.raises(InvalidMoveFormatError):
+        validate_fen(fen)
+
+
+def test_fen_guard_rejects_an_over_length_string() -> None:
+    """超出長度上限即拒絕(9.3)。
+
+    全部由白名單字元組成也一樣 —— 長度是獨立的一道,不是字元集的副產品。
+    """
+    with pytest.raises(InvalidMoveFormatError):
+        validate_fen("9" * (MAX_FEN_LENGTH + 1))
+
+
+def test_fen_guard_accepts_a_string_at_the_length_limit() -> None:
+    """上限本身是可通過的,界線不得差一。"""
+    at_limit = "9" * MAX_FEN_LENGTH
+    assert validate_fen(at_limit) == at_limit
+
+
+def test_the_length_limit_clears_any_real_fen_by_a_wide_margin() -> None:
+    """上限必須明顯高於任何真實 FEN,否則它會變成誤擋的來源。
+
+    象棋盤 90 格全滿加 9 個 `/` 為 99 字元,再加走子方等四欄約 110 —— 上限取在這
+    之上一大截才算「明顯高於」。
+    """
+    assert MAX_FEN_LENGTH >= 2 * max(len(fen) for _, fen in CORPUS_FENS)
+    assert MAX_FEN_LENGTH >= 128
+
+
+def test_fen_rejection_carries_the_existing_error_class() -> None:
+    """沿用既有著法格式驗證的錯誤類別(9.4)。
+
+    不另立第八種類別碼:對 client 而言「請求裡的字串形狀不對」就是同一件事,而
+    `INVALID_MOVE_FORMAT` 已是 400。錯誤類別若不同,前端要為同一類輸入寫兩套處理。
+    """
+    with pytest.raises(InvalidMoveFormatError) as excinfo:
+        validate_fen("bad\nfen")
+    assert excinfo.value.code is ErrorCode.INVALID_MOVE_FORMAT
+    assert excinfo.value.http_status == 400
+
+
+def test_fen_rejection_message_does_not_echo_an_unbounded_payload() -> None:
+    """訊息會回給使用者,不得把任意長度的輸入原樣送回去。"""
+    with pytest.raises(InvalidMoveFormatError) as excinfo:
+        validate_fen("9" * 50_000)
+    assert len(excinfo.value.message) < 200
+
+
+def test_fen_rejection_message_does_not_echo_control_characters() -> None:
+    """被擋下的控制字元不得原樣出現在回給使用者的訊息裡。
+
+    訊息會流進日誌與畫面 —— 把換行原樣送回去,等於在另一個行導向的介面上重演同一
+    個問題。
+    """
+    with pytest.raises(InvalidMoveFormatError) as excinfo:
+        validate_fen("9/9 w - - 0 1\nquit")
+    assert "\n" not in excinfo.value.message
+    assert "\r" not in excinfo.value.message
+
+
+@pytest.mark.parametrize(
+    "fen",
+    [
+        "9/9/9/9/9/9/9/9/9/9 w - - 0 1",  # 空盤:引擎會拒,字元層不拒
+        "kkkkkkkkk/9/9/9/9/9/9/9/9/9 b - - 0 1",  # 九個將:棋規不合法
+        "3ak1b2 x - - 0 1",  # 走子方不是 w/b
+        "1/2/3",  # 只有三列
+        "zzz",  # 根本不是 FEN
+        "-",
+    ],
+)
+def test_fen_guard_does_not_validate_the_grammar(fen: str) -> None:
+    """本層**不判定局面合法性**(9.5)。
+
+    以上每一個字串在字元層都是安全的 —— 它們跳不出這一行指令。合不合法由引擎回答,
+    在此重做一份只會製造第二個真相來源與誤擋。這個測試釘住的是**沒有做什麼**。
+    """
+    assert validate_fen(fen) == fen
+
+
+# --- 候選題目的請求模型 -----------------------------------------------------
+
+
+def _candidate_position(**overrides: Any) -> dict[str, Any]:
+    """一份形狀完整的候選題目。欄位取自 `structure.md` 的題目 schema。"""
+    payload: dict[str, Any] = {
+        "id": 21,
+        "title": "野馬操田",
+        "description": "《適情雅趣》第 21 局",
+        "fen": RED_FEN,
+        "difficulty": 3,
+        "tags": ["連將殺"],
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_candidate_request_accepts_a_well_formed_position() -> None:
+    request = CandidatePositionRequest.model_validate(
+        {"position": _candidate_position()}
+    )
+    assert request.position == _candidate_position()
+
+
+def test_candidate_request_rejects_a_position_whose_fen_carries_a_newline() -> None:
+    """把關發生在請求模型上,因此在路由函式被呼叫之前(9.1、design Invariants)。"""
+    with pytest.raises(InvalidMoveFormatError):
+        CandidatePositionRequest.model_validate(
+            {"position": _candidate_position(fen=RED_FEN + "\nquit")}
+        )
+
+
+def test_candidate_request_does_not_declare_the_position_schema_fields() -> None:
+    """題目 schema 的權威在 `service/positions.py`,此處不得再宣告一次欄位。
+
+    宣告了就是第二份規則:兩邊對「難度值域」或「必填欄位」的看法遲早分歧,而本
+    spec 存在的理由之一正是避免這件事。`position` 因此是未經模型化的物件。
+    """
+    declared = set(CandidatePositionRequest.model_fields)
+    assert declared == {"position"}
+
+
+def test_candidate_request_rejects_unknown_fields() -> None:
+    """拼錯的欄位必須失敗而非被忽略 —— 與 `MoveSequenceRequest` 同一個理由。"""
+    with pytest.raises(ValidationError):
+        CandidatePositionRequest.model_validate(
+            {"position": _candidate_position(), "positions": {}}
+        )
+
+
+@pytest.mark.parametrize("position", ["not an object", 42, None, ["a"], True])
+def test_candidate_request_rejects_a_non_object_position(position: Any) -> None:
+    """`position` 不是物件是**請求形狀**的問題,交由框架回報結構錯誤。"""
+    with pytest.raises(ValidationError):
+        CandidatePositionRequest.model_validate({"position": position})
+
+
+@pytest.mark.parametrize(
+    "position",
+    [
+        {"id": 21, "title": "野馬操田"},  # 根本沒有 fen
+        {"fen": None},
+        {"fen": 123},
+        {"fen": ["3ak1b2/4a4/4b4/9/9/9/9/4B4/4A4/2BAK1R2 w - - 0 1"]},
+        {},
+    ],
+)
+def test_candidate_request_passes_a_missing_or_non_string_fen_through(
+    position: dict[str, Any],
+) -> None:
+    """缺 `fen` 或其值非字串是「欄位不對」,不是「字元危險」(design Implementation Notes)。
+
+    這一層放行,交由 `validate_position()` 以題目 schema 的說法回報 —— 那個說法對
+    使用者才有用(「fen 欄位缺少」而不是「格式不合法」)。**放行不擴大攻擊面**:
+    非字串不可能是使用者送進引擎的那一行文字,而 schema 未過時服務層根本不借引擎。
+    """
+    request = CandidatePositionRequest.model_validate({"position": position})
+    assert request.position == position
+
+
+def test_candidate_request_does_not_mutate_the_position() -> None:
+    """把關是唯讀的:通過之後的 `position` 與送進來的逐鍵相同。
+
+    驗證器若順手正規化(去空白、補欄位),服務端驗的就不再是使用者要寫進題庫的那
+    一份 —— 寫入由瀏覽器執行,兩邊的內容必須是同一個。
+    """
+    original = _candidate_position()
+    request = CandidatePositionRequest.model_validate({"position": dict(original)})
+    assert request.position == original
+    assert request.position["fen"] == original["fen"]
