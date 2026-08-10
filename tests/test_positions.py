@@ -152,10 +152,28 @@ def test_real_corpus_ids_are_unique_across_the_whole_corpus() -> None:
     assert all(repository.source_of(one.id) for one in positions)
 
 
+def _folder_holding(position_id: int) -> str:
+    """真實題庫裡,收著某一題的那個資料夾的名字。"""
+    for path in sorted(DEFAULT_POSITIONS_DIR.rglob("*.json")):
+        entries = json.loads(path.read_text(encoding="utf-8"))
+        if any(entry.get("id") == position_id for entry in entries):
+            return path.parent.name
+    raise AssertionError(f"真實題庫裡找不到第 {position_id} 題")
+
+
 def test_real_corpus_source_comes_from_the_folder_name() -> None:
-    """出處由所在資料夾表達,不是題目 JSON 的欄位。"""
+    """出處由所在資料夾表達,不是題目 JSON 的欄位。
+
+    期望值**自檔案系統推導,不寫死字面**。理由是這一條要驗的就是「出處等於資料夾
+    名」——抄一份資料夾名進來只是把同一件事寫第二遍,而題庫改名時會以一條看不出
+    成因的失敗收場(實測過:資料夾自「…-卷一」改名為「…~卷一」之後,這裡報的是
+    兩個看起來幾乎一樣的字串不相等)。
+
+    推導不會讓斷言變成恆真:它仍然擋得住「出處取自 JSON 的某個欄位」「出處寫死在
+    程式裡」「出處取的是檔名而非資料夾名」這幾種實作。
+    """
     repository = _loaded(DEFAULT_POSITIONS_DIR)
-    assert repository.source_of(REAL_POSITION_ID) == "適情雅趣-卷一"
+    assert repository.source_of(REAL_POSITION_ID) == _folder_holding(REAL_POSITION_ID)
 
 
 def test_repository_returns_the_shared_domain_type() -> None:

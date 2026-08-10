@@ -107,11 +107,25 @@ requires_real_engine = pytest.mark.skipif(
     not REAL_ENGINE.is_file(), reason="真實引擎未安裝,請先執行 engine/fetch.sh"
 )
 
-#: 題庫中的《適情雅趣》第 21 局 —— `positions/適情雅趣-卷一/20-24.json` 裡的第 21 題。
-#: 題號即書上的局號,出處即題目所在的資料夾名。
+#: 題庫中的《適情雅趣》第 21 局。題號即書上的局號,出處即題目所在的資料夾名。
 PUZZLE_ID = 21
 PUZZLE_TITLE = "盡善克終"
-PUZZLE_SOURCE = "適情雅趣-卷一"
+
+
+def _corpus_folder_of(position_id: int) -> str:
+    """收著某一題的資料夾名。**不寫死** —— 題庫資料夾改名時,寫死的字面會讓這裡以
+    「兩個看起來幾乎一樣的字串不相等」收場,看不出成因。"""
+    from service.config import DEFAULT_POSITIONS_DIR
+
+    for path in sorted(DEFAULT_POSITIONS_DIR.rglob("*.json")):
+        entries = json.loads(path.read_text(encoding="utf-8"))
+        if any(entry.get("id") == position_id for entry in entries):
+            return path.parent.name
+    raise AssertionError(f"真實題庫裡找不到第 {position_id} 題")
+
+
+#: 出處即題目所在的資料夾名,自題庫推導。
+PUZZLE_SOURCE = _corpus_folder_of(PUZZLE_ID)
 #: 這一題**真實的**最長殺著距離(題目的 `max_dtm`)。
 #:
 #: 用途已經反過來了:它現在是「**不得**出現在側欄上」的那個字串。requirement 1.3
