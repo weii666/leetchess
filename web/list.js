@@ -46,6 +46,7 @@
  */
 
 import { loadCatalog } from './catalog.js';
+import { readDifficulty } from './difficulty.js';
 import { loadCompleted, toggleCompleted } from './progress.js';
 
 const elements = {
@@ -62,34 +63,6 @@ const BLANK = '—';
 
 /** 局名為空時的說法 —— 題目一定有題號,但局名可能缺。 */
 const UNTITLED = '(未命名)';
-
-/**
- * 難度分級的說法(1–3)。分級的定義在 `.kiro/steering/structure.md` 的題目 schema
- * ——**這裡不是它的出處**,改動要從那裡改起。
- *
- * ## 為什麼是英文
- *
- * 這是整頁**唯一**不用繁體中文的使用者可見文字(另一處是 `LeetChess` 這個產品名,
- * 專有名詞不算),steering 的「使用者可見文字一律繁體中文」為此列了一條例外。
- *
- * 理由不是調性而是**可分辨**:同一列右半邊的標籤(「解殺還殺」「借炮使馬」)也是
- * 中文詞,難度改成無底色的彩色字之後,兩者的差別只剩顏色 —— 對色覺障礙者等於沒有
- * 線索,一般人在餘光掃視時也糊。拉丁字母在一排中文裡自成一格,不必靠顏色就分得出
- * 哪一個是難度。**因此顏色不是這一格唯一的線索,字形本身也是。**
- *
- * 用 `Map` 而不是物件字面值有兩個實質理由:
- *
- * 1. **鍵是數字而非字串。** 索引的 `difficulty` 一路是數字(`service/positions.py`
- *    的 `_read_int`),物件的鍵會把 `1` 與 `"1"` 混為一談;`Map.get('1')` 認不得,
- *    因而落到下面那條退路 —— 一個型別不對的值不會偽裝成一個合法的分級。
- * 2. 物件字面值查得到 `constructor`、`toString` 這些原型上的東西,`difficulty`
- *    只要是那幾個字串就會拿到一個函式當標籤。`Map` 結構上就沒有這個面。
- */
-const DIFFICULTY_LABELS = new Map([
-  [1, 'Easy'],
-  [2, 'Medium'],
-  [3, 'Hard'],
-]);
 
 /** 對局介面的位址。題號經 `?id=` 交接(3.1 定案的契約,`web/app.js` 的
  * `readPositionId()` 讀它 —— 指函式而非行號:行號會在對方改動時靜默過期)。 */
@@ -134,30 +107,17 @@ let loading = false;
  * 1–3 畫成**一個帶顏色的詞**(不是標籤:沒有底色,字級與標籤的 chip 相同),顏色由
  * `list.css` 依 `data-level` 上色 —— **本檔不碰顏色**,呈現層裡的顏色屬樣式表。
  *
- * ## 認不得的值一定有退路
- *
- * schema 說難度是 1–3,但**沒有任何一層在執行期強制它**:`service/positions.py`
- * 的 `_read_int` 對難度沒有下界,`0` 收得進來,`4`、`-1`、`null`、欄位不存在同理。
- * 這些值一律**原樣顯示、不上 `data-level`**(於是吃中性色),而不是丟一個例外或
- * 畫不出那一格 —— 一題資料失準不該讓整份列表消失。
- *
- * 判空以 `!= null` 而非 falsy:`0` 是一個真的值,雖然不是合法分級,使用者仍該看見
- * 它,才知道是資料有問題而不是欄位漏填。tasks 2.1 與 3.2 都在這個 falsy 陷阱上被
- * 抓過。
+ * 說法與退路都出自 `difficulty.js`,與對局頁共用同一份;本檔只負責把它畫成列上的
+ * 一格。認不得的值(0、4、`null`、欄位不存在)的處理見那裡。
  */
 function difficultyCell(value) {
   const cell = document.createElement('span');
   cell.className = 'position-difficulty';
 
-  const label = DIFFICULTY_LABELS.get(value);
-  if (label !== undefined) {
-    // 上色的掛勾。與 `data-completed` 同性質:是樣式要用的結構契約,不是測試鉤子。
-    cell.dataset.level = String(value);
-    cell.textContent = label;
-    return cell;
-  }
-
-  cell.textContent = value != null ? String(value) : BLANK;
+  const { text, level } = readDifficulty(value, BLANK);
+  // 上色的掛勾。與 `data-completed` 同性質:是樣式要用的結構契約,不是測試鉤子。
+  if (level !== null) cell.dataset.level = level;
+  cell.textContent = text;
   return cell;
 }
 

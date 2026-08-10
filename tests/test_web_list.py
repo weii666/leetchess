@@ -327,6 +327,15 @@ TOTAL = str(len(LISTED_IDS))
 #: 題號到局名的對照,供無障礙名稱的斷言使用。
 TITLES = {str(entry["id"]): entry["title"] for entry in CATALOG}
 
+
+def played_heading(position_id: Any) -> str:
+    """對局介面的 `<h1>` 對某一題應有的字面:「題號 + 點 + 空格 + 局名」。
+
+    列表只畫局名(題號是它自己獨立的一欄),對局頁把兩者串成一行 —— 從列表點進來
+    看到的是同一組資訊,一眼就確認自己開對了題(`web/app.js` 的 `puzzleHeading`)。
+    """
+    return f"{position_id}. {TITLES[str(position_id)]}"
+
 #: 不得出現在列表上的字串:每一題的描述,以及兩個出處。
 NEVER_ON_THE_LIST = [entry["description"] for entry in CATALOG] + [
     "適情雅趣",
@@ -375,6 +384,15 @@ SHARED_CUSTOM_PROPERTIES = [
     "--line",
     "--gap",
     "--radius",
+    # 難度三色。**兩頁都畫難度之後才進這份清單** —— 列表每一列一個,對局頁的 meta
+    # 行一個。同一題在兩頁必須是同一個顏色,否則使用者會以為自己點錯了題,而那正是
+    # 沒有任何測試會自然抓到的一種錯。
+    "--difficulty-easy-text",
+    "--difficulty-medium-text",
+    "--difficulty-hard-text",
+    # 標籤 chip 的底色與字級。同上:兩頁都畫標籤之後才進這份清單。
+    "--tag-bg",
+    "--chip-font-size",
 ]
 
 
@@ -384,13 +402,14 @@ SHARED_CUSTOM_PROPERTIES = [
 #
 #   <li class="position" data-id="<題號>" [data-completed]>
 #     <span class="position-id">                          <- 「<題號>.」,右對齊
-#     <a class="position-title" href="./play.html?id=<題號>">
-#     <span class="position-tags">                         <- 靠右對齊
-#     <span class="position-difficulty" [data-level="1|2|3"]>
+#     <a class="position-title" href="./play.html?id=<題號>">   <- 固定 8em(八個中文字)
+#     <span class="position-tags">                         <- 靠左對齊,緊接局名
+#     <span class="position-difficulty" [data-level="1|2|3"]>   <- 靠右對齊
 #     <input type="checkbox" class="position-toggle">
 #
-# **DOM 順序即左到右的欄序。** 難度緊鄰完成標記(不在局名旁邊):標籤是全列最不
-# 可預測的一項,夾在中間,右側那兩欄才連成固定的兩直欄。
+# **DOM 順序即左到右的欄序。** 難度緊鄰完成標記(不在局名旁邊)。五欄只有標籤欄是
+# 彈性的,其餘寬度固定 —— 每個 `<li>` 各自是一個 grid,固定寬度是各列欄界能對齊成
+# 直欄的唯一辦法。
 #
 # `data-id` 是列與題號的對應,`data-completed` 是完成狀態的呈現掛勾,`data-level`
 # 是難度標籤的上色掛勾;三者都不是測試專用的鉤子,列表本身要靠它們才畫得出樣式與
@@ -800,10 +819,11 @@ def test_the_id_and_title_read_as_the_primary_identifiers(list_page) -> None:
 
 # --- 欄序與對齊 ---------------------------------------------------------
 #
-# 左到右:題號、局名、標籤(靠右)、難度、完成標記。
+# 左到右:題號、局名(固定八字寬)、標籤(靠左)、難度(靠右)、完成標記。
 #
-# **難度緊鄰完成標記**,不在局名旁邊。標籤是全列最不可預測的一項(數量與長度都
-# 不定),夾在局名與難度之間,右側那兩欄才連成固定的兩直欄。
+# **難度緊鄰完成標記**,不在局名旁邊。標籤緊接在局名右邊並靠左對齊 —— 殺法名是這
+# 個服務最獨特的東西,視線掃完局名就該直接落在它上面。難度不隨標籤多寡浮動,靠的
+# 是五欄裡只有標籤欄彈性、其餘寬度固定,與標籤的對齊方向無關。
 
 
 #: 欄序:選擇器由左到右。DOM 順序也必須是這個順序(理由見完成標記那一節)。
@@ -852,26 +872,34 @@ def test_the_columns_run_id_title_tags_difficulty_toggle(list_page) -> None:
         )
 
 
-def test_the_tags_are_flushed_right_so_the_difficulty_never_drifts(list_page) -> None:
-    """標籤欄靠右對齊,難度與完成標記因此在每一列都落在同一個位置。
+def test_the_tags_sit_flush_left_while_the_difficulty_holds_its_column(list_page) -> None:
+    """標籤靠左緊接局名,難度靠右,兩者都不隨標籤多寡浮動。
 
-    這條有實質作用而不只是美觀:標籤靠左的話,空隙落在標籤與難度**之間**,而每一列
-    空隙的寬度都不同 —— 難度看起來就像浮在一片寬度不定的空白右邊。靠右之後空隙移到
-    標籤左側,標籤、難度、完成標記三者在右緣連成三條直欄。
+    標籤靠左是使用者的決定:殺法名(「臥槽馬」「雙馬飲泉」)是這個服務最獨特的部
+    分,視線掃完局名就該直接落在它上面,而不是橫越一段寬度不定的空白才看到。
 
-    三層斷言,少一層就漏得掉一種寫法:
+    上一輪標籤是靠右的,理由是「難度不隨標籤多寡浮動」。那個目的現在改由**固定欄
+    寬**達成:五欄只有標籤欄是彈性的,難度欄的邊界本來就不動。因此對齊方向已經與
+    難度是否浮動無關,可以純粹依可讀性決定 —— 這條測試同時驗兩件事,就是要讓「改
+    了對齊方向卻讓難度跟著飄」這種退步立刻現形。
 
-    1. **難度欄的左緣在三列上相同** —— 這是使用者真正在意的結果。
-    2. **標籤文字的右緣在三列上相同** —— 只有第 1 條的話,靠左照樣全綠(欄是 `fr`,
-       邊界本來就不隨內容動);這一條才真的在驗對齊方向。
-    3. **標籤文字的左緣互不相同** —— 擋掉「三列標籤碰巧一樣寬」讓第 2 條自動成立。
+    四層斷言,少一層就漏得掉一種寫法:
 
-    夾具的三列標籤數各為 1、3、0,寬度必不相同。
+    1. **標籤欄的右緣(即標籤與難度的欄界)在三列上相同** —— 難度不浮動,使用者真正
+       在意的結果。量的是標籤欄而不是難度欄:難度已是 `justify-self: end`,它的元素
+       縮到內容寬並貼欄的右緣,左緣因此本來就隨 `Easy` / `Medium` / `Hard` 的長度
+       變動,量它等於在量文字寬度而不是欄界。
+    2. **難度文字的右緣在三列上相同** —— 三個標籤長度不同,靠左的話右緣參差;這一
+       條才在驗難度的對齊方向。
+    3. **標籤文字的左緣在三列上相同** —— 驗標籤的對齊方向。
+    4. **標籤文字的右緣互不相同** —— 擋掉「三列標籤碰巧一樣寬」讓第 3 條自動成立。
+
+    夾具的三列標籤數各為 1、3、0,難度各為 1、2、3,兩者的寬度都必不相同。
     """
     list_page.set_viewport_size({"width": 1280, "height": 900})
     open_list(list_page, ALIGNMENT_SAMPLES)
 
-    # 標籤沒有折行,否則「右緣」指的是最後一行的右緣,三列不再可比。
+    # 標籤沒有折行,否則「左緣」指的是第一行的左緣而「右緣」是最後一行的,三列不再可比。
     wrapped = list_page.evaluate(
         """() => [...document.querySelectorAll('#positions > li')].map((li) => {
           const tops = [...li.querySelectorAll('.position-tags > *')].map(
@@ -880,23 +908,28 @@ def test_the_tags_are_flushed_right_so_the_difficulty_never_drifts(list_page) ->
           return new Set(tops).size;
         })"""
     )
-    assert all(count <= 1 for count in wrapped), f"夾具的標籤折行了,右緣不再可比:{wrapped}"
+    assert all(count <= 1 for count in wrapped), f"夾具的標籤折行了,左右緣不再可比:{wrapped}"
 
     difficulty = text_boxes(list_page, ".position-difficulty")
     tags = text_boxes(list_page, ".position-tags")
 
-    left_edges = {row_id: box["cellLeft"] for row_id, box in difficulty.items()}
-    assert max(left_edges.values()) - min(left_edges.values()) < 0.5, (
-        f"標籤多寡讓難度欄左右浮動:{left_edges}"
+    column_edges = {row_id: box["cellRight"] for row_id, box in tags.items()}
+    assert max(column_edges.values()) - min(column_edges.values()) < 0.5, (
+        f"標籤多寡讓標籤與難度的欄界左右浮動:{column_edges}"
+    )
+
+    difficulty_rights = {row_id: box["textRight"] for row_id, box in difficulty.items()}
+    assert max(difficulty_rights.values()) - min(difficulty_rights.values()) < 0.5, (
+        f"難度沒有靠右對齊(右緣不齊):{difficulty_rights}"
     )
 
     tag_rights = {row_id: box["textRight"] for row_id, box in tags.items()}
     tag_lefts = {row_id: box["textLeft"] for row_id, box in tags.items()}
-    assert max(tag_rights.values()) - min(tag_rights.values()) < 0.5, (
-        f"標籤沒有靠右對齊(右緣不齊):{tag_rights}"
+    assert max(tag_lefts.values()) - min(tag_lefts.values()) < 0.5, (
+        f"標籤沒有靠左對齊(左緣不齊):{tag_lefts}"
     )
-    assert len(set(round(value, 1) for value in tag_lefts.values())) == 3, (
-        f"三列的標籤一樣寬 —— 右緣對齊這件事因此什麼也沒證明:{tag_lefts}"
+    assert len(set(round(value, 1) for value in tag_rights.values())) == 3, (
+        f"三列的標籤一樣寬 —— 左緣對齊這件事因此什麼也沒證明:{tag_rights}"
     )
 
 
@@ -1810,10 +1843,14 @@ def test_the_link_is_as_tall_as_the_row_it_opens(list_page) -> None:
     高就變成「一條細細的可點區域浮在一大片死區中間」,點歪一點不是沒反應就是落到
     隔壁題上。
 
-    夾具刻意給一題八個標籤讓那一欄折行:標籤少的時候局名本來就是全列最高的元素,
+    夾具刻意給一題很多標籤讓那一欄折行:標籤少的時候局名本來就是全列最高的元素,
     這條斷言不論寫不寫都會成立 —— 那正是 tasks 3.2 那條假的金邊斷言犯過的錯。
+
+    **標籤數要多到在任何合理的欄寬下都會折行。** 原本是八個,局名欄從彈性改為固定
+    8em 之後標籤欄變寬,八個剛好排得下,下方那條前置守衛因此擋了下來。守衛擋住即
+    表示夾具失效而非產品壞掉,調的是這個數字,不是把守衛拿掉。
     """
-    crowded = [{**CATALOG[0], "tags": [f"標籤{index}" for index in range(8)]}]
+    crowded = [{**CATALOG[0], "tags": [f"標籤{index}" for index in range(16)]}]
     open_list(list_page, crowded)
 
     box = list_page.evaluate(
@@ -1867,7 +1904,7 @@ def test_opening_a_position_loads_that_very_position(list_page, position_id) -> 
 
     open_position(list_page, position_id)
 
-    assert played_title(list_page) == TITLES[position_id]
+    assert played_title(list_page) == played_heading(position_id)
     assert served["positions"] == [position_id], (
         f"對局頁要的題號不是所選的那一題:{served['positions']}"
     )
@@ -1885,7 +1922,7 @@ def test_opening_a_position_can_be_done_from_the_keyboard(list_page) -> None:
 
     list_page.locator('#positions > li[data-id="3"] a[href]').press("Enter")
 
-    assert played_title(list_page) == TITLES["3"]
+    assert played_title(list_page) == played_heading(3)
     assert served["positions"] == ["3"]
 
 
@@ -2110,7 +2147,7 @@ def test_the_marks_survive_a_round_trip_through_a_game(list_page) -> None:
     before = counts(list_page)
 
     open_position(list_page, 3)
-    assert play_view(list_page)["title"] == TITLES["3"], "沒有真的進到對局介面"
+    assert play_view(list_page)["title"] == played_heading(3), "沒有真的進到對局介面"
 
     go_back(list_page)
 
@@ -2201,33 +2238,56 @@ def test_the_source_moved_rather_than_multiplied(list_page) -> None:
     assert DESCRIPTIONS["1"] not in played
 
 
-def test_the_meta_line_is_nothing_but_the_source(list_page) -> None:
-    """那一行 meta **只剩出處**(使用者看過實際畫面後的第三輪意見)。
+def test_the_puzzle_info_is_source_difficulty_and_tags_each_on_its_own_line(
+    list_page,
+) -> None:
+    """題目資訊是三行:出處、難度、標籤,**各自獨立一行**。
 
-    這一條原本叫 `test_the_source_and_mate_distance_share_a_single_line`,驗的是
-    出處與最長殺著併在同一行上。**最長殺著整組移除之後那件事沒有對象了**,斷言因此
-    反過來:那一行從頭到尾就是出處本身,沒有分隔點、沒有「最長殺著」、也沒有任何
-    名目(web-play-runtime 的 requirement 1.3 已推翻)。
+    這一條的歷史說明了它在守什麼。原本叫
+    `test_the_source_and_mate_distance_share_a_single_line`,驗出處與最長殺著併在
+    同一行;**最長殺著整組移除**(它對使用者劇透,預告這題幾步殺得完)之後改成驗
+    那一行從頭到尾就是出處;難度與標籤加進來之後又改成現在這樣。
 
-    比對用 `==` 而非 `startswith` 是刻意的:後者對「適情雅趣 · 最長殺著 9」照樣
-    成立,而那正是要擋掉的形態。
+    **不變的是要擋掉的東西:最長殺著不得回到題目資訊裡。** 因此仍以列舉的方式比對
+    每一行的字面,而不是 `in` 或 `startswith` —— 後者對「適情雅趣 · 最長殺著 9」
+    照樣成立,而那正是要擋掉的形態。
+
+    「各自獨立一行」以**三者的上緣互不相同**來驗:比對字面只能說出內容對不對,說不出
+    它們是不是被併回同一行(併行時三段字面照樣各自正確)。
     """
     open_list_that_can_be_played(list_page)
     open_position(list_page, 1)
     list_page.wait_for_selector("#board svg .piece")
 
-    line = list_page.evaluate(
-        """() => ({
-          meta: document.getElementById('puzzle-meta')?.innerText.trim() ?? null,
-          dtm: document.getElementById('puzzle-max-dtm') !== null,
-          source: document.getElementById('puzzle-source')?.innerText.trim() ?? null,
-        })"""
+    info = list_page.evaluate(
+        """() => {
+          const text = (id) =>
+            document.getElementById(id)?.innerText.trim() ?? null;
+          const top = (id) => {
+            const el = document.getElementById(id);
+            return el ? Math.round(el.getBoundingClientRect().top) : null;
+          };
+          return {
+            meta: text('puzzle-meta'),
+            source: text('puzzle-source'),
+            difficulty: text('puzzle-difficulty'),
+            tags: [...document.querySelectorAll('#puzzle-tags .puzzle-tag')].map(
+              (chip) => chip.textContent.trim(),
+            ),
+            dtm: document.getElementById('puzzle-max-dtm') !== null,
+            tops: [top('puzzle-meta'), top('puzzle-difficulty'), top('puzzle-tags')],
+          };
+        }"""
     )
 
-    assert line["meta"] is not None, "側欄沒有那一行 meta"
-    assert line["source"] == SOURCES["1"], f"那一行的出處不對:{line}"
-    assert line["meta"] == SOURCES["1"], f"那一行不只有出處:{line}"
-    assert not line["dtm"], "最長殺著那一格還在"
+    expected_difficulty = DIFFICULTY_LABELS[CATALOG[0]["difficulty"]]
+    assert info["source"] == SOURCES["1"], f"出處不對:{info}"
+    # 出處那一行**只有出處** —— 難度或標籤被併回去的話這一條就會轉紅。
+    assert info["meta"] == SOURCES["1"], f"出處那一行不只有出處:{info}"
+    assert info["difficulty"] == expected_difficulty, f"難度不對:{info}"
+    assert info["tags"] == CATALOG[0]["tags"], f"標籤不對:{info}"
+    assert not info["dtm"], "最長殺著那一格還在"
+    assert len(set(info["tops"])) == 3, f"三者不在各自的一行上:{info['tops']}"
 
 
 # =======================================================================
@@ -2420,7 +2480,7 @@ def test_the_next_position_actually_opens_that_position(list_page) -> None:
     list_page.wait_for_selector("#board svg .piece")
 
     assert urlsplit(list_page.url).path == PLAY_PATH
-    assert list_page.locator("#puzzle-title").inner_text().strip() == TITLES["2"]
+    assert list_page.locator("#puzzle-title").inner_text().strip() == played_heading(2)
     assert served["positions"][-1] == "2", (
         f"對局頁最後要的不是第 2 題:{served['positions']}"
     )
