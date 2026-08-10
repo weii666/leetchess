@@ -37,7 +37,7 @@ repo 內已有本地 POC(`poc/`:Python 小後端包住 native pikafish + 單頁�
   - **WASM 相關的一切** —— 已否決,不保留任何 wasm 構件、載入層或雙軌設計
   - 離線可用 —— 後端架構的已知代價,明確排除
   - 使用者帳號、雲端進度同步(進度只存本機)
-  - 排局編輯器、自建題目
+  - **給終端使用者的排局編輯器、使用者自建題目** —— 產品面向的功能,不在本輪。此條原本寫作「排局編輯器、自建題目」,語意涵蓋過寬:**維護者專用的收題工具不在此排除之列**,見 corpus-editor。兩者的分野是使用者身分與攝取路徑 —— 維護者的產出經 git commit 進版本庫,終端使用者的題目沒有這條路
   - 500 題全量(本輪目標為前 200 局,schema 與流程須能無痛擴充)
   - `poc/` 的持續維護 —— 產品化後 `poc/` 功成身退,不再同步演進
 
@@ -75,12 +75,16 @@ repo 內已有本地 POC(`poc/`:Python 小後端包住 native pikafish + 單頁�
 - [ ] corpus-verification -- `tools/verify.py`:長時間搜尋確認紅先必勝、剔除偽題、回填 max_dtm,加 CI 的 FEN 合法性檢查。Dependencies: position-corpus
 - [ ] problem-browser -- 題目列表、難度與標籤篩選、練習進度紀錄(localStorage)。Dependencies: web-play-runtime, position-corpus, corpus-verification
 - [ ] service-deploy-ops -- 服務部署、引擎版本鎖定的上線流程、監控與資源上限、濫用防護、引擎與 NNUE 授權標示。Dependencies: engine-service, web-play-runtime
+- [ ] corpus-editor -- 維護者專用的收題工具:貼 FEN 即時繪盤、五欄位表單與驗證、以 File System Access API 直接 append 進題目檔。後端只新增一個唯讀的候選題目驗證端點,**不具備任何寫入能力**;頁面與端點皆不設存取控制(能寫的只有使用者自選的本機目錄,伺服器題庫碰不到)。同時補上**送往引擎的 FEN 字元把關** —— 這是專案中第一條使用者文字到達引擎輸入的路徑。Dependencies: engine-service, web-play-runtime, position-corpus
 
 ### 交付波次
 
 - **波 1**(並行): engine-service, position-corpus
 - **波 2**(並行): web-play-runtime, corpus-verification
 - **波 3**(並行): problem-browser, service-deploy-ops
+- **波 4**: corpus-editor
+
+corpus-editor 排在最後不是因為不急,而是因為它依賴的三件事(引擎服務、繪盤模組、題目 schema)必須先定案 —— 但它是**前 200 局收錄的加速器**,position-corpus 的內容產出實際上會等它。若收題進度是當前瓶頸,它可以提前插隊到波 2 之後。
 
 ## Later Phase(本輪不做)
 
