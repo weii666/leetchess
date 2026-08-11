@@ -20,7 +20,10 @@
  * 它們記的都**不是畫面**,而是幾件無法由當下的值看出來的事:描述欄裡那句話是誰打的、
  * 本分頁已經成功寫入過哪些題號、上一次寫入嘗試指認了哪個題號撞號、權威驗證對那一份
  * 候選題目說了什麼、以及那一次嘗試有沒有走完。五者一律只經 `render()` 反映到畫面上。
- * (tasks 5.3 會再帶進目錄控制代碼,屆時同樣只驅動這一條路徑。)
+ * 五個**就是全部** —— 目錄控制代碼不在其中,它是 `fs.js` 的模組層狀態(design 的
+ * Invariants:同一分頁內只詢問一次目錄)。本檔每次寫入都照樣呼叫
+ * `acquireCorpusDirectory()`,已取得者由那一層直接兌現。在這裡再記一份控制代碼就是
+ * 第二個真相來源,而兩者遲早會分家。
  *
  * ## 描述建議值:每一次都算,但只在沒有人動過它時才寫回去
  *
@@ -61,14 +64,17 @@
  * 錯誤訊息,而 requirement 2.5 要的是清空輸入即呈現空盤面、不報錯。兩者在本檔分成
  * 兩條路(見 `readFenView`),這是 tasks.md 對 3.1 的筆記點名的地方。
  *
- * ## 寫入是一條序列,本檔目前只走到第三步
+ * ## 寫入是一條序列,本檔目前走到記下題號為止
  *
  * 寫入一題的完整次序是(design 的 System Flows):**取題庫索引 → 撞號 → 送權威驗證
  * → 取目錄授權 → 重讀目標檔 → 文字層追加 → 寫回 → 記下題號並清空欄位**。
- * tasks 5.1 實作前兩步,5.2 接上權威驗證,5.3 接上授權與寫檔,5.4 接上成敗的呈現。
- * 因此 `#write` 的 click 處理**刻意寫成一條會被往下接的序列**(`runWriteSequence`),
- * 而不是一個自成一體的動作:5.3 要加的東西接在驗證通過的那一行之後,不必回頭改
- * 這裡的形狀。
+ * tasks 5.1 實作前兩步,5.2 接上權威驗證,5.3 接上授權、寫檔與記下題號,5.4 接上
+ * 成敗的呈現與清空欄位。
+ *
+ * 序列因此分成兩段函式:`runWriteSequence()` 是**擋得下來的那些檢查**(索引、撞號、
+ * 驗證),`writeCandidate()` 是**通過之後真的動到磁碟的那幾步**。切在這裡是因為前段
+ * 的每一步都可能讓寫入不成立、而後段的每一步都已經假定它成立了 —— 5.4 要加的成功
+ * 呈現接在後段的最後一行之後,不必回頭改前段的形狀。
  *
  * 淺層檢查未通過時 `#write` 仍然是停用的(4.1),所以序列跑得起來就代表七個欄位
  * 都已填妥 —— 撞號檢查不必再驗一次題號的寫法。
@@ -165,6 +171,15 @@ import {
   sideFromFen,
   suggestDescription,
 } from './check.js';
+import { CorpusFileError, appendPosition } from './corpus-file.js';
+import {
+  PermissionDeniedError,
+  UnsupportedBrowserError,
+  acquireCorpusDirectory,
+  isSupported,
+  readTextAt,
+  writeTextAt,
+} from './fs.js';
 
 /**
  * 空盤面的 FEN(requirement 2.5)。
@@ -299,6 +314,25 @@ const UNSENDABLE_FEN_MESSAGE =
   'FEN 送不出去:它含有不能送往引擎的字元,或長度超出上限。請重新貼一次完整的 FEN。';
 
 /**
+ * 拒絕授權或取消目錄選擇之後那一行(requirement 6.2)。
+ *
+ * 6.2 要的是兩件事:**保留已填入的全部內容**,以及**告知寫入未進行**。內容的保留
+ * 由本檔什麼都不做達成(只有寫入成功才清空,而那屬 5.4),所以這裡只剩下說話。
+ *
+ * 句子裡明講「再按一次寫入」:按 Esc 關掉對話框是最容易誤觸的一個動作,而維護者
+ * 此刻看著一個沒有反應的畫面,不會知道下一步該做什麼。
+ */
+const DENIED_NOTE = '未取得題庫目錄的存取授權,寫入未進行。已填入的內容都還在,再按一次寫入可以重新選擇目錄。';
+
+/**
+ * 平台不支援時,寫入操作旁那一行(requirement 6.3)。
+ *
+ * 與 `#unsupported` 那句常駐說明講的是同一件事。**兩處都要有**:常駐的那一句在頁面
+ * 上方,可能已經被捲出視野,而按下寫入之後維護者的眼睛在按鈕附近。
+ */
+const UNSUPPORTED_NOTE = '這個瀏覽器不支援由網頁寫入本機檔案,寫入未進行。請改用桌面版的 Chrome、Edge 或 Opera。';
+
+/**
  * 判定為不合格、卻一項可顯示的未通過項目都沒有時的退路。
  *
  * 契約上不會發生(`valid` 由 `issues` 導出),但沉默的後果太不對稱:畫面上什麼都不
@@ -367,6 +401,9 @@ const elements = {
   // 為止(見檔首)。`writeNote` 同時承接上一次嘗試的頁面層級說法(4.9)。
   write: document.getElementById('write'),
   writeNote: document.getElementById('write-note'),
+  // 平台不支援的常駐說明(6.3)。**不進 `render()`** —— 它顯示與否是
+  // `isSupported()` 的函式,而那個答案在分頁存續期間不會變(見模組末尾的接線)。
+  unsupported: document.getElementById('unsupported'),
 };
 
 /**
@@ -1096,8 +1133,73 @@ function applyFailure(code, key) {
 }
 
 /**
- * 寫入序列的前三步:取題庫索引、撞號檢查、送權威驗證
- * (requirements 4.3、4.4、4.5、4.7、4.8、4.9)。
+ * 序列的後半:取目錄授權 → 重讀目標檔 → 文字層追加 → 寫回 → 記下題號
+ * (requirements 6.1、6.2、6.3、5.4–5.9、7.4、7.5)。
+ *
+ * ## 授權要到這一步才問
+ *
+ * 對話框是整條序列裡唯一會打斷維護者的東西 —— 它蓋住整個視窗,要用鍵盤或滑鼠才
+ * 關得掉。撞號或驗證擋下的題目根本寫不出去,為它跳一次對話框,代價完全落在人身上
+ * (6.1 的「首次要求寫入時請求授權」講的是時機,不是頁面載入時)。
+ *
+ * 反過來說,**授權尚未取得不妨礙任何事**(6.4):繪盤與七個欄位都不經過本函式,
+ * 構造上碰不到平台。
+ *
+ * ## 重讀擺在授權之後
+ *
+ * 讀檔到寫檔之間目標檔若被編輯器或 git 改動,追加會蓋掉那次改動(design 的 Risks)。
+ * 那個視窗壓不到零,但可以壓到最小 —— 而挑目錄要花的是**人的時間**,是這條序列裡
+ * 最長的一段。先讀再等人挑目錄,等的那段時間全都算進視窗裡。
+ *
+ * ## 三種失敗,兩種歸屬
+ *
+ * - **不支援**(6.3)與**拒絕授權**(6.2):requirement 明文要求告知,在這裡就翻成
+ *   畫面上的說法。表單內容一字不動 —— 只有寫入成功才清空,而那屬 5.4。
+ * - **其餘**(目標檔不是題目陣列、平台寫入失敗):原樣往上。它們的說法歸 7.3 的
+ *   一般失敗處理,而那是 5.4 的事;在這裡先寫一句,同一件事就會有兩種講法。
+ *
+ * 三者的共同點是**都不記題號**:`recordWrittenId()` 只在寫回兌現之後才呼叫,失敗的
+ * 嘗試不佔用題號(4.4)。佔走的話,維護者排除障礙後再送一次會被自己上一次的失敗
+ * 擋下,而畫面說的是「這個題號重複」—— 一句與事實完全相反的話。
+ *
+ * @param {object} candidate `buildCandidate()` 的產物,即送去驗證的那一份。
+ * @returns {Promise<void>}
+ * @throws {CorpusFileError} 目標檔的既有內容不是題目陣列(5.6)。
+ */
+async function writeCandidate(candidate) {
+  const target = valueOf('target').trim();
+
+  let directory;
+  try {
+    directory = await acquireCorpusDirectory();
+  } catch (error) {
+    if (error instanceof UnsupportedBrowserError) {
+      attemptNote = UNSUPPORTED_NOTE;
+    } else if (error instanceof PermissionDeniedError) {
+      attemptNote = DENIED_NOTE;
+    } else {
+      throw error;
+    }
+    render(null);
+    return;
+  }
+
+  // `readTextAt()` 對不存在的檔案回 `null`,而那個 `null` 一路傳進 `appendPosition()`
+  // ——**不折成空字串**:空字串是「檔案在,但裡面沒有東西」,那一種要報錯而不是產出
+  // 一份新檔(`corpus-file.js` 的三種形態)。一種狀態只有一個表示法。
+  const existing = await readTextAt(directory, target);
+  const updated = appendPosition(existing, candidate);
+  await writeTextAt(directory, target, updated);
+
+  // 落盤之後才記(4.4)。`writeTextAt()` 兌現時內容已經在磁碟上(`fs.js` 的
+  // Postconditions),所以這一行的前提是成立的。
+  recordWrittenId(candidate.id);
+  // 寫入成功。成功訊息與清空欄位屬 tasks 5.4,本輪刻意不生任何呈現。
+}
+
+/**
+ * 寫入序列擋得下來的那三步:取題庫索引、撞號檢查、送權威驗證
+ * (requirements 4.3、4.4、4.5、4.7、4.8、4.9)。三步全過才交給 `writeCandidate()`。
  *
  * **每一次嘗試都重新取一次索引**,不是載入時取一次就沿用(research 的 Decision 5):
  * 服務會在題目檔變動時重啟,索引因此自己會跟上,重新取一次可讓已經進了索引的題號
@@ -1122,8 +1224,8 @@ function applyFailure(code, key) {
  * 不可能同時掛著兩次嘗試的話,也不會在 `loadCatalog()` 拋出、序列停住的那條路上留著
  * 一句已經被撤下的舊話(狀態與畫面分家)。取不到索引時該說什麼屬 5.4。
  *
- * **序列到此為止。** 5.3 的目錄授權與寫檔接在下面那一行註解的位置,再往下是 5.4 的
- * 成敗呈現。驗證通過在本輪因此不生任何呈現 —— 那正是「還沒有偷跑」的樣子。
+ * **三步全過就交棒。** 驗證通過那一行呼叫 `writeCandidate()`,而本函式對它的結果
+ * 不再多做任何事 —— 成敗的呈現屬 5.4,寫在兩處只會讓同一件事有兩種講法。
  */
 async function runWriteSequence() {
   candidateVerdict = null;
@@ -1161,7 +1263,8 @@ async function runWriteSequence() {
   // **兩者矛盾時取嚴的那一邊。** `valid` 由 `issues` 導出,契約上不可能不一致;
   // 真的不一致時放行的代價是壞資料進題庫,擋下的代價只是維護者再按一次。
   if (payload.valid && issues.length === 0) {
-    // 驗證通過(4.7)。tasks 5.3 的目錄授權與寫檔自此接續,而後是 5.4 的成敗呈現。
+    // 驗證通過(4.7)—— 取目錄授權、重讀目標檔、追加、寫回(6.1–6.3、5.4–5.9)。
+    await writeCandidate(candidate);
     return;
   }
 
@@ -1179,9 +1282,16 @@ async function runWriteSequence() {
 /**
  * 按下寫入時跑一次寫入序列(requirements 4.3、4.4、4.5)。
  *
- * 這一層只處理**取不到索引**這一種停止:服務重啟中、連線斷掉或逾時的時候
- * `loadCatalog()` 拋出 `CatalogError`,而寫入不成立(design 的 Risks 已把它歸在
- * 7.3 的一般失敗處理,不另立分支)。
+ * 這一層處理**兩種預期內的停止**,兩者的共同點是「說法歸 7.3、而 7.3 屬 tasks 5.4」:
+ *
+ * - **取不到索引**:服務重啟中、連線斷掉或逾時的時候 `loadCatalog()` 拋出
+ *   `CatalogError`,而寫入不成立(design 的 Risks 已把它歸在 7.3,不另立分支)。
+ * - **目標檔不是題目陣列**:`appendPosition()` 拋出 `CorpusFileError`(5.6)。追加是
+ *   整檔覆寫,所以這一道擋的是「路徑打錯,而那個檔是別的東西」——本工具最危險的
+ *   一步。擋下之後檔案一個位元組都沒被動過。
+ *
+ * 平台的寫入失敗(權限中途失效、磁碟寫不進去)**目前原樣往上**:它沒有專屬的錯誤
+ * 型別,與真正的缺陷分不開,而 5.4 要為 7.3 寫一般失敗呈現時會一併決定。
  *
  * **不得把它折成「沒有撞號」**:那會讓最容易撞號的那一刻 —— 剛寫完一題、服務正在
  * 重啟、索引因此取不到 —— 變成最放行的一刻。此處因此只是讓序列停下,連上一次的
@@ -1200,13 +1310,21 @@ async function attemptWrite() {
   try {
     await runWriteSequence();
   } catch (error) {
-    if (!(error instanceof CatalogError)) {
+    if (!(error instanceof CatalogError) && !(error instanceof CorpusFileError)) {
       throw error;
     }
   }
 }
 
 renderDifficultyOptions();
+
+// 平台支不支援(6.3)。**問一次就夠,而且要在載入時問**:`isSupported()` 只看一個
+// 全域函式在不在,沒有副作用也不會在分頁存續期間改變答案。等到按下寫入才說是錯的
+// —— 維護者會先花時間貼 FEN、填完七個欄位、核對盤面,然後才知道這個瀏覽器從一開始
+// 就做不到這件事。
+//
+// 這也是本檔唯一不經 `render()` 的畫面更新,理由正是「它不是當下那些值的函式」。
+elements.unsupported.hidden = isSupported();
 
 // **`input` 而不是 `change`**(requirement 2.1):`change` 要等到欄位失焦才發,貼上
 // FEN 之後盤面得等使用者去點別的地方才出現。`input` 涵蓋鍵入、貼上、剪下與復原,
@@ -1219,7 +1337,7 @@ for (const [name, control] of elements.controls) {
   control.addEventListener('input', () => render(name));
 }
 
-// 寫入序列(5.2 走到權威驗證為止)。處理器本身刻意是同步的,只把那個 promise 丟出去
+// 寫入序列(5.3 走到寫回為止)。處理器本身刻意是同步的,只把那個 promise 丟出去
 // ——`addEventListener` 不會等 async 處理器,回傳一個 promise 給它只會讓「誰來處理
 // 拒絕」變得含混。真正的例外處理集中在 `attemptWrite()` 一處。
 //

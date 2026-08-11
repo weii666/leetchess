@@ -1,10 +1,17 @@
-"""收題頁按下寫入之後的撞號檢查與權威驗證(tasks 5.1、5.2;requirements 4.3–4.5、
-4.7–4.9)。
+"""收題頁按下寫入之後的整條寫入流程(tasks 5.1–5.3;requirements 4.3–4.5、4.7–4.9、
+5.4–5.9、6.1–6.4、7.4、7.5)。
 
 寫入一題是一條有次序的序列(design 的 System Flows):**取索引 → 撞號 → 送權威
 驗證 → 取目錄授權 → 重讀目標檔 → 文字層追加 → 寫回 → 記下題號並清空欄位**。
-本檔涵蓋的是**前三步**,tasks 5.3–5.4 會沿用同一套夾具往下接 —— 因此夾具與輔助
-函式都寫成「一次寫入嘗試」的形狀,而不是「一次撞號檢查」的形狀。
+本檔涵蓋的是**記下題號為止**,task 5.4 會沿用同一套夾具接上成敗呈現與清空 ——
+因此夾具與輔助函式都寫成「一次寫入嘗試」的形狀,而不是「一次撞號檢查」的形狀。
+
+## 這條序列的每一步都是「擋得下來」或「已經動到磁碟」二者之一
+
+前三步都可能讓寫入不成立,而它們的共同責任是**在動到磁碟之前擋下來**;後四步則
+已經假定它成立了。這條分界在測試裡的樣子,是幾乎每一組都會問一次「平台被碰過
+幾次」——`fs_kinds()` 回的那份流水帳。撞號擋下卻已經跳過目錄選擇框、驗證未通過卻
+已經讀過檔,兩者都是次序壞掉,而它們在畫面上看起來與正確的實作一模一樣。
 
 ## 判定與「確認未能完成」是兩件事,而畫面必須分得出來
 
@@ -72,6 +79,9 @@ CATALOG_PATH = "/api/catalog"
 
 #: 權威驗證端點(design 的 API Contract)。撞號通過的嘗試必然走到這裡(5.2)。
 VALIDATE_PATH = "/api/editor/validate"
+
+#: 平台包裝的模組位址。本檔**以替身頂替它**(5.3),理由見 `FS_FAKE_SOURCE`。
+FS_MODULE_PATH = "/editor/fs.js"
 
 #: 桌面尺寸。窄畫面的折行屬版面(4.1)。
 DESKTOP = (1280, 800)
@@ -224,6 +234,92 @@ class Validator:
         return [body.get("position") for body in self.bodies]
 
 
+# --- 平台包裝替身 -------------------------------------------------------
+
+
+#: 題庫目錄裡那個目標檔的相對路徑,即 `VALID_FORM['target']`。
+TARGET_PATH = VALID_FORM["target"]
+
+#: 目標檔的既有內容 —— 一份**只有一題**的合法題目檔。
+#:
+#: 排版刻意照既有題目檔的樣子寫(兩格縮排、欄位各一行、標籤單行、中文不轉義),
+#: 因為 7.4 要問的是「既有的每一題逐字不變」,而逐字不變只有在既有內容本來就有
+#: 排版特徵時才問得出來 —— 一份被重新序列化過的檔案與原檔的差別正是排版。
+EXISTING_FILE = """[
+  {
+    "id": 21,
+    "title": "獨卒擒王",
+    "description": "適情雅趣 第二一局 獨卒擒王",
+    "fen": "4k4/9/9/9/9/9/9/9/4P4/4K4 w - - 0 1",
+    "difficulty": 1,
+    "tags": ["小兵", "困斃"]
+  }
+]
+"""
+
+
+#: 注入的 `fs.js` 替身原始碼。
+#:
+#: design 的 Testing Strategy 明載這是**刻意接受的覆蓋缺口**:系統目錄選擇框無法由
+#: 自動化工具操作,所以檔案系統那一層以替身驗證。`fs.js` 自己的每一行由
+#: `tests/test_web_editor_fs.py` 以平台替身驗證,本檔驗的是**組裝層有沒有照正確的
+#: 次序使用它**——什麼時候問授權、什麼時候重讀、寫出去的是哪一串位元組。
+#:
+#: 替身的形狀貼著 `fs.js` 的契約寫,兩處尤其要緊:`acquireCorpusDirectory()`
+#: **不是 async 函式**(它必須同步把對話框開下去,見該檔的 Preconditions),以及
+#: `readTextAt()` 對不存在的檔案**回 `null` 而不是拋出** —— 一種狀態只有一個表示法。
+#:
+#: 狀態掛在 `globalThis.__fs` 上讓測試讀寫。`supported` 是唯一必須在模組求值**之前**
+#: 就定好的旗標(6.3 要求載入時就告知),所以它讀的是 `globalThis.__fsSupported`,
+#: 由 `add_init_script()` 在導覽之前種下。
+FS_FAKE_SOURCE = """
+const state = {
+  supported: globalThis.__fsSupported !== false,
+  denied: false,
+  files: {},
+  calls: [],
+};
+globalThis.__fs = state;
+
+export class UnsupportedBrowserError extends Error {
+  constructor() {
+    super('這個瀏覽器沒有本機目錄選取');
+    this.name = 'UnsupportedBrowserError';
+  }
+}
+
+export class PermissionDeniedError extends Error {
+  constructor() {
+    super('未取得題庫目錄的存取授權');
+    this.name = 'PermissionDeniedError';
+  }
+}
+
+export function isSupported() {
+  return state.supported;
+}
+
+export function acquireCorpusDirectory() {
+  state.calls.push(['acquire']);
+  if (!state.supported) return Promise.reject(new UnsupportedBrowserError());
+  if (state.denied) return Promise.reject(new PermissionDeniedError());
+  return Promise.resolve({ name: 'positions' });
+}
+
+export async function readTextAt(dir, relativePath) {
+  state.calls.push(['read', relativePath]);
+  return Object.prototype.hasOwnProperty.call(state.files, relativePath)
+    ? state.files[relativePath]
+    : null;
+}
+
+export async function writeTextAt(dir, relativePath, text) {
+  state.calls.push(['write', relativePath]);
+  state.files[relativePath] = text;
+}
+"""
+
+
 # --- 夾具與操作 ---------------------------------------------------------
 
 
@@ -241,10 +337,13 @@ def validator() -> Validator:
 
 @pytest.fixture
 def editor_page(browser_page, catalog: Catalog, validator: Validator) -> Iterator:
-    """以 http 來源開啟**真實的**收題頁,並把兩個後端端點接到本檔的替身。
+    """以 http 來源開啟**真實的**收題頁,並把兩個後端端點與平台包裝接到本檔的替身。
 
-    索引、驗證與靜態檔共用同一個處理器而不是註冊三條 `page.route()`:多條規則的
-    優先順序是框架的細節,寫成一個顯式的分派就不必記它。
+    索引、驗證、`fs.js` 與其餘靜態檔共用同一個處理器而不是註冊四條 `page.route()`:
+    多條規則的優先順序是框架的細節,寫成一個顯式的分派就不必記它。
+
+    `fs.js` 是**唯一被頂替的模組**,其餘一律供真實檔案 —— 被驗證的必須是真的
+    `editor.js`、真的 `check.js`、真的 `corpus-file.js`(見 `FS_FAKE_SOURCE`)。
     """
 
     def serve(route) -> None:
@@ -275,6 +374,14 @@ def editor_page(browser_page, catalog: Catalog, validator: Validator) -> Iterato
                 status=validator.status,
                 content_type="application/json",
                 body=json.dumps(validator.payload),
+            )
+            return
+
+        if path == FS_MODULE_PATH:
+            route.fulfill(
+                status=200,
+                content_type=CONTENT_TYPES[".js"],
+                body=FS_FAKE_SOURCE,
             )
             return
 
@@ -382,6 +489,35 @@ def record_written_id(page, position_id: int) -> None:
 def page_text(page) -> str:
     """整頁看得見的文字。用來斷言某些字**沒有**出現在畫面上任何一處。"""
     return page.evaluate("() => document.body.innerText")
+
+
+def fs_calls(page) -> list[list]:
+    """平台包裝被使用的完整流水帳,依發生次序。
+
+    次序本身就是 5.3 要釘住的東西:授權在重讀之前、重讀在寫回之前。一份「有沒有
+    呼叫過」的集合表達不了這件事。
+    """
+    return page.evaluate("() => globalThis.__fs.calls")
+
+
+def fs_kinds(page) -> list[str]:
+    """流水帳裡只取動作名 —— 問次序時路徑是噪音。"""
+    return [call[0] for call in fs_calls(page)]
+
+
+def fs_files(page) -> dict:
+    """替身當下持有的檔案內容。寫回落盤之後這裡就是磁碟上的那串位元組。"""
+    return page.evaluate("() => globalThis.__fs.files")
+
+
+def fs_setup(page, **changes) -> None:
+    """佈置替身的前提:既有檔案內容、是否拒絕授權。"""
+    page.evaluate("changes => Object.assign(globalThis.__fs, changes)", changes)
+
+
+def unsupported_is_shown(page) -> bool:
+    """不支援的說明(6.3)當下看不看得見。"""
+    return page.evaluate("() => !document.getElementById('unsupported').hidden")
 
 
 def wait_for_catalog(page, catalog: Catalog, expected: int) -> None:
@@ -997,17 +1133,308 @@ def test_a_fen_the_service_refuses_to_send_is_not_a_busy_service(
     assert BACKEND_DETAIL not in page_text(editor_page)
 
 
-# --- 本任務的邊界:序列停在權威驗證之後 --------------------------------
+# --- 授權的時機:在驗證之後,不在之前(6.1)----------------------------
 
 
-def test_the_write_sequence_stops_after_the_authoritative_validation(
+def test_a_failed_verdict_never_opens_the_directory_picker(
     editor_page, catalog: Catalog, validator: Validator
 ) -> None:
-    """5.2 實作序列的前三步:取索引、撞號、送權威驗證。
+    """次序是設計的一部分:**不合格的題目不讓維護者先跳一次目錄選擇框**。
 
-    目錄授權與寫檔(5.3)、成敗呈現(5.4)都還不存在,因此一次通過的嘗試對後端
-    只有那兩個請求,而畫面上沒有任何一句話說寫入成功了。這一條釘住的是「這裡還
-    沒有偷跑」,5.3 起會由那些任務改寫。
+    對話框是這條序列裡唯一會打斷維護者的東西 —— 它蓋住整個視窗、要用鍵盤或滑鼠
+    才關得掉。為一份根本寫不出去的題目跳一次,代價完全落在人身上。
+    """
+    validator.rejects([{"field": "fen", "message": "引擎載不進這個 fen"}])
+    catalog.ids = []
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    assert message(editor_page, "fen") != ""
+    assert fs_calls(editor_page) == [], "不合格的題目卻已經去要了目錄授權"
+
+
+def test_a_collision_never_opens_the_directory_picker(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """撞號擋下的嘗試同樣不碰平台 —— 理由與上一條相同,只是擋在更前面一步。"""
+    catalog.ids = [FORM_ID]
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog)
+
+    assert str(FORM_ID) in message(editor_page, "id")
+    assert fs_calls(editor_page) == [], "撞號已經擋下這一次嘗試,不該再去要授權"
+
+
+def test_the_target_file_is_read_only_after_the_directory_is_granted(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """授權 → 重讀 → 寫回,而且**就是這個次序**。
+
+    重讀擺在授權之後才把「讀檔到寫檔」的視窗壓到最小(design 的 Risks):那段期間
+    目標檔若被編輯器或 git 改動,追加會蓋掉那次改動。先讀再等使用者挑目錄,等的
+    那段時間全都算在視窗裡,而挑目錄要花的正是人的時間 —— 那是這條序列裡最長的
+    一段。
+    """
+    catalog.ids = []
+    fs_setup(editor_page, files={TARGET_PATH: EXISTING_FILE})
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    assert fs_kinds(editor_page) == ["acquire", "read", "write"]
+    assert fs_calls(editor_page)[1] == ["read", TARGET_PATH], "重讀的不是目標檔"
+    assert fs_calls(editor_page)[2] == ["write", TARGET_PATH], "寫回的不是目標檔"
+
+
+def test_drawing_and_typing_work_before_any_authorisation(
+    editor_page, catalog: Catalog
+) -> None:
+    """6.4:授權尚未取得時,繪盤與全部欄位的填寫**仍然可用**。
+
+    這是「授權只在按下寫入時才要」的可觀察後果。頁面載入時就跳對話框的實作會在
+    這裡被抓到:那時維護者連要不要用這個工具都還沒決定。
+    """
+    fill_valid_form(editor_page)
+
+    assert editor_page.locator("#board .piece").count() > 0, "沒有授權就畫不出盤面"
+    for name in FORM_FIELDS:
+        assert value_of(editor_page, name) == VALID_FORM[name], f"{name} 填不進去"
+    assert write_is_enabled(editor_page), "七欄都填妥了,寫入卻按不下去"
+    assert fs_calls(editor_page) == [], "還沒按下寫入就去要了目錄授權"
+
+
+# --- 平台不支援(6.3)--------------------------------------------------
+
+
+def reload_as_unsupported(page) -> None:
+    """把這一頁重新載入成「平台不支援」的樣子。
+
+    `isSupported()` 在模組求值時就被問到(6.3 要求載入當下即告知),所以旗標必須在
+    導覽**之前**種下 —— `add_init_script()` 只對之後的導覽生效,故要重新載入一次。
+    """
+    page.add_init_script("globalThis.__fsSupported = false;")
+    page.reload()
+    page.wait_for_function(
+        "() => document.querySelectorAll('[data-field=\"difficulty\"] option').length > 1",
+        timeout=5000,
+    )
+
+
+def test_an_unsupported_browser_says_so_before_anything_is_pressed(editor_page) -> None:
+    """6.3:不支援時**載入當下**就告知,不必等到按下寫入才發現。
+
+    等到按下才說是錯的:維護者會先花時間貼 FEN、填完七個欄位、核對盤面,然後才
+    知道這個瀏覽器從一開始就做不到這件事。`isSupported()` 沒有副作用,頁面載入時
+    問得起。
+    """
+    assert not unsupported_is_shown(editor_page), "支援的瀏覽器不該掛著不支援的說明"
+
+    reload_as_unsupported(editor_page)
+
+    assert unsupported_is_shown(editor_page), "不支援的瀏覽器上那句說明沒有出現"
+    assert fs_kinds(editor_page) == [], "只是問支不支援,不該去要授權"
+
+
+def test_an_unsupported_browser_that_is_pressed_anyway_says_why(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """6.3 的另一半:真的按下去時,寫入操作旁那一行也要說得出原因。
+
+    畫面上那句常駐的說明可能被捲出視野,而按下寫入之後維護者的眼睛在按鈕附近。
+    兩處說的是同一件事,不是兩種原因。
+    """
+    reload_as_unsupported(editor_page)
+
+    catalog.ids = []
+    fill_valid_form(editor_page)
+    attempt_write(editor_page, catalog, validator)
+
+    assert "不支援" in note(editor_page), f"按下之後說的是 {note(editor_page)!r}"
+    assert fs_kinds(editor_page) == ["acquire"], "不支援卻仍然去讀寫了檔案"
+
+
+# --- 拒絕授權或取消選擇(6.2)------------------------------------------
+
+
+def test_a_refused_authorisation_keeps_everything_and_says_nothing_was_written(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """6.2:拒絕授權或取消選擇時,**保留已填入的全部內容**,並告知寫入未進行。
+
+    兩件事缺一不可。只保留內容而不說話,畫面看起來與什麼都沒按一樣;只說話而清空
+    內容,維護者要重抄一次 FEN —— 而按 Esc 關掉對話框是最容易誤觸的一個動作。
+    """
+    catalog.ids = []
+    fs_setup(editor_page, denied=True, files={TARGET_PATH: EXISTING_FILE})
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    assert note(editor_page) != "", "拒絕授權之後畫面一句話都沒說"
+    for name in FORM_FIELDS:
+        assert value_of(editor_page, name) == VALID_FORM[name], (
+            f"拒絕授權之後 {name} 的內容變了"
+        )
+    assert fs_kinds(editor_page) == ["acquire"], "沒拿到授權卻仍然動了檔案"
+    assert fs_files(editor_page) == {TARGET_PATH: EXISTING_FILE}, "目標檔被動過了"
+
+
+def test_a_refused_authorisation_does_not_reserve_the_id(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """4.4 的規則在這條路上同樣成立:**沒寫成功的嘗試不佔用題號**。
+
+    佔走的話,維護者按了允許之後再送一次,會被自己上一次的失敗擋下來,而畫面說的
+    是「這個題號重複」——一句與事實完全相反的話。
+    """
+    catalog.ids = []
+    fs_setup(editor_page, denied=True)
+    fill_valid_form(editor_page)
+    attempt_write(editor_page, catalog, validator)
+    assert note(editor_page) != ""
+
+    fs_setup(editor_page, denied=False)
+    attempt_write(editor_page, catalog, validator)
+
+    assert message(editor_page, "id") == "", "被拒絕的那一次嘗試把題號佔走了"
+    assert "write" in fs_kinds(editor_page), "給了授權之後仍然沒有寫出去"
+
+
+# --- 重讀、追加與寫回(5.4–5.9、7.4、7.5)------------------------------
+
+
+def test_a_successful_write_keeps_every_existing_position_byte_for_byte(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """7.4、7.5:新題進去了,而既有的每一題**逐字不變、一題都不少**。
+
+    斷言寫成「既有全文是新全文的前綴」而不是「解析後比對」,因為兩者證明的東西
+    差很多:解析後相等只說明資料一樣,而前綴成立說明**那段位元組根本沒有被重寫
+    過** —— 排版、縮排、中文的原樣全都在。這正是 `appendPosition()` 在文字層而不是
+    在資料層做事的理由。
+    """
+    catalog.ids = [21]
+    fs_setup(editor_page, files={TARGET_PATH: EXISTING_FILE})
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    written = fs_files(editor_page)[TARGET_PATH]
+    kept = EXISTING_FILE[: EXISTING_FILE.rindex("]")].rstrip()
+    assert written.startswith(kept), "既有內容被重新序列化過了"
+
+    entries = json.loads(written)
+    assert len(entries) == 2, "追加之後不是兩題"
+    assert entries[1] == EXPECTED_CANDIDATE, "寫進去的那一題與送去驗證的那一份不同"
+
+
+def test_a_missing_target_file_becomes_a_single_element_array(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """目標檔還不存在時產出一份只有一題的題目檔(3.2 的三種形態之一)。
+
+    新的書目資料夾收第一題就是這個情形,而 `readTextAt()` 對不存在的檔案回 `null`
+    ——那個 `null` 必須一路走到 `appendPosition()`,不能在中間被折成空字串:空字串
+    是「檔案在但空的」,那一種要報錯而不是產出新檔。
+    """
+    catalog.ids = []
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    assert json.loads(fs_files(editor_page)[TARGET_PATH]) == [EXPECTED_CANDIDATE]
+
+
+def test_every_attempt_re_reads_the_target_file(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """每一次寫入都**重讀一次**目標檔,不沿用上一次讀到的內容。
+
+    可觀察的後果是連寫兩題會累積成兩題。沿用舊內容的實作在這裡會把第一題蓋掉 ——
+    而那正是本工具最不能犯的錯:一次寫入弄丟一題既有的題目。
+    """
+    catalog.ids = []
+    fill_valid_form(editor_page)
+    attempt_write(editor_page, catalog, validator)
+
+    put(editor_page, "id", "27")
+    attempt_write(editor_page, catalog, validator)
+
+    assert fs_kinds(editor_page) == ["acquire", "read", "write"] * 2
+    entries = json.loads(fs_files(editor_page)[TARGET_PATH])
+    assert [entry["id"] for entry in entries] == [26, 27], "第二次寫入沒有讀到第一次的結果"
+
+
+def test_a_target_that_is_not_a_position_array_is_not_written(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """目標檔不是題目陣列時**不寫入**(5.6)。
+
+    這是本工具最危險的一步:一個路徑打錯的目標檔可能是任何東西,而追加是整檔覆寫。
+    判準止於「是不是陣列」,但那一道必須真的擋得住 —— 讀到的內容原封不動留在磁碟上。
+    """
+    junk = '{"這不是": "題目陣列"}\n'
+    catalog.ids = []
+    fs_setup(editor_page, files={TARGET_PATH: junk})
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    assert fs_kinds(editor_page) == ["acquire", "read"], "非題目陣列的檔案被寫過了"
+    assert fs_files(editor_page) == {TARGET_PATH: junk}, "目標檔的內容變了"
+
+
+def test_a_failed_append_does_not_reserve_the_id(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """追加失敗同樣不佔用題號 —— 與拒絕授權那一條是同一條規則的另一個入口。"""
+    catalog.ids = []
+    fs_setup(editor_page, files={TARGET_PATH: "不是 JSON"})
+    fill_valid_form(editor_page)
+    attempt_write(editor_page, catalog, validator)
+    assert fs_kinds(editor_page) == ["acquire", "read"]
+
+    fs_setup(editor_page, files={})
+    attempt_write(editor_page, catalog, validator)
+
+    assert message(editor_page, "id") == "", "追加失敗的那一次嘗試把題號佔走了"
+    assert json.loads(fs_files(editor_page)[TARGET_PATH]) == [EXPECTED_CANDIDATE]
+
+
+def test_a_written_id_is_reserved_for_the_rest_of_the_tab(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """4.4 走完整條真實路徑:**寫入成功之後**那個題號才進入本分頁的已寫入集合。
+
+    5.1 是拿 `recordWrittenId()` 佈置前提來驗撞號規則的,那證明不了有人真的呼叫它。
+    這一條從按下寫入開始:第一次成功、第二次同一題號被擋 —— 而題庫索引自始至終
+    是空的,所以擋下來的唯一可能來源就是那次成功的寫入。
+    """
+    catalog.ids = []
+    fill_valid_form(editor_page)
+    attempt_write(editor_page, catalog, validator)
+    assert "write" in fs_kinds(editor_page), "第一次就沒寫成功,這一條問不出東西"
+
+    attempt_write(editor_page, catalog)
+
+    assert str(FORM_ID) in message(editor_page, "id"), (
+        "寫入成功之後題號沒有進入已寫入集合 —— `recordWrittenId()` 沒有被呼叫"
+    )
+    assert fs_kinds(editor_page).count("write") == 1, "撞號沒擋住,同一題被寫了兩次"
+
+
+# --- 本任務的邊界:序列停在寫回之後 ------------------------------------
+
+
+def test_the_write_sequence_stops_after_the_file_is_written(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """5.3 實作到寫回為止。
+
+    成功訊息與清空欄位屬 5.4,因此一次成功的嘗試之後畫面上**沒有任何一句話**說它
+    成功了,七個欄位也還是原樣。這一條釘住的是「這裡還沒有偷跑」,5.4 會改寫它。
     """
     paths: list[str] = []
     editor_page.on("request", lambda request: paths.append(urlsplit(request.url).path))
@@ -1016,6 +1443,11 @@ def test_the_write_sequence_stops_after_the_authoritative_validation(
     fill_valid_form(editor_page)
     attempt_write(editor_page, catalog, validator)
 
+    assert "write" in fs_kinds(editor_page)
     api = [path for path in paths if path.startswith("/api/")]
-    assert api == [CATALOG_PATH, VALIDATE_PATH], f"驗證之外還打了別的端點:{api}"
-    assert note(editor_page) == "", f"驗證通過還不是寫入成功:{note(editor_page)!r}"
+    assert api == [CATALOG_PATH, VALIDATE_PATH], f"寫入流程還打了別的端點:{api}"
+    assert note(editor_page) == "", f"成功訊息屬 5.4:{note(editor_page)!r}"
+    for name in FORM_FIELDS:
+        assert value_of(editor_page, name) == VALID_FORM[name], (
+            f"清空欄位屬 5.4,{name} 卻已經被動過"
+        )

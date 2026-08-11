@@ -130,7 +130,7 @@
   - _Requirements: 4.7, 4.8, 4.9_
   - _Depends: 2.4_
 
-- [ ] 5.3 目錄授權、重讀目標檔與寫回
+- [x] 5.3 目錄授權、重讀目標檔與寫回
   - 驗證通過後才請求目錄授權 —— 不合格的題目不讓使用者先跳一次目錄選擇框
   - 授權取得後**才重讀**目標檔,把讀檔到寫檔的視窗壓到最小,再以文字層追加產生新全文並寫回
   - 授權尚未取得時,繪盤與欄位填寫**仍然可用**
@@ -205,7 +205,7 @@
 - **4.3 待辦**:訊息槽目前吃 `.field-hint` 的灰字,與提示同色 —— 解析失敗看起來像提示。8.4 的視覺區隔要在 `editor.css` 做,`[data-message-for]` 已是現成的掛勾。
 
 - **5.1**:`/api/catalog` 的 client 是 **`web/catalog.js`(既有,列表頁在用)**,不是 `api.js` —— 後者的 `request()` 未 export,構造上到不了這個端點。design 已回填。
-- **5.3 必須做**:`recordWrittenId()` 目前**沒有任何模組內呼叫端**(只有測試拿它佈置前提)。寫回落盤成功之後、清空欄位之前必須真的呼叫它,否則 4.4 在真實路徑上不成立 —— 連寫兩題時第二題撞第一題不會被擋。並補一條端到端測試。
+- **5.3(已完成)**:`recordWrittenId()` 在 5.2 之前沒有任何模組內呼叫端(只有測試拿它佈置前提),4.4 因此在真實路徑上不成立。5.3 已在 `writeCandidate()` 的寫回兌現之後呼叫它,並補上端到端測試 `test_a_written_id_is_reserved_for_the_rest_of_the_tab` —— 那一條從按下寫入開始,索引自始至終為空,所以擋下第二次的唯一可能來源就是那次成功的寫入。
 - **5.4 必須做**:取索引失敗時目前**畫面完全沒有反應**(序列停住,但不說話)。design 的 Risks 說它歸一般失敗處理,所以 5.4 要在 `attemptWrite()` 的 catch 裡補上呈現,否則這個情境會靜默出貨。
 - **5.1**:撞號**刻意不停用** `#write` —— 檢查每次按下都重跑,擋不掉的寫入不存在;停用反而會讓維護者無法對同一題號再試一次(索引可能正在重啟)。
 
@@ -214,11 +214,16 @@
 - **5.2**:`attemptNote`(頁面層級說法)與 `candidateVerdict`(對某一份候選題目的判定)成立條件不同,故分成兩個變數:前者一路留到**下一次嘗試**才被換掉,後者在候選題目內容一改時就撤下。5.3/5.4 新增狀態時照這條規則判斷該掛在哪一邊。
 - **5.2**:`runWriteSequence()` 的接續點在「驗證通過(4.7)」那個 `return` 之前 —— 5.3 的授權與寫檔接在那裡,不必回頭改前三步的形狀。
 - **5.2**:`requestValidation()` 的逾時上界取 `api.js` 的 `DEFAULT_TIMEOUT_MS`(10 秒)而非 `catalog.js` 自己那一個:這個端點會借引擎,後端 8 秒的總時間預算就是那個常數在遷就的東西。
+- **5.3**:序列切成兩段函式 —— `runWriteSequence()` 是**擋得下來的那三步**(索引、撞號、驗證),`writeCandidate()` 是**通過之後真的動到磁碟的那幾步**(授權、重讀、追加、寫回、記下題號)。5.4 的成功呈現與清空欄位接在 `writeCandidate()` 最後一行之後。
+- **5.3**:目錄控制代碼**沒有**進 `editor.js` 的模組層狀態(5.2 的檔首曾預測它會)。它留在 `fs.js`,本檔每次寫入都照樣呼叫 `acquireCorpusDirectory()`,已取得者由那一層直接兌現 —— 在組裝層再記一份就是第二個真相來源。
+- **5.3(測試手法,5.4 沿用)**:`fs.js` 的替身由 `editor_page` 夾具以 `page.route()` 頂替 `/editor/fs.js` 注入,其餘模組一律供真實檔案。替身狀態掛在 `globalThis.__fs`(`files` / `calls` / `denied`),`supported` 例外 —— 它必須在模組求值前定好,由 `add_init_script()` 種 `globalThis.__fsSupported` 再 reload。`fs_kinds()` 回的流水帳是本檔問「次序有沒有壞掉」的主要工具。
+- **5.3(實測,勿再重查)**:**Playwright 的 Chromium 沒有 `showDirectoryPicker`**(`typeof` 為 `undefined`)。後果分兩邊:以 http 供檔的 `tests/test_web_editor_fields.py` 與 `tests/test_web_editor_board.py` 載的是真的 `fs.js`,所以那兩檔的頁面**自 5.3 起永遠掛著 `#unsupported` 那一段**(無害,它們不量幾何);而 `tests/test_web_editor_layout.py` 與 `test_web_editor_page.py` 以 `file://` 供檔,Chromium 不允許自 `file://` 匯入 ES module,`editor.js` 根本沒執行,那些版面斷言因此不受影響。**代價是 `test_the_unsupported_notice_has_a_fixed_place` 的「預設隱藏」永遠抓不到 `editor.js` 這一側的迴歸** —— 那一條由 5.3 新增的 `test_an_unsupported_browser_says_so_before_anything_is_pressed` 以替身補上。
+- **5.4 必須做(5.3 尚未做)**:**平台的寫入失敗**(權限中途失效、磁碟寫不進去)目前由 `attemptWrite()` **原樣往上拋**,畫面完全沒有反應。它沒有專屬的錯誤型別,與真正的缺陷分不開,所以 5.3 沒有替它決定;7.3 的一般失敗呈現要一併處理。`CatalogError`(索引取不到)與 `CorpusFileError`(目標檔不是題目陣列)已經是 `attemptWrite()` 吞下的兩種預期停止,同樣**還沒有任何說法**。
 - **5.4 必須做(5.2 尚未做)**:寫入期間**沒有停用** `#write`,連按兩次會送出兩次驗證、借兩次引擎。design 的 State Management 明列「寫入期間停用寫入按鈕」,歸屬在 5.4 的「寫入期間停用寫入操作」。
 
 ## 人工驗收清單(自動化到不了的部分)
 
-`fs.js` 對平台 API 的實際呼叫無法自動驗證(系統目錄選擇框不受測試工具操作)。**待 4.x / 5.x 把頁面接起來之後**,在桌面版 Chrome 以 `localhost` 開啟收題頁,依序確認:
+`fs.js` 對平台 API 的實際呼叫無法自動驗證(系統目錄選擇框不受測試工具操作)。**自 5.3 起這份清單跑得起來了** —— 寫入流程已接到寫回為止。在桌面版 Chrome 以 `localhost` 開啟收題頁,依序確認:
 
 1. 由真實按鈕觸發取得授權,選 `positions/`,**只跳一次**對話框
 2. 再按一次寫入,**不應**再跳對話框
