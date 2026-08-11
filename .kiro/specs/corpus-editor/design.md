@@ -238,7 +238,7 @@ sequenceDiagram
 | 3.2 | 難度三選一 | `editor.js`、`difficulty.js`(重用) | `DIFFICULTY_LABELS` | — |
 | 3.4, 3.5 | 不提供 `max_dtm` 與出處輸入 | `web/editor/index.html` | DOM 契約 | — |
 | 3.6–3.8 | ~~描述建議值、可自由改寫、可換行~~ **(已移除)** | — | `suggestDescription` 連同呼叫端一併刪除 | — |
-| 3.9 | 不提供描述輸入,亦不寫出描述 | `web/editor/index.html`、`corpus-file.js` | DOM 契約;`SCHEMA_FIELDS` | — |
+| 3.9 | 不提供描述輸入,亦不寫出描述 | `web/editor/index.html`、`corpus-file.js` | DOM 契約;`serializePosition` 略過不存在的欄位 | — |
 | 3.10 | 題目 schema 的描述改為選填 | `service/positions.py`、`service/types.py`、`service/main.py`、`structure.md` | `Position`、`CatalogEntry` | — |
 | 4.1, 4.2, 4.6 | 必填、題號正整數、標籤至少一個 | `check.js` | `checkForm` | 淺層檢查 |
 | 4.3, 4.4, 4.5 | 撞號檢查含本分頁已寫入者 | `editor.js` | `catalog.js` 的 `loadCatalog` + 分頁內集合 | 寫入流程 |
@@ -346,7 +346,13 @@ interface CheckModule {
 | Intent | 決定「一題在題庫檔中長什麼樣」,以及如何把它接到既有檔案文字之後 |
 | Requirements | 5.5, 5.6, 5.7, 5.8, 5.9, 7.4 |
 
-> **修訂:`SCHEMA_FIELDS` 去掉 `description`(3.9);`appendPosition` 的 `null` 分支失去呼叫端(5.4 移出範圍)。** 該分支**保留**而不刪除:它是本模組對外契約的一部分、由測試釘住、且是純函式沒有維護成本,而 5.4 只是移出本輪範圍不是被否決 —— 日後補上「另存新檔」時它就是現成的。`check.js` 那兩個函式的處置刻意相反,差別在**它們有沒有可能回來**。
+> **修訂:`SCHEMA_FIELDS` 保留 `description` 的位置,但序列化時略過候選題目沒有的欄位。**
+>
+> 直覺的做法是把 `description` 自 `SCHEMA_FIELDS` 刪掉,但那會打破本模組最強的一道回歸網:「對**既有題庫檔中的每一題**重新序列化後與原檔片段逐字相同」—— 既有題目**全部帶著描述**,少寫一個欄位就對不起來,而那道網防的是排版漂移,不該為了一個選填欄位放棄。
+>
+> 因此 `SCHEMA_FIELDS` 仍是六個名字(它表達的是**欄位次序**),`serializePosition()` 改為只寫出 entry 上實際存在的欄位。收題頁不產生 `description`(3.9),所以新題自然不含它;既有題目仍逐字還原得出來。
+>
+> **`appendPosition` 的 `null` 分支失去呼叫端**(5.4 移出範圍),但**保留**而不刪除:它是本模組對外契約的一部分、由測試釘住、且是純函式沒有維護成本,而 5.4 只是移出本輪範圍不是被否決 —— 日後補上「另存新檔」時它就是現成的。`check.js` 那兩個函式的處置刻意相反,差別在**它們有沒有可能回來**。
 
 **Responsibilities & Constraints**
 
@@ -719,7 +725,8 @@ class CandidatePositionRequest(BaseModel):
 
 ### 純函式測試(Playwright `page.evaluate()`)
 
-1. `serializePosition()` 對**既有題庫檔中的每一題**重新序列化後與原檔片段逐字相同 —— 排版漂移的回歸網
+1. `serializePosition()` 對**既有題庫檔中的每一題**重新序列化後與原檔片段逐字相同 —— 排版漂移的回歸網。**既有題目全部帶著 `description`,所以這條同時釘住了「略過不存在的欄位」不會誤傷有值的欄位**
+1b. `serializePosition()` 對**不帶 `description`** 的候選題目輸出五個欄位,且其餘欄位的排版與有描述時完全相同(3.9)
 2. `appendPosition()` 的三種形態:不存在、空陣列、非空陣列;非陣列輸入拋 `CorpusFileError`。**「不存在」那一種已無呼叫端**(5.4 移出範圍),測試保留 —— 它釘住的是模組契約,而該分支日後補上「另存新檔」時就是現成的
 3. `appendPosition()` 的輸出以 `existing` 為前綴直到收尾的 `]`(5.7 的構造性保證)
 4. `checkForm()` 對各種缺漏回傳定位到正確欄位的清單,順序與表單一致

@@ -171,6 +171,75 @@
   - _Requirements: 1.2_
   - _Boundary: tests/test_web_editor_entry.py_
 
+## 7. 修訂:選檔案取代路徑、描述欄移除
+
+> 本組來自人工驗收後的 requirements / design 窄修訂(見兩份文件的「修訂」說明)。排序原則:**schema 先鬆綁**,否則收題頁一改成不寫描述,寫出的每一題都會讓服務啟動不起來;純函式與平台包裝各自獨立成檔、可並行;版面與組裝層是整合,不可並行。
+>
+> 本組**刪除的程式碼多於新增的**。每一項都要連同其測試一起處理 —— 留著一份沒有呼叫端的函式與它的測試,下一個人會以為那是現行行為。
+
+- [ ] 7.1 題目 schema 的描述改為選填
+  - `structure.md` 的 schema 表格把 `description` 標為選填並記下理由;**定義權在這份文件**,程式碼跟著它走
+  - 自 `service/positions.py` 的必填欄位清單移除 `description`;`service/types.py` 的 `Position.description` 與 `service/main.py` 的 `CatalogEntry.description` 改為可空
+  - `description` **仍是允許的欄位** —— 只是不再必填。把它自允許清單一併刪掉會讓既有題目全數被判為含未知欄位
+  - 既有題目一律帶著描述,**不做任何資料遷移**
+  - 完成狀態:既有題庫的每一題仍載得進去,且一份**不帶** `description` 的題目也載得進去;題庫列表頁與對局頁的畫面**實測**無變化(兩者本就不渲染描述)
+  - _Requirements: 3.10_
+  - _Boundary: structure.md, service/positions.py, service/types.py, service/main.py_
+
+- [ ] 7.2 (P) fs.js:檔案控制代碼取代目錄控制代碼
+  - 以 `pickCorpusFile()`、`selectedFile()`、`readText(handle)`、`writeText(handle, text)` 取代 `acquireCorpusDirectory()`、`readTextAt()`、`writeTextAt()`
+  - `pickCorpusFile()` **每次呼叫都重新詢問** —— 它同時是 5.11 的「更換目標題目檔」;`selectedFile()` **不開任何對話框**,任何時候都呼叫得起
+  - 選檔與要權限仍須落在使用者手勢的呼叫堆疊內,`pickCorpusFile()` 因此**刻意不是 `async`**(沿用既有理由)
+  - 檔案型別過濾限 `.json` 單選,並帶 `id` 讓瀏覽器記住上次的資料夾
+  - **整層路徑解析刪除**:`splitPath()`、`resolveDirectory()` 與其測試一併移除。`FileSystemFileHandle` 不帶所在位置,本模組因此不做、也做不到任何路徑判斷
+  - 完成狀態:拒絕授權與不支援仍產生**不同**的可辨識錯誤;`selectedFile()` 在選檔前回 `null`、選檔後回同一個控制代碼;本模組仍是收題頁中唯一接觸平台檔案 API 的地方
+  - _Requirements: 5.1, 5.11, 6.1, 6.2, 6.3_
+  - _Boundary: web/editor/fs.js, tests/test_web_editor_fs.py_
+
+- [ ] 7.3 (P) check.js:刪除路徑檢查與描述建議值
+  - 刪除 `checkTargetPath()` 與 `suggestDescription()`,連同 `tests/test_web_editor_pure.py` 的對應測試
+  - `checkForm()` 的輸入與輸出各少兩欄:`FormValues` 與 `CheckIssue.field` 皆收斂為題號、局名、難度、標籤、FEN 五者
+  - **不留無呼叫端的函式**:它們的對象(手打的路徑字串、描述)已不存在,而且不會回來 —— 這與 `corpus-file.js` 的 `null` 分支處置刻意相反,差別在**有沒有可能回來**
+  - 完成狀態:五項淺層檢查各自定位到正確欄位且順序與表單一致;`checkTargetPath` 與 `suggestDescription` 在整個 repo 中一處都搜不到
+  - _Requirements: 4.1, 4.2, 4.6, 8.4_
+  - _Boundary: web/editor/check.js, tests/test_web_editor_pure.py_
+
+- [ ] 7.4 (P) corpus-file.js:序列化略過不存在的欄位
+  - `serializePosition()` 只寫出 entry 上**實際存在**的欄位;`SCHEMA_FIELDS` **保留六個名字不動** —— 它表達的是欄位次序
+  - **不可直接把 `description` 自 `SCHEMA_FIELDS` 刪掉**:既有題目全部帶著描述,刪掉會打破「對既有題庫檔中的每一題重新序列化後逐字相同」那道排版漂移的回歸網
+  - `appendPosition()` 的 `null` 分支與其測試**保留** —— 5.4 是移出本輪範圍而非被否決
+  - 完成狀態:既有題庫檔中的每一題重新序列化後仍與原檔對應片段逐字相同;不帶 `description` 的候選題目輸出五個欄位,其餘欄位的排版與有描述時完全相同
+  - _Requirements: 3.9, 5.8, 5.9_
+  - _Boundary: web/editor/corpus-file.js, tests/test_web_editor_pure.py_
+
+- [ ] 7.5 收題頁版面:選檔按鈕、FEN 上移、描述與路徑欄移除
+  - 移除描述欄位與目標檔案路徑欄位及其訊息槽;新增「選擇題目檔」操作與**目前選定檔名的顯示位置**
+  - FEN 的輸入排在題號與局名之後、其餘欄位之前(8.5);全部欄位在桌面視窗尺寸下不需捲動即可見(8.6)
+  - 訊息槽一律**宣告在 `index.html`**、由 JS 顯隱,沿用既有慣例
+  - 完成狀態:桌面尺寸下 FEN 輸入與盤面同屏可見且不需捲動;DOM 中不存在描述與路徑的輸入;檔名顯示在選檔前有固定位置
+  - _Requirements: 3.1, 3.9, 5.1, 8.1, 8.2, 8.5, 8.6_
+  - _Boundary: web/editor/index.html, web/editor/editor.css, tests/test_web_editor_layout.py_
+  - _Depends: 7.3_
+
+- [ ] 7.6 editor.js:接上選檔,寫入序列改用檔案控制代碼
+  - 選檔按鈕呼叫 `pickCorpusFile()` 並更新檔名顯示;**選檔不進寫入序列** —— 它由自己的按鈕觸發,因此天然落在使用者手勢的呼叫堆疊內
+  - 寫入序列改為「取索引 → 撞號 → 送驗證 → 重讀 → 追加 → 寫回 → 記下題號並清空欄位」,以 `selectedFile()` 取得控制代碼
+  - 尚未選定目標題目檔時不執行寫入並說明(5.10);寫入成功後清空題目欄位而**選定的檔案保留**(7.2)
+  - 移除描述建議值的狀態與接線、移除目標路徑欄位的處理;候選題目由六欄降為五欄
+  - **順帶關掉一個已知缺口**:舊設計把授權排在驗證之後,而驗證是一次網路往返;實測手勢有效期僅約 5 秒,一次引擎池滿就會讓對話框開不起來。選檔移出序列之後這個情形構造上不再發生 —— tasks 的既有筆記與「刻意接受的覆蓋缺口」須一併更新
+  - 完成狀態:未選檔時可繪盤與填寫全部欄位但寫入被擋下並說明;選檔後連續寫入兩題不再出現任何對話框;更換檔案後寫入落到新的檔
+  - _Requirements: 2.1–2.6, 3.1–3.3, 4.3–4.5, 5.1, 5.10, 5.11, 6.4, 7.1–7.3, 8.4_
+  - _Boundary: web/editor/editor.js, tests/test_web_editor_write.py, tests/test_web_editor_fields.py_
+  - _Depends: 7.2, 7.3, 7.4, 7.5_
+
+- [ ] 7.7 修訂後的人工驗收
+  - 在桌面版 Chrome 以 `localhost` 走一次:選檔只跳一次對話框、連續收兩題不再跳、取消選擇後表單內容仍在、`git diff` 確認落盤的位元組
+  - 確認**未選檔時仍可繪盤與填寫**,以及桌面尺寸下 FEN 與盤面同屏
+  - 以 Firefox 或 Safari 確認不支援訊息仍然出現
+  - 完成狀態:上述各項皆親眼確認,且驗收寫入的資料已還原
+  - _Requirements: 5.1, 5.10, 5.11, 6.1, 6.2, 6.3, 6.4, 8.6_
+  - _Depends: 7.1, 7.6_
+
 ---
 
 ## Implementation Notes
