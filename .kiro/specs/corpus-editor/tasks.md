@@ -84,7 +84,7 @@
 
 ## 4. 收題頁的版面、繪盤與欄位
 
-- [ ] 4.1 表單容器與左盤右欄版面
+- [x] 4.1 表單容器與左盤右欄版面
   - 補齊收題頁容器:左側盤面區、右側表單區,表單含題號、局名、描述、難度、標籤、FEN 與目標檔案路徑
   - 描述欄位允許換行;**不提供**最長殺著距離與出處的輸入;**不提供**任何編輯或刪除既有題目的操作
   - 版面沿用既有的 flex 慣例;收題頁的樣式表**須自帶盤面的尺寸規則**,對局頁那組不會套到本頁
@@ -193,6 +193,11 @@
 
 - **3.3**:`acquireCorpusDirectory()` **刻意不是 `async`** —— 選擇框必須開在呼叫端的同步呼叫堆疊內,中間插一個 `await` 就會花掉使用者手勢。5.3 串接時,取得授權那一步**不能**放在任何 `await` 之後。
 - **3.3**:`SecurityError` 不併入「使用者拒絕」—— 它代表沒有使用者手勢,是呼叫端的 bug。報成「你拒絕了」會讓維護者一直去按允許。
+
+- **4.1 的 DOM 契約(4.2 / 4.3 / 5.x 依賴)**:欄位為 `#field-id`、`#field-title`、`#field-description`(textarea)、`#field-difficulty`(select)、`#field-tags`、`#field-fen`、`#field-target`,每個都帶 `data-field`,值即 `CheckIssue.field`。**後續請以 `[data-field="…"]` 查詢**,id 前綴只給 `<label for>` 用。其他識別符:`#page-head`、`#unsupported`、`#board`(內含 `.board-placeholder`)、`#entry`。
+- **4.1**:表單容器刻意是 `<section>` 而非 `<form>` —— 無 JS 時 `<form>` 按 Enter 會送出並重載,七個欄位全部清空。後續若要「按 Enter 送出」必須自己接,不能改成 `<form>` 了事。
+- **4.1**:`#field-difficulty` 只有一個 `<option value="">尚未選擇</option>` 且必須留在第一個(`checkForm()` 以 `''` 代表未選)。4.3 把 `DIFFICULTY_LABELS` 的三個選項接在它後面,HTML 裡不得出現 Easy/Medium/Hard 字面。
+- **4.1(review 提出的未釘住項)**:`editor.css` 的九個設計 token 是從 `style.css` **複製**而來、值目前相同,但**沒有任何測試交叉比對**(`list.css` 與 `style.css` 之間是有的)。改 `style.css` 的 `--line` 會讓收題頁盤面邊框靜默偏離「外觀與對局頁一致」而 30 條測試全綠。design 已把此依賴標為 P2,屬已接受的風險。
 
 ## 人工驗收清單(自動化到不了的部分)
 

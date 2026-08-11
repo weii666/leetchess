@@ -11,6 +11,13 @@
   (`board.js`、`fen.js`、`difficulty.js`、`api.js`)一律 `../`。
 -->
 <link rel="icon" href="../favicon.svg">
+<!--
+  樣式表是本目錄自己的那一份,**產品頁那一份共用樣式表刻意不掛**(design 的
+  File Structure Plan)。兩者的差別不只是配色:對局頁的盤面尺寸規則住在那一份裡,
+  不掛它就等於沒有那條規則,而 `board.js` 會在 `<svg>` 上寫死 `width="576"` ——
+  少了本目錄自帶的那一條,窄畫面必然溢出。理由與那條規則本身都寫在 `editor.css`。
+-->
+<link rel="stylesheet" href="./editor.css">
 </head>
 <body>
 <!--
@@ -41,13 +48,173 @@
   因此不要為了「保護」這一頁而回頭加開關或登入:那擋不到本來就不存在的能力,卻會
   讓本機開發多一道沒有意義的手續。
 
-  ## 目前只有容器
+  ## 本檔只有容器,沒有邏輯
 
-  版面(左盤右表單)、表單欄位、繪盤與寫入流程分屬後續任務,它們**都改得到本檔**,
-  故此處不預先擺出任何等著被填的空殼。同理不連上 `editor.css` 與 `editor.js` ——
-  兩者尚不存在,先寫上去只會讓每次載入都吞一個 404。
+  與對局頁同一個形態:這裡擺出的是「有哪些格子」,不是「按下去會怎樣」。繪盤屬
+  tasks 4.2、欄位互動與難度選項屬 4.3、寫入流程屬第 5 組,那幾個任務**都改得到
+  本檔**,但目前一個 `<script>` 都不掛 —— `editor.js` 尚不存在,先寫上去只會讓每
+  次載入都吞一個 404。
+
+  ## 這個工具只新增,不改也不刪(requirement 7.6)
+
+  DOM 中不存在任何編輯或刪除既有題目的控制項,而且這是**硬邊界而非還沒做**:寫檔
+  一律是「把新的一題追加到檔案文字末端」(`corpus-file.js`),既有題目逐字不動。
+  要修既有題目請直接改題目檔並走 git —— 在這裡長出一顆「改這一題」的按鈕,等於讓
+  一個瀏覽器端工具擁有覆寫題庫的能力,而那正是整個設計避開的東西。
+  `tests/test_web_editor_layout.py` 以字眼黑名單掃 DOM 反向釘住這條邊界。
 -->
-<h1>收題工具</h1>
-<p>本頁供題庫維護者收題之用,不在產品的導覽動線上。</p>
+
+<!--
+  頁首橫跨整個寬度(版面規則見 `editor.css` 的 `#page-head`),不參與左右兩欄:
+  它講的是「這一頁是什麼」,對盤面與表單都成立,擠進其中一欄會讓另一欄無故矮一截。
+-->
+<header id="page-head">
+  <h1>收題工具</h1>
+  <p class="page-note">本頁供題庫維護者收題之用,不在產品的導覽動線上。</p>
+
+  <!--
+    平台不支援時的說明(requirement 6.3)。**位置固定、預設隱藏、文字是靜態的。**
+
+    三件事各有理由:
+
+    1. **位置固定且在表單之前。** 一段「這個瀏覽器寫不了檔」的話擺在表單底下,等於
+       等使用者把七個欄位填完才說。
+    2. **預設隱藏,由 tasks 5.3 掀開。** `fs.js` 的 `isSupported()` 在載入當下就評估
+       得出來,因此這一段不會在使用者操作到一半時忽然冒出來推動版面 —— 對局頁的
+       等待區塊正是栽在那件事上,已整條移除。`editor.css` 的
+       `[hidden] { display: none !important }` 保住這個預設值:任何給它 `display`
+       的版面規則都會讓這段話對**支援的**瀏覽器也永遠掛在畫面上,而那是絕大多數。
+    3. **文字寫在這裡而不是由 JS 產生。** 說法是靜態的,5.3 只負責拿掉 `hidden`。
+       說法要與 `fs.js` 的 `UnsupportedBrowserError` 一致 —— 兩處講的是同一件事,
+       使用者不該因為觸發路徑不同而讀到兩種說法。
+
+    內容要**說得出原因**,不是一句「無法使用」:講清楚是瀏覽器缺了寫入本機檔案的
+    能力,使用者才知道下一步是換一個瀏覽器,而不是回頭檢查自己填了什麼。
+  -->
+  <p id="unsupported" hidden>這個瀏覽器不支援由網頁寫入本機檔案,收題工具無法在此使用。請改用桌面版的 Chrome、Edge 或 Opera。</p>
+</header>
+
+<!--
+  盤面預覽(requirements 2.1–2.3、8.2)。**唯讀** —— tasks 4.2 會以 `board.js` 的
+  `renderBoard()` 畫進來,傳空的著法清單,整片盤面因此不可選取,那是既有模組的自然
+  狀態而不是新增的參數。
+
+  裡面先擺一句佔位說明:在貼上 FEN 之前這一格是空的,而一塊沒有任何說明的空白區域
+  看起來像是壞了。`board.js` 以 `replaceChildren` 畫盤,一畫就把它換掉,兩者不會並存。
+
+  容器在版面上排左邊(8.1),規則見 `editor.css` 的 `#board`。
+-->
+<main id="board" aria-label="盤面預覽">
+  <p class="board-placeholder">貼上 FEN 之後,這裡會顯示對應的盤面。</p>
+</main>
+
+<!--
+  題目內容的表單區,排在盤面右邊(8.1)。
+
+  ## 為什麼不是 `<form>`
+
+  這一頁沒有「送出」這件事:寫入是瀏覽器端寫檔,不是提交到任何位址。用 `<form>` 的
+  話,在任一欄位按下 Enter 會觸發預設送出而**重新載入本頁**,已填的七欄連同盤面一起
+  沒了 —— 那要靠 JS 攔下來才不會發生,而本檔刻意沒有 JS。用 `<section>` 就不存在這
+  個預設行為。`<label for>` 的關聯不需要 `<form>`,`element.labels` 照樣成立。
+
+  ## 欄位的順序是契約
+
+  七欄的順序與 `check.js` 的 `checkForm()` 回傳清單一致(該檔明載「清單順序即表單
+  欄位順序」)。requirement 8.4 要把未通過的項目定位到欄位,兩邊的順序一旦分家,
+  使用者每改一欄就得重新找一次訊息在哪。
+
+  ## 認欄位靠 `data-field` 而不是 id
+
+  `data-field` 的取值就是 `check.js` 的 `CheckIssue.field`,同名才對得起來。id 是給
+  `<label for>` 用的,兩者刻意分開:id 的命名慣例(`field-` 前綴)改了不會波及檢查
+  那一側。
+
+  ## 這裡沒有的兩個欄位
+
+  - **最長殺著距離(3.4)**:由驗證工具回填(屬 corpus-verification),不是人填的。
+  - **出處(3.5)**:由目標檔案所在的書目資料夾表達,不是獨立欄位。
+
+  兩者都不是漏做。給了輸入框,維護者就填得出一個後端會拒絕的欄位 —— 題目 schema
+  的既有檢查對未知欄位是直接拒絕的。
+
+  起手方同理沒有獨立輸入(2.6):它讀自 FEN,由 tasks 4.3 顯示出來。
+-->
+<section id="entry" aria-labelledby="entry-heading">
+  <h2 id="entry-heading">題目內容</h2>
+
+  <div class="field">
+    <label for="field-id">題號</label>
+    <!--
+      刻意是 `type="text"` 而不是 `type="number"`:數字輸入框在使用者打了非數字時
+      把值回報成空字串,於是「打錯了」與「還沒填」在 JS 那一側長得一模一樣,
+      `check.js` 分得出的兩種說法(「請填入題號」與「題號必須是正整數」)就少了一種。
+      正整數的判定在 `check.js`,這裡只負責原樣把字交出去。
+    -->
+    <input id="field-id" data-field="id" type="text" inputmode="numeric" autocomplete="off">
+  </div>
+
+  <div class="field">
+    <label for="field-title">局名</label>
+    <input id="field-title" data-field="title" type="text" autocomplete="off">
+  </div>
+
+  <div class="field">
+    <label for="field-description">描述</label>
+    <!--
+      **必須是 `<textarea>`**(requirement 3.8):描述允許換行,而 `<input>` 會把貼上
+      來的換行靜默吃掉 —— 沒有錯誤、沒有提示,使用者要等到題目檔寫出來才發現少了東西。
+      tasks 4.3 會在這裡填入建議值(`check.js` 的 `suggestDescription`),而建議值是
+      可以自由改寫的,故此處不設 `readonly`。
+    -->
+    <textarea id="field-description" data-field="description" rows="3"></textarea>
+  </div>
+
+  <div class="field">
+    <label for="field-difficulty">難度</label>
+    <!--
+      三選一而不是自由輸入的數值(requirement 3.2):`<select>` 在結構上就沒有「填一個
+      不存在的分級」這件事。
+
+      **三個分級的說法一個字都不寫在這裡。** 唯一出處是 `web/difficulty.js`,選項由
+      tasks 4.3 自該模組產生 —— 寫死一份就是第二個真相來源,改了模組而忘了這一頁時,
+      兩邊會靜默分家。`tests/test_web_editor_layout.py` 直接掃本檔的文字反向釘住。
+
+      第一個選項的值刻意是空字串,而且必須留在最前面:`check.js` 以空字串判定「還沒
+      選」,預設就選中某一級會讓維護者在沒有做過選擇的情況下寫進一個難度。
+    -->
+    <select id="field-difficulty" data-field="difficulty">
+      <option value="">尚未選擇</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label for="field-tags">標籤</label>
+    <input id="field-tags" data-field="tags" type="text" autocomplete="off">
+    <!--
+      提示不放進 `<label>` 裡:標籤唸出來應該只有「標籤」兩個字,把分隔符號的說明
+      塞進去會讓螢幕閱讀器每次聚焦都唸一長串。分隔符號收得寬的理由見 `check.js`
+      的 `parseTags`。
+    -->
+    <p class="field-hint">可填多個,以逗號、頓號或空白分隔。</p>
+  </div>
+
+  <div class="field">
+    <label for="field-fen">FEN</label>
+    <input id="field-fen" data-field="fen" type="text" autocomplete="off" spellcheck="false">
+    <p class="field-hint">貼上完整的局面字串,盤面會照著重畫。</p>
+  </div>
+
+  <div class="field">
+    <label for="field-target">目標檔案路徑</label>
+    <input id="field-target" data-field="target" type="text" autocomplete="off" spellcheck="false">
+    <!--
+      路徑相對於使用者選定的題庫根目錄,而且**必須落在某一個書目資料夾內** ——
+      那個資料夾決定了這一題歸在哪一本書底下,所以這一頁不需要、也不提供對應的
+      文字欄位(requirement 3.5)。完整規則與說法都在 `check.js` 的 `checkTargetPath`。
+    -->
+    <p class="field-hint">相對於題庫根目錄,例如 適情雅趣~卷一/26.json。</p>
+  </div>
+</section>
 </body>
 </html>

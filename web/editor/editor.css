@@ -1,0 +1,286 @@
+/*
+ * 收題頁的版面(tasks 4.1;requirements 8.1、8.2)。
+ *
+ * ## 這一份是獨立的,而且必須是
+ *
+ * 收題頁**不掛產品頁那一份共用樣式表**(design 的 File Structure Plan)。理由不是
+ * 潔癖:那一份是為「一頁一題、盤面加側欄」長出來的,而這一頁是一張要填的表單,
+ * 兩者的版面規則會互相拉扯。收題工具也不該在改產品外觀時被順手改壞。
+ *
+ * 代價是**盤面的尺寸規則要自己再寫一次**(見下方 `#board svg`)。那不是重複,是
+ * 這個切分的必然:`board.js` 在 `<svg>` 上寫死 `width="576"` / `height="638"` 兩個
+ * 呈現屬性,沒有 CSS 蓋掉它們的頁面,盤面就是 576px 寬,窄畫面必然溢出。少了那三
+ * 行,`tests/test_web_editor_layout.py` 的橫向捲軸與長寬比兩組斷言會一起紅。
+ *
+ * ## 為什麼視覺語言仍與產品頁一致
+ *
+ * 深色底、暖色盤面、卡片分區,是照著產品頁複述一次而不是重新發明。收題的人要看
+ * 的是「這一題放進題庫之後長什麼樣」,盤面外觀與對局頁一致是 requirement 8.2 的
+ * 要求;整頁的調性跟著一致,才不會讓同一個盤面看起來像兩塊不同的東西。
+ *
+ * **自訂屬性因此是抄過來的一份副本,不是共用的一份。** 兩邊的值漂了不會有測試轉紅
+ * (產品頁那兩份彼此有比對,這一份不在其中)—— 這是刻意的取捨:收題頁是內部工具,
+ * 顏色差一階不影響任何使用者,而綁死兩者會讓改產品外觀時多一個要顧的地方。
+ *
+ * ## 版面
+ *
+ * 單一 flex 容器加 `flex-wrap`,**沒有媒體查詢** —— 與產品頁同一個做法:頁首橫跨
+ * 整行,盤面與表單各給一個 flex basis,容器塞不下兩欄時自然換行成上下兩列。寬度
+ * 是連續的,不存在「剛好卡在斷點上」的尺寸。
+ */
+
+:root {
+  color-scheme: dark;
+
+  --page-bg: #2b2b2b;
+  --panel-bg: #3a3a3a;
+  --field-bg: #333333;
+  --text: #eeeeee;
+  --text-muted: #a8a8a8;
+  --accent: #ffd479;
+  --line: #6b5433;
+  --danger-bg: #5c2a24;
+  --danger-text: #ffd6d0;
+
+  --gap: 24px;
+  --radius: 8px;
+  --radius-sm: 6px;
+
+  /* 一組之內 8px、組與組之間 16px,與產品頁同一組節奏。 */
+  --stack-tight: 8px;
+  --stack: 16px;
+
+  --text-lg: 20px;
+  --text-base: 16px;
+  --text-sm: 14px;
+
+  /* 盤面的 `viewBox` 寬度 —— 放大超過原尺寸只會讓線條變糊。 */
+  --board-max-width: 576px;
+
+  /*
+   * 表單那一欄的 flex basis 與上限。
+   *
+   * basis 取 420px 而不是產品頁側欄的 300px,這個值同時決定了**兩欄在哪裡折成一欄**:
+   * 盤面 320 + 間距 24 + 表單 420 = 764px,加上左右內距 48px,約 812px 以下就換行。
+   * 平板直向(768px)因此是上下兩列 —— 那是要的:七個欄位擠在 300px 寬裡,每一個
+   * 輸入框都只剩半個中文句子的寬度,而收題本來就是桌機上的工作。
+   *
+   * 上限 560px 是給寬螢幕的:輸入框無限拉寬並不會更好填,一行文字太長反而難掃。
+   */
+  --entry-basis: 420px;
+  --entry-max-width: 560px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/*
+ * 不支援的說明(6.3)與後續任務的訊息區塊都以 `hidden` 屬性控制顯示。**任何
+ * `display` 都不得蓋掉它** —— 蓋掉的結果是那段「這個瀏覽器寫不了檔」對支援的瀏覽器
+ * 也永遠掛在畫面上,而開這一頁的瀏覽器絕大多數是支援的。故這一條放在最前面當保險。
+ */
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  padding: var(--gap);
+  background: var(--page-bg);
+  color: var(--text);
+  font-family: -apple-system, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC",
+    sans-serif;
+  font-size: var(--text-base);
+  line-height: 1.6;
+
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap);
+  justify-content: center;
+  /* 兩欄高矮不同,靠上對齊 —— 拉伸的話短的那一欄會多出一片沒有內容的底色。 */
+  align-items: flex-start;
+}
+
+/* --- 頁首 ------------------------------------------------------------- */
+
+/*
+ * `flex-basis: 100%` 讓頁首**獨佔第一行**,盤面與表單從第二行起排。
+ *
+ * 不把它塞進其中一欄:標題與那段「這是維護工具」講的是整頁,而不支援的說明
+ * (`#unsupported`)更是 —— 它掀開時整頁都用不了,擠在表單欄裡會讓它看起來只是某
+ * 一個欄位的錯誤。獨佔一行也讓它在窄畫面上仍然是第一眼看到的東西。
+ */
+#page-head {
+  flex: 0 0 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--stack-tight);
+}
+
+#page-head h1 {
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: 1.4;
+}
+
+.page-note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/*
+ * 不支援的說明用與錯誤同一個形態(紅底)—— 它講的是「這一頁在這裡做不了事」,
+ * 語氣不該比一個欄位填錯還輕。
+ *
+ * **這裡不寫 `display`**:它只在 `hidden` 為假時才排得出來,而上方的
+ * `[hidden] { display: none !important }` 是保險,規則本身不去挑戰它。
+ */
+#unsupported {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+/* --- 盤面(8.1 的左欄、8.2)------------------------------------------- */
+
+/*
+ * `flex: 1 1 320px` 讓盤面在寬畫面上與表單並排、在窄畫面上獨佔一列;`max-width`
+ * 擋住它在寬螢幕上被拉過 `viewBox` 的原尺寸(放大只會讓線條變糊)。
+ *
+ * `min-width: 0` 是防禦性的:flex item 的自動最小尺寸是內容的 min-content,而下方
+ * 的 `width: 100%` 已使替換元素對它的貢獻為 0,故現況下它是空操作。留著是為了
+ * 「有人把子元素改成固定寬」的那一天。
+ */
+#board {
+  flex: 1 1 320px;
+  min-width: 0;
+  max-width: var(--board-max-width);
+}
+
+/*
+ * **這一頁的盤面尺寸規則,整份樣式表最不能少的三行**(requirement 8.2)。
+ *
+ * `board.js` 同時在 `<svg>` 上寫了 `width` / `height` 呈現屬性與 `viewBox`。CSS 勝過
+ * 呈現屬性,於是 `width: 100%` 把寬度交給容器、`height: auto` 把高度交給 `viewBox`
+ * 的長寬比,棋子與格線都在同一個座標系內,縮放盤面不需要重新定位任何東西。
+ *
+ * **兩者缺一不可**:只蓋掉 `width` 的話高度仍是 638px,棋盤看起來還在,格子卻不
+ * 是正方形了。這比溢出更難發現 —— 沒有捲軸、沒有錯誤,只是每一格都被壓扁。
+ *
+ * 產品頁有一份形狀相同的規則,但它住在那一份共用樣式表裡,**不會套到本頁**(見
+ * 檔首)。這一條不是複製貼上的殘留,刪掉它這一頁的盤面就壞了。
+ *
+ * 邊框與圓角是為了 8.2 的「外觀與對局頁一致」;`pointer-events` 一個字都不要加 ——
+ * 棋子就在這個 SVG 裡面。
+ */
+#board svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 2px solid var(--line);
+  border-radius: 4px;
+}
+
+/* 盤面畫出來之前的佔位說明(`board.js` 一畫就把它換掉,兩者不會並存)。 */
+.board-placeholder {
+  margin: 0;
+  padding: 48px 16px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* --- 表單(8.1 的右欄)------------------------------------------------ */
+
+/*
+ * 欄位之間的間距由這一條 `gap` 統籌,子元素一律不帶 margin:margin collapse 的規則
+ * (相鄰取大值、父子穿透)正是「改一個地方影響到另一處」的來源,`gap` 沒有那一面。
+ */
+#entry {
+  display: flex;
+  flex-direction: column;
+  gap: var(--stack);
+
+  flex: 1 1 var(--entry-basis);
+  min-width: 0;
+  max-width: var(--entry-max-width);
+}
+
+#entry h2 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+}
+
+/*
+ * 一欄是「標籤 + 控制項 + 選填的提示」直向疊起來,**標籤一律在上而不在左**:
+ * 左置標籤要靠一個固定寬度對齊,而這七個標籤從兩個字(題號)到六個字(目標檔案
+ * 路徑)都有,那個寬度得遷就最長的一個,窄畫面上輸入框就沒剩多少。
+ */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.field label {
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+/*
+ * 三種控制項共用同一套外觀:它們是同一張表單上的同一種東西,長得不一樣只會讓人
+ * 以為填法不同。`font: inherit` 是必要的 —— 表單控制項預設用系統字型,不繼承 body
+ * 的字族與字級,不寫的話中文會與頁面其餘部分明顯不同體。
+ *
+ * `width: 100%` 讓三者都填滿欄寬。`<input>` 的預設寬度來自 `size` 屬性、`<textarea>`
+ * 來自 `cols`,兩者都與版面無關;交給容器決定才會隨著折行一起變。
+ */
+.field input,
+.field textarea,
+.field select {
+  font: inherit;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #4f4f4f;
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+  color: var(--text);
+}
+
+.field input:focus-visible,
+.field textarea:focus-visible,
+.field select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/*
+ * 描述可以很長(requirement 3.8 要它收得下換行),但這一欄不該把底下的欄位推到
+ * 看不見的地方。`resize: vertical` 把調整權交給維護者,同時擋掉橫向拉寬 ——
+ * 橫向拉寬會撐破欄寬而在整頁拉出橫向捲軸。
+ */
+.field textarea {
+  min-height: 4.5em;
+  resize: vertical;
+  line-height: 1.6;
+}
+
+/*
+ * 提示是註腳,不是欄位的一部分:字小一階、顏色淡一階,讓「這一格在問什麼」與
+ * 「怎麼填」在視線上分得開。
+ */
+.field-hint {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
