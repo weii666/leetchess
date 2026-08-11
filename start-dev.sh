@@ -24,10 +24,14 @@ set -euo pipefail
 
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# 預設埠 8123。**`"$@"` 留在最後**:uvicorn 以最後出現的同名選項為準,因此
+# `./start-dev.sh --port 9000` 仍蓋得掉這個預設,不必回頭改這個檔案。
+# (註解不能夾在下面那串續行之間 —— `\` 後面接註解會讓整條命令斷掉。)
 exec uv run uvicorn service.main:app \
   --reload \
   --reload-dir service \
   --reload-dir positions \
   --reload-include '*.py' \
   --reload-include '*.json' \
+  --port 8123 \
   "$@"
