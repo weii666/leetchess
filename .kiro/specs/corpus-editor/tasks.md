@@ -139,7 +139,7 @@
   - _Requirements: 6.1, 6.2, 6.3, 6.4_
   - _Depends: 3.2, 3.3_
 
-- [ ] 5.4 寫入結果呈現與連續收題
+- [x] 5.4 寫入結果呈現與連續收題
   - 寫入成功時顯示成功訊息並指明寫入的題號與目標檔案,清空題目欄位但**保留目標檔案路徑**
   - 寫入過程失敗時保留已填入的全部內容並顯示失敗原因;目標檔不是合法題目檔屬此類
   - 題庫索引取得失敗時不另立分支,落在一般寫入失敗處理
@@ -206,11 +206,11 @@
 
 - **5.1**:`/api/catalog` 的 client 是 **`web/catalog.js`(既有,列表頁在用)**,不是 `api.js` —— 後者的 `request()` 未 export,構造上到不了這個端點。design 已回填。
 - **5.3(已完成)**:`recordWrittenId()` 在 5.2 之前沒有任何模組內呼叫端(只有測試拿它佈置前提),4.4 因此在真實路徑上不成立。5.3 已在 `writeCandidate()` 的寫回兌現之後呼叫它,並補上端到端測試 `test_a_written_id_is_reserved_for_the_rest_of_the_tab` —— 那一條從按下寫入開始,索引自始至終為空,所以擋下第二次的唯一可能來源就是那次成功的寫入。
-- **5.4 必須做**:取索引失敗時目前**畫面完全沒有反應**(序列停住,但不說話)。design 的 Risks 說它歸一般失敗處理,所以 5.4 要在 `attemptWrite()` 的 catch 裡補上呈現,否則這個情境會靜默出貨。
+- **5.4(已做)**:取索引失敗在 5.1–5.3 期間**畫面完全沒有反應**(序列停住,但不說話)。已在 `attemptWrite()` 的 catch 裡補上 `INDEX_FAILURE_NOTE`,並補測試 `test_an_index_that_cannot_be_fetched_says_so_instead_of_going_quiet`。
 - **5.1**:撞號**刻意不停用** `#write` —— 檢查每次按下都重跑,擋不掉的寫入不存在;停用反而會讓維護者無法對同一題號再試一次(索引可能正在重啟)。
 
 - **5.3(已決定,勿再重議):照 design 的次序走,手勢過期列為刻意接受的缺口。** design 的 System Flows 要求**驗證通過之後才取目錄授權**,但 3.3 的筆記說取授權那一步**不能放在任何 `await` 之後** —— 序列走到授權之前有兩個 await(`loadCatalog()` 與 `requestValidation()`),而 `showDirectoryPicker()` 要的是 transient activation。**已實測(Chrome,勿再重查)**:手勢有效期自按下算起,第 4011ms 時 `navigator.userActivation.isActive` 仍為 `true`,第 5011ms 已為 `false`;而 `/api/catalog` 加 `/api/editor/validate` 的實際往返量到 11ms、4ms、4ms —— 正常路徑有約 1000 倍餘裕。要踩到過期,條件是**分頁的第一次寫入**(`acquireCorpusDirectory()` 第一行對已取得者直接 `Promise.resolve`,第二次以後根本不碰平台 API)**且**那一次借引擎等超過 5 秒。此時 `showDirectoryPicker()` 拋 `SecurityError`,`asAcquireFailure()` 原樣往上,穿過 `attemptWrite()` 成為未處理的 rejection,畫面不動 —— 而復原方式就是**再按一次寫入**(序列每次按下都完整重跑)。5.3 因此**不為它寫任何程式碼**:另立說法要在 `fs.js`(3.3 已關閉的 `_Boundary:`)新增第四種錯誤型別,代價與觸發機率不成比例;在 `editor.js` 比對 `error.name === 'SecurityError'` 則違反 `fs.js` 模組說明「平台細節不得散進組裝層」那一條。
-- **5.4 可順手補**:7.3 的一般失敗呈現若把 catch 寫得夠寬,上面那個 `SecurityError` 會**免費**得到一句「寫入未完成」,不必新增任何錯誤型別。是否值得由 5.4 判斷,不是必須。
+- **5.4(已做)**:7.3 的一般失敗呈現把 catch 寫成了「其餘一律說一句話,然後原樣往上拋」,所以 5.3 那個手勢過期的 `SecurityError` 現在**會**得到一句「寫入未完成」,而缺陷本身仍然浮得上主控台。免費拿到,不必新增任何錯誤型別。
 - **5.2**:`attemptNote`(頁面層級說法)與 `candidateVerdict`(對某一份候選題目的判定)成立條件不同,故分成兩個變數:前者一路留到**下一次嘗試**才被換掉,後者在候選題目內容一改時就撤下。5.3/5.4 新增狀態時照這條規則判斷該掛在哪一邊。
 - **5.2**:`runWriteSequence()` 的接續點在「驗證通過(4.7)」那個 `return` 之前 —— 5.3 的授權與寫檔接在那裡,不必回頭改前三步的形狀。
 - **5.2**:`requestValidation()` 的逾時上界取 `api.js` 的 `DEFAULT_TIMEOUT_MS`(10 秒)而非 `catalog.js` 自己那一個:這個端點會借引擎,後端 8 秒的總時間預算就是那個常數在遷就的東西。
@@ -218,8 +218,12 @@
 - **5.3**:目錄控制代碼**沒有**進 `editor.js` 的模組層狀態(5.2 的檔首曾預測它會)。它留在 `fs.js`,本檔每次寫入都照樣呼叫 `acquireCorpusDirectory()`,已取得者由那一層直接兌現 —— 在組裝層再記一份就是第二個真相來源。
 - **5.3(測試手法,5.4 沿用)**:`fs.js` 的替身由 `editor_page` 夾具以 `page.route()` 頂替 `/editor/fs.js` 注入,其餘模組一律供真實檔案。替身狀態掛在 `globalThis.__fs`(`files` / `calls` / `denied`),`supported` 例外 —— 它必須在模組求值前定好,由 `add_init_script()` 種 `globalThis.__fsSupported` 再 reload。`fs_kinds()` 回的流水帳是本檔問「次序有沒有壞掉」的主要工具。
 - **5.3(實測,勿再重查)**:**Playwright 的 Chromium 沒有 `showDirectoryPicker`**(`typeof` 為 `undefined`)。後果分兩邊:以 http 供檔的 `tests/test_web_editor_fields.py` 與 `tests/test_web_editor_board.py` 載的是真的 `fs.js`,所以那兩檔的頁面**自 5.3 起永遠掛著 `#unsupported` 那一段**(無害,它們不量幾何);而 `tests/test_web_editor_layout.py` 與 `test_web_editor_page.py` 以 `file://` 供檔,Chromium 不允許自 `file://` 匯入 ES module,`editor.js` 根本沒執行,那些版面斷言因此不受影響。**代價是 `test_the_unsupported_notice_has_a_fixed_place` 的「預設隱藏」永遠抓不到 `editor.js` 這一側的迴歸** —— 那一條由 5.3 新增的 `test_an_unsupported_browser_says_so_before_anything_is_pressed` 以替身補上。
-- **5.4 必須做(5.3 尚未做)**:**平台的寫入失敗**(權限中途失效、磁碟寫不進去)目前由 `attemptWrite()` **原樣往上拋**,畫面完全沒有反應。它沒有專屬的錯誤型別,與真正的缺陷分不開,所以 5.3 沒有替它決定;7.3 的一般失敗呈現要一併處理。`CatalogError`(索引取不到)與 `CorpusFileError`(目標檔不是題目陣列)已經是 `attemptWrite()` 吞下的兩種預期停止,同樣**還沒有任何說法**。
-- **5.4 必須做(5.2 尚未做)**:寫入期間**沒有停用** `#write`,連按兩次會送出兩次驗證、借兩次引擎。design 的 State Management 明列「寫入期間停用寫入按鈕」,歸屬在 5.4 的「寫入期間停用寫入操作」。
+- **5.4(已做)**:**平台的寫入失敗**(權限中途失效、磁碟寫不進去)目前由 `attemptWrite()` **原樣往上拋**,畫面完全沒有反應。它沒有專屬的錯誤型別,與真正的缺陷分不開,所以 5.3 沒有替它決定。5.4 的做法是**說一句話、然後原樣往上拋** —— 7.3 沒有為哪一種失敗開例外,所以維護者一定要聽到一聲;但這一類與程式的缺陷分不開,吞掉會讓那些缺陷永遠沒有人發現。兩件事不衝突,所以兩件都做。`CatalogError` 與 `CorpusFileError` 則各有專屬說法。
+- **5.4**:寫入操作旁那一行(`#write-note`)承接**三種**說法,優先序是**成功 → 淺層點名 → 失敗**。兩處各有理由:成功排在點名之前,因為清空欄位與顯示成功訊息在同一瞬間發生,而清空之後七項淺層檢查全部未通過,點名會把唯一有價值的那句話擠掉;點名排在失敗之前,因為失敗那句話一路留到下一次嘗試,而表單在那之後可能被改到送不出去,那時該講的是當下這一份為什麼按不下去。
+- **5.4**:`successNote` 與 `attemptNote` 分成兩個變數,因為**存續期間不同** —— 失敗那句留到下一次嘗試(表單原封不動,那句話講的仍是此刻這一份),成功那句在**任何一次欄位輸入**時就撤下(它講的題號已經不在畫面上了)。清空欄位靠的是「以程式指派 `value` 不會發出 `input` 事件」,所以那一次清空撤不掉它自己。
+- **5.4(改到既有測試)**:清空欄位讓六條 5.1–5.3 的測試轉紅 —— 它們連按兩次寫入,而第一次成功之後表單已空、按鈕停用。修法一律是**在第二次之前重填一次表單**,那正是連續收題真實的樣子;沒有任何一條斷言被放寬。另有一條(`test_a_service_failure_is_never_read_as_a_passing_verdict`)的收尾由 `note == ''` 改為「`確認未能完成` 不在 note 裡」,因為第二次嘗試現在會成功並留下成功訊息。
+- **5.4(測試手法)**:「嘗試進行中」由替身的 `hold` 旗標製造 —— `acquireCorpusDirectory()` 回一個掛住的 promise,測試按下寫入、等到 `acquire` 出現、問畫面,再呼叫 `globalThis.__fs.release()` 放行。延遲**刻意做在頁面這一側**:讓 `page.route()` 的處理器睡覺會擋住整條驅動通道,那時候連問畫面都問不動。
+- **5.4(已做)**:寫入期間停用 `#write`(`writing` 旗標),停用與解除寫在 `attemptWrite()` 的 `try`/`finally` 裡,任何一條例外路徑都不會讓按鈕永遠灰著。真正的代價不是多借一次引擎,而是**兩條序列各自讀一次目標檔、各自追加、各自整檔寫回,後寫的那次讀到的是前一次寫回之前的內容** —— 先寫進去的那一題會被蓋掉。
 
 ## 人工驗收清單(自動化到不了的部分)
 

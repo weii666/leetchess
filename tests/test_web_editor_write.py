@@ -1,10 +1,10 @@
-"""收題頁按下寫入之後的整條寫入流程(tasks 5.1–5.3;requirements 4.3–4.5、4.7–4.9、
-5.4–5.9、6.1–6.4、7.4、7.5)。
+"""收題頁按下寫入之後的整條寫入流程(tasks 5.1–5.4;requirements 4.3–4.5、4.7–4.9、
+5.4–5.9、6.1–6.4、7.1–7.5)。
 
 寫入一題是一條有次序的序列(design 的 System Flows):**取索引 → 撞號 → 送權威
 驗證 → 取目錄授權 → 重讀目標檔 → 文字層追加 → 寫回 → 記下題號並清空欄位**。
-本檔涵蓋的是**記下題號為止**,task 5.4 會沿用同一套夾具接上成敗呈現與清空 ——
-因此夾具與輔助函式都寫成「一次寫入嘗試」的形狀,而不是「一次撞號檢查」的形狀。
+本檔涵蓋整條序列,因此夾具與輔助函式都寫成「一次寫入嘗試」的形狀,而不是「一次
+撞號檢查」的形狀。
 
 ## 這條序列的每一步都是「擋得下來」或「已經動到磁碟」二者之一
 
@@ -95,6 +95,13 @@ CONTENT_TYPES = {
 
 #: 表單欄位的順序,即 `check.js` 的 `checkForm()` 回傳清單的順序。
 FORM_FIELDS = ["id", "title", "description", "difficulty", "tags", "fen", "target"]
+
+#: **題目**欄位 —— 寫入成功後要清空的那些(7.2)。
+#:
+#: 目標檔案路徑刻意不在裡面:它是「寫到哪個檔」,而**連續收題抄的是同一本書的同一卷**
+#: (requirement 7 的 Objective:「一次抄完一段書」)。每收一題就要重打一次路徑,是這
+#: 個工具最容易讓人放棄的地方。
+PUZZLE_FIELDS = [name for name in FORM_FIELDS if name != "target"]
 
 WRITE_BUTTON = "#write"
 WRITE_NOTE = "#write-note"
@@ -278,6 +285,15 @@ const state = {
   denied: false,
   files: {},
   calls: [],
+  // 平台自己的寫入失敗(權限中途失效、磁碟寫不進去)。它**沒有專屬的錯誤型別** ——
+  // `fs.js` 只翻「使用者不給」與「瀏覽器做不到」那兩種,其餘原樣往上,所以替身這裡
+  // 丟的也是一個普通的 `Error`(5.4)。
+  writeError: null,
+  // 把授權那一步掛住,好在「嘗試進行中」的那一瞬間問畫面(5.4 的重複送出)。
+  // 延遲刻意做在頁面這一側:讓 `page.route()` 的處理器睡覺會擋住整條驅動通道,
+  // 那時候連問畫面都問不動。
+  hold: false,
+  release: null,
 };
 globalThis.__fs = state;
 
@@ -303,6 +319,11 @@ export function acquireCorpusDirectory() {
   state.calls.push(['acquire']);
   if (!state.supported) return Promise.reject(new UnsupportedBrowserError());
   if (state.denied) return Promise.reject(new PermissionDeniedError());
+  if (state.hold) {
+    return new Promise((resolve) => {
+      state.release = () => resolve({ name: 'positions' });
+    });
+  }
   return Promise.resolve({ name: 'positions' });
 }
 
@@ -315,6 +336,7 @@ export async function readTextAt(dir, relativePath) {
 
 export async function writeTextAt(dir, relativePath, text) {
   state.calls.push(['write', relativePath]);
+  if (state.writeError !== null) throw new Error(state.writeError);
   state.files[relativePath] = text;
 }
 """
@@ -520,6 +542,20 @@ def unsupported_is_shown(page) -> bool:
     return page.evaluate("() => !document.getElementById('unsupported').hidden")
 
 
+def wait_for_acquire(page) -> None:
+    """等到嘗試走進授權那一步 —— 掛住的那一次會停在這裡(5.4)。"""
+    page.wait_for_function(
+        "() => globalThis.__fs.calls.some(call => call[0] === 'acquire')",
+        timeout=5000,
+    )
+
+
+def release_hold(page) -> None:
+    """放掉被掛住的授權,讓那一次嘗試跑完。"""
+    page.evaluate("() => globalThis.__fs.release()")
+    page.wait_for_timeout(SETTLE_MS)
+
+
 def wait_for_catalog(page, catalog: Catalog, expected: int) -> None:
     """等到索引端點被打滿 `expected` 次。"""
     deadline = time.monotonic() + CATALOG_TIMEOUT_S
@@ -712,8 +748,9 @@ def test_an_id_in_neither_place_is_not_reported_as_a_collision(
     assert message(editor_page, "id") == "", (
         f"兩邊皆無的題號被當成撞號:{message(editor_page, 'id')!r}"
     )
-    assert note(editor_page) == ""
-    assert write_is_enabled(editor_page)
+    # 通過的正面後果:這一次嘗試真的走完了整條序列(5.3、5.4)。單看「沒有紅字」
+    # 分不出「檢查通過」與「檢查根本沒跑」。
+    assert "write" in fs_kinds(editor_page), "撞號檢查通過了,序列卻沒有走下去"
 
 
 def test_passing_the_collision_check_withdraws_an_earlier_collision(
@@ -721,9 +758,8 @@ def test_passing_the_collision_check_withdraws_an_earlier_collision(
 ) -> None:
     """4.5:通過是一個**結果**,不只是「沒有出事」。
 
-    5.1 之後的序列還不存在,所以通過在畫面上唯一看得見的正面後果就是:先前指認
-    的那個撞號被收回。這條同時是「索引取不到」那條測試的對照組 —— 兩者的差別
-    正是這句指認有沒有被撤下。
+    通過在畫面上看得見的正面後果是:先前指認的那個撞號被收回。這條同時是「索引
+    取不到」那條測試的對照組 —— 兩者的差別正是這句指認有沒有被撤下。
     """
     catalog.ids = [FORM_ID]
     fill_valid_form(editor_page)
@@ -734,7 +770,6 @@ def test_passing_the_collision_check_withdraws_an_earlier_collision(
     attempt_write(editor_page, catalog)
 
     assert message(editor_page, "id") == "", "撞號檢查通過時沒有把先前的指認撤下"
-    assert write_is_enabled(editor_page)
 
 
 # --- 每一次嘗試都重新取索引(research 的 Decision 5)--------------------
@@ -754,7 +789,10 @@ def test_the_index_is_fetched_again_on_every_attempt(
     attempt_write(editor_page, catalog)
     assert message(editor_page, "id") == ""
 
+    # 第一次成功之後題目欄位被清空(7.2),所以第二次要重填 —— 而重填**同一個題號**
+    # 正是這條測試要問的情形:那一題此刻已經在索引裡了。
     catalog.ids = [FORM_ID]
+    fill_valid_form(editor_page)
     attempt_write(editor_page, catalog)
 
     assert str(FORM_ID) in message(editor_page, "id"), (
@@ -1107,7 +1145,9 @@ def test_a_service_failure_is_never_read_as_a_passing_verdict(
     attempt_write(editor_page, catalog, validator)
 
     assert message(editor_page, "id") == "", "確認未能完成的那一次嘗試把題號佔走了"
-    assert note(editor_page) == "", "確認未能完成那句話在下一次嘗試之後還掛著"
+    assert UNFINISHED_KEYWORD not in note(editor_page), (
+        f"確認未能完成那句話在下一次嘗試之後還掛著:{note(editor_page)!r}"
+    )
 
 
 def test_a_fen_the_service_refuses_to_send_is_not_a_busy_service(
@@ -1359,7 +1399,8 @@ def test_every_attempt_re_reads_the_target_file(
     fill_valid_form(editor_page)
     attempt_write(editor_page, catalog, validator)
 
-    put(editor_page, "id", "27")
+    # 成功之後題目欄位是空的(7.2),第二題從頭填 —— 這正是連續收題的樣子。
+    fill_valid_form(editor_page, id="27")
     attempt_write(editor_page, catalog, validator)
 
     assert fs_kinds(editor_page) == ["acquire", "read", "write"] * 2
@@ -1417,6 +1458,9 @@ def test_a_written_id_is_reserved_for_the_rest_of_the_tab(
     attempt_write(editor_page, catalog, validator)
     assert "write" in fs_kinds(editor_page), "第一次就沒寫成功,這一條問不出東西"
 
+    # 成功之後欄位被清空(7.2),所以要重填一次 —— **填的是同一個題號**,而這正是
+    # 維護者最可能犯的錯:剛抄完一題,下一題的題號忘了往前推。
+    fill_valid_form(editor_page)
     attempt_write(editor_page, catalog)
 
     assert str(FORM_ID) in message(editor_page, "id"), (
@@ -1425,29 +1469,247 @@ def test_a_written_id_is_reserved_for_the_rest_of_the_tab(
     assert fs_kinds(editor_page).count("write") == 1, "撞號沒擋住,同一題被寫了兩次"
 
 
-# --- 本任務的邊界:序列停在寫回之後 ------------------------------------
+# --- 寫入成功的呈現與連續收題(7.1、7.2)------------------------------
 
 
-def test_the_write_sequence_stops_after_the_file_is_written(
+def test_a_successful_write_names_the_id_and_the_target_file(
     editor_page, catalog: Catalog, validator: Validator
 ) -> None:
-    """5.3 實作到寫回為止。
+    """7.1:成功訊息要**指明寫入的題號與目標檔案**,不是一句「已寫入」。
 
-    成功訊息與清空欄位屬 5.4,因此一次成功的嘗試之後畫面上**沒有任何一句話**說它
-    成功了,七個欄位也還是原樣。這一條釘住的是「這裡還沒有偷跑」,5.4 會改寫它。
+    兩個都要有,理由是這個工具的使用方式:連續收題時維護者一分鐘按好幾次,而目標
+    檔案路徑是**留著不清空的**那一欄(7.2)—— 也就是最容易在不知不覺間寫錯地方的
+    一欄。訊息裡指名道姓,他掃一眼就知道剛才那一題落在哪。
     """
-    paths: list[str] = []
-    editor_page.on("request", lambda request: paths.append(urlsplit(request.url).path))
+    catalog.ids = []
+    fill_valid_form(editor_page)
 
+    attempt_write(editor_page, catalog, validator)
+
+    said = note(editor_page)
+    assert str(FORM_ID) in said, f"成功訊息沒有指出題號:{said!r}"
+    assert VALID_FORM["target"] in said, f"成功訊息沒有指出目標檔案:{said!r}"
+
+
+def test_a_successful_write_clears_the_puzzle_fields_and_keeps_the_target(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """7.2:清空**題目欄位**,保留**目標檔案路徑**。
+
+    這條分界就是「一次抄完一段書」那件事本身:同一卷的下一題,路徑一個字都不會變。
+    連路徑一起清掉的話,維護者每收一題都要重打一次 `適情雅趣~卷一/27.json`,而那正是
+    最容易打錯、又最沒有必要重打的一欄。
+    """
+    catalog.ids = []
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    for name in PUZZLE_FIELDS:
+        assert value_of(editor_page, name) == "", f"成功之後 {name} 沒有清空"
+    assert value_of(editor_page, "target") == VALID_FORM["target"], (
+        "目標檔案路徑被一起清掉了"
+    )
+
+
+def test_the_success_message_is_not_buried_by_the_empty_form_it_just_created(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """清空欄位與顯示成功訊息**發生在同一瞬間**,而兩者搶同一行。
+
+    清空之後七項淺層檢查全部未通過,寫入操作旁那一行本來會說「仍有項目未通過:題號、
+    局名……」。那句話此刻是噪音 —— 欄位空著是這個工具剛剛做的事,不是維護者的疏漏 ——
+    而它會把唯一有價值的那句話擠掉:剛剛那一題到底寫進去了沒有。
+
+    所以上一次嘗試的結果**排在淺層點名之前**。
+    """
+    catalog.ids = []
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    said = note(editor_page)
+    assert str(FORM_ID) in said, f"成功訊息被清空後的淺層點名擠掉了:{said!r}"
+    assert not write_is_enabled(editor_page), "欄位都空了,寫入卻還按得下去"
+
+
+def test_the_success_message_goes_away_once_the_next_puzzle_is_started(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """那句話講的是**上一題**,維護者一動手收下一題它就該讓位。
+
+    留著的話,下一題填到一半、畫面上卻還掛著「第 26 題已寫入」,那個題號與此刻表單
+    裡的內容再也沒有關係 —— 與撞號指認、權威驗證判定被撤下的理由是同一條規則。
+    """
+    catalog.ids = []
+    fill_valid_form(editor_page)
+    attempt_write(editor_page, catalog, validator)
+    assert str(FORM_ID) in note(editor_page)
+
+    put(editor_page, "id", "27")
+
+    assert str(FORM_ID) not in note(editor_page), "開始收下一題了,上一題的成功訊息還掛著"
+
+
+def test_two_puzzles_in_a_row_only_need_the_target_typed_once(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """連續收題走完整條路:第二題只填題目欄位,路徑沿用上一次留下的那一個。
+
+    這一條是 7.1、7.2 與 4.4 合起來的樣子,也是這個工具真正的使用方式。兩題都進了
+    同一個檔,而第二題的路徑**一個字都沒有重打過**。
+    """
     catalog.ids = []
     fill_valid_form(editor_page)
     attempt_write(editor_page, catalog, validator)
 
-    assert "write" in fs_kinds(editor_page)
-    api = [path for path in paths if path.startswith("/api/")]
-    assert api == [CATALOG_PATH, VALIDATE_PATH], f"寫入流程還打了別的端點:{api}"
-    assert note(editor_page) == "", f"成功訊息屬 5.4:{note(editor_page)!r}"
+    # 第二題**從一份空的題目欄位開始填** —— 那正是第一次成功之後畫面該有的樣子。
+    # 少了這一行,這一條在「什麼都不清空」的實作上也會通過。
+    assert value_of(editor_page, "id") == "", "第一次成功之後題目欄位沒有清空"
+    for name in PUZZLE_FIELDS:
+        put(editor_page, name, "27" if name == "id" else VALID_FORM[name])
+    attempt_write(editor_page, catalog, validator)
+
+    entries = json.loads(fs_files(editor_page)[TARGET_PATH])
+    assert [entry["id"] for entry in entries] == [26, 27]
+    assert value_of(editor_page, "target") == VALID_FORM["target"]
+
+
+# --- 寫入失敗的呈現(7.3)----------------------------------------------
+
+
+def test_an_index_that_cannot_be_fetched_says_so_instead_of_going_quiet(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """索引取不到時**不另立分支**,落在一般寫入失敗處理(design 的 Risks)。
+
+    在 5.1–5.3 這條路上畫面是完全沒有反應的:序列停住,但一句話都不說。維護者看到的
+    是一個按了沒事的按鈕 —— 而這正是 requirement 6 的 Objective 點名要避免的情形
+    (「我不會對著沒有反應的按鈕猜原因」)。
+    """
+    catalog.failing = True
+    fill_valid_form(editor_page)
+
+    editor_page.click(WRITE_BUTTON)
+    editor_page.wait_for_timeout(SETTLE_MS)
+
+    assert note(editor_page) != "", "索引取不到,畫面卻一句話都沒說"
     for name in FORM_FIELDS:
-        assert value_of(editor_page, name) == VALID_FORM[name], (
-            f"清空欄位屬 5.4,{name} 卻已經被動過"
-        )
+        assert value_of(editor_page, name) == VALID_FORM[name], f"{name} 的內容變了"
+    assert write_is_enabled(editor_page), "失敗之後應該還能再按一次"
+    assert fs_calls(editor_page) == [], "索引都取不到,不該碰到檔案"
+
+
+def test_a_target_that_is_not_a_position_array_says_why(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """7.3:目標檔不是合法題目檔屬一般寫入失敗,而失敗要**說得出原因**。
+
+    這一種尤其需要說法:路徑打錯到一個存在但不是題目檔的檔案上,畫面若只是沒反應,
+    維護者會以為是工具壞了,而真正的問題是他少打了一個資料夾名。
+    """
+    junk = '{"這不是": "題目陣列"}\n'
+    catalog.ids = []
+    fs_setup(editor_page, files={TARGET_PATH: junk})
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    assert "陣列" in note(editor_page), f"沒有說出原因:{note(editor_page)!r}"
+    for name in FORM_FIELDS:
+        assert value_of(editor_page, name) == VALID_FORM[name], f"{name} 的內容變了"
+    assert fs_files(editor_page) == {TARGET_PATH: junk}
+
+
+def test_a_platform_write_failure_is_reported_and_keeps_everything(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """平台自己的寫入失敗(權限中途失效、磁碟寫不進去)同樣要出聲。
+
+    它**沒有專屬的錯誤型別** —— `fs.js` 只翻「使用者不給」與「瀏覽器做不到」那兩種。
+    5.3 把它原樣往上拋、畫面完全沒有反應,而 7.3 沒有為「哪一種失敗」開例外:
+    寫入過程失敗就要保留內容並顯示原因。
+
+    訊息**刻意不宣稱題目檔沒有被動過**:整檔覆寫失敗在半途,檔案可能已經被截斷。
+    講一句沒有根據的保證,比不講更糟。
+    """
+    catalog.ids = []
+    fs_setup(editor_page, writeError="平台的原始訊息,不該外流")
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    assert note(editor_page) != "", "寫入失敗,畫面卻一句話都沒說"
+    assert "平台的原始訊息" not in page_text(editor_page), "平台原文流到了畫面上"
+    for name in FORM_FIELDS:
+        assert value_of(editor_page, name) == VALID_FORM[name], f"{name} 的內容變了"
+
+
+def test_a_failure_leaves_the_target_path_alone_too(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """7.3 的「全部內容」包含目標檔案路徑 —— 清空**只在成功時**發生。
+
+    分開問是因為 7.2 為那一欄開了特例(成功時保留),而特例最容易被寫成「不管成功
+    失敗都不動它」或「不管成功失敗都清掉」。這一條與上面那條成功的測試合起來,才把
+    那一欄的兩種情形都釘住。
+    """
+    catalog.ids = []
+    fs_setup(editor_page, denied=True)
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    assert value_of(editor_page, "target") == VALID_FORM["target"]
+
+
+# --- 寫入期間不得重複送出 ----------------------------------------------
+
+
+def test_the_write_action_is_disabled_while_an_attempt_is_running(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """嘗試進行中時寫入操作停用,避免重複送出(design 的 State Management)。
+
+    重複送出的代價不只是多借一次引擎:兩條序列會各自讀一次目標檔、各自追加一題、
+    再各自整檔寫回,而**後寫的那一次讀到的是前一次寫回之前的內容** —— 先寫進去的那
+    一題就這樣被蓋掉了。停用是把這條競態關掉最便宜的地方。
+
+    把授權那一步掛住來製造「進行中」:那是序列裡唯一等得住人的一步,真實情境裡它
+    等的正是維護者在對話框前面挑目錄的那幾秒。
+    """
+    catalog.ids = []
+    fs_setup(editor_page, hold=True)
+    fill_valid_form(editor_page)
+
+    editor_page.click(WRITE_BUTTON)
+    wait_for_acquire(editor_page)
+
+    assert not write_is_enabled(editor_page), "嘗試還在跑,寫入卻按得下去"
+
+    release_hold(editor_page)
+
+    assert str(FORM_ID) in note(editor_page), "放掉之後那一次嘗試沒有跑完"
+    assert fs_kinds(editor_page).count("write") == 1
+
+
+def test_a_finished_attempt_gives_the_write_action_back(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """停用只持續到那一次嘗試結束 —— 失敗之後必須能再按一次。
+
+    停用忘了解除的話,一次逾時就會讓這一頁再也寫不進任何東西,而畫面上看起來只是
+    按鈕灰掉,沒有任何線索指向原因。維護者唯一的出路是重新整理,然後重打七個欄位。
+    """
+    validator.fails_with(503, "SERVICE_BUSY")
+    catalog.ids = []
+    fill_valid_form(editor_page)
+    attempt_write(editor_page, catalog, validator)
+
+    assert write_is_enabled(editor_page), "一次確認未能完成之後這一頁就再也寫不了了"
+
+    validator.status = 200
+    validator.payload = {"valid": True, "issues": []}
+    attempt_write(editor_page, catalog, validator)
+
+    assert str(FORM_ID) in note(editor_page)
