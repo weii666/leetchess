@@ -45,7 +45,7 @@ POSITIONS_DIR = PROJECT_ROOT / "positions"
 #: 一個不會真的解析出去的網域 —— 所有請求都被 `page.route()` 攔下就地供檔。
 ORIGIN = "https://web-editor-pure.test"
 
-#: 《適情雅趣》第 25 局的起始局面,取自 `positions/適情雅趣~卷一/25.json`。
+#: 《適情雅趣》第 25 局的起始局面(題庫裡的 `適情雅趣~卷一`)。
 PUZZLE_FEN = "2Rakc3/4aR3/4b1n2/4C4/6b2/2B6/2P1c4/2n1B3C/1r2A1p2/4KA3 w - - 0 1"
 
 #: 一份**淺層檢查全數通過**的表單。各測試以覆寫單一欄位的方式製造缺漏,
@@ -53,15 +53,13 @@ PUZZLE_FEN = "2Rakc3/4aR3/4b1n2/4C4/6b2/2B6/2P1c4/2n1B3C/1r2A1p2/4KA3 w - - 0 1"
 VALID_FORM = {
     "id": "26",
     "title": "患在几席",
-    "description": "適情雅趣 第二六局 患在几席",
     "difficulty": "1",
     "tags": "解殺還殺、鐵門栓",
     "fen": PUZZLE_FEN,
-    "target": "適情雅趣~卷一/26.json",
 }
 
 #: 表單欄位的順序。`checkForm()` 的清單順序必須與此一致,8.4 的呈現才有穩定次序。
-FORM_FIELD_ORDER = ["id", "title", "description", "difficulty", "tags", "fen", "target"]
+FORM_FIELD_ORDER = ["id", "title", "difficulty", "tags", "fen"]
 
 
 @pytest.fixture
@@ -236,11 +234,16 @@ def test_check_form_attributes_a_broken_fen_to_the_fen_field(module_page) -> Non
     assert fields_of(issues) == ["fen"]
 
 
-def test_check_form_attributes_a_bad_path_to_the_target_field(module_page) -> None:
-    """路徑不合格時,未通過項目定位到目標檔案欄位。"""
-    issues = check_form(module_page, target="26.json")
+def test_check_form_ignores_keys_that_are_no_longer_fields(module_page) -> None:
+    """表單多帶一個本模組不認得的鍵時,**不生任何未通過項目**。
 
-    assert fields_of(issues) == ["target"]
+    `description` 與 `target` 曾經是欄位(requirements R5 與 R3 的修訂已移除)。
+    組裝層若在改版途中還多送著它們,這一層應該視而不見,而不是憑空報一項錯 ——
+    欄位清單的權威在本模組,不在呼叫端送了什麼。
+    """
+    issues = check_form(module_page, description="", target="26.json")
+
+    assert fields_of(issues) == []
 
 
 def test_check_form_tolerates_missing_keys(module_page) -> None:
@@ -365,150 +368,6 @@ def test_check_fen_structure_accepts_a_black_to_move_fen(module_page) -> None:
     )
 
 
-# --- sideFromFen:起手方顯示字樣(2.6)-----------------------------------
-
-
-@pytest.mark.parametrize(
-    ("fen", "expected"),
-    [
-        ("4k4/9/9/9/9/9/9/9/9/4K4 w - - 0 1", "紅先"),
-        ("4k4/9/9/9/9/9/9/9/9/4K4 b - - 0 1", "黑先"),
-        ("4k4/9/9/9/9/9/9/9/9/4K4", None),  # 沒有走子方欄位
-        ("4k4/9/9/9/9/9/9/9/9/4K4 x - - 0 1", None),  # 認不得的走子方
-        ("", None),
-        ("   ", None),
-    ],
-)
-def test_side_from_fen_reads_the_side_to_move_field(
-    module_page, fen: str, expected: str | None
-) -> None:
-    """2.6:起手方由 FEN 的走子方欄位決定,判不出來時回 `null` 而不是猜一個。"""
-    assert (
-        with_check(module_page, f"  return check.sideFromFen({js(fen)});") == expected
-    )
-
-
-def test_side_from_fen_agrees_with_the_corpus(module_page) -> None:
-    """題庫每一題的起手方都讀得出來,且與 FEN 那一欄一致。"""
-    fens = [entry["fen"] for _, entry in corpus_entries()]
-    expected = ["紅先" if fen.split(" ")[1] == "w" else "黑先" for fen in fens]
-
-    got = with_check(
-        module_page, f"  return {js(fens)}.map(fen => check.sideFromFen(fen));"
-    )
-
-    assert got == expected
-
-
-# --- checkTargetPath:題庫目錄內、書目資料夾內、題目檔(5.1、5.2、5.3)---
-
-
-@pytest.mark.parametrize(
-    "target",
-    [
-        "適情雅趣~卷一/26.json",
-        "適情雅趣~卷二/100-104.json",
-        " 適情雅趣~卷一/26.json ",  # 前後空白
-        "橘中秘/卷一/1.json",  # 更深的層次一樣在書目資料夾內
-    ],
-)
-def test_check_target_path_accepts_a_path_inside_a_source_folder(
-    module_page, target: str
-) -> None:
-    """5.1:路徑相對於題庫根目錄,位於書目資料夾內的題目檔一律放行。
-
-    判準是**結構**(至少兩段 + `.json`),不是已知資料夾的白名單 —— 收下一本書時
-    不該回頭改這個函式。
-    """
-    assert (
-        with_check(module_page, f"  return check.checkTargetPath({js(target)});")
-        is None
-    )
-
-
-def test_check_target_path_accepts_every_existing_corpus_file(module_page) -> None:
-    """題庫中每一個既有題目檔的相對路徑都必須通過 —— 判準與現實同形的回歸網。"""
-    relatives = sorted(
-        str(path.relative_to(POSITIONS_DIR).as_posix())
-        for path in POSITIONS_DIR.rglob("*.json")
-    )
-
-    rejected = with_check(
-        module_page,
-        f"  return {js(relatives)}.filter(p => check.checkTargetPath(p) !== null);",
-    )
-
-    assert relatives, "題庫必須至少有一個題目檔,否則這條回歸網是空的"
-    assert rejected == []
-
-
-@pytest.mark.parametrize("target", ["26.json", "./26.json"])
-def test_check_target_path_rejects_a_file_in_the_corpus_root(
-    module_page, target: str
-) -> None:
-    """5.2:直接躺在題庫根目錄的題目沒有出處可言 —— 出處由資料夾表達。
-
-    後端的 `_source_of_path()` 也會擋下同一件事;此處是為了在送出前就給回饋。
-    """
-    issue = with_check(module_page, f"  return check.checkTargetPath({js(target)});")
-
-    assert issue is not None
-    assert issue["field"] == "target"
-
-
-@pytest.mark.parametrize(
-    "target",
-    [
-        "../26.json",
-        "適情雅趣~卷一/../../26.json",
-        "..",
-        "/tmp/26.json",  # 絕對路徑
-        "/適情雅趣~卷一/26.json",
-    ],
-)
-def test_check_target_path_rejects_a_path_that_leaves_the_corpus(
-    module_page, target: str
-) -> None:
-    """5.3:跳出題庫目錄的路徑一律擋下。
-
-    平台本身也跳不出使用者選定的目錄樹(控制代碼只在其內解析),此處是為了給出
-    清楚的訊息,不是唯一防線。
-    """
-    issue = with_check(module_page, f"  return check.checkTargetPath({js(target)});")
-
-    assert issue is not None
-    assert issue["field"] == "target"
-
-
-@pytest.mark.parametrize(
-    "target",
-    [
-        "適情雅趣~卷一/26",  # 沒有副檔名
-        "適情雅趣~卷一/26.txt",
-        "適情雅趣~卷一/26.json.bak",
-        "適情雅趣~卷一/",  # 只到資料夾
-        "適情雅趣~卷一//26.json",  # 空白段落
-    ],
-)
-def test_check_target_path_rejects_a_path_that_is_not_a_puzzle_file(
-    module_page, target: str
-) -> None:
-    """目標必須是題目檔:題庫的題目檔一律是 `.json`。"""
-    issue = with_check(module_page, f"  return check.checkTargetPath({js(target)});")
-
-    assert issue is not None
-    assert issue["field"] == "target"
-
-
-@pytest.mark.parametrize("target", ["", "   "])
-def test_check_target_path_reports_an_empty_path(module_page, target: str) -> None:
-    """5.1:路徑沒填就沒有寫入的目標,回一項未通過。"""
-    issue = with_check(module_page, f"  return check.checkTargetPath({js(target)});")
-
-    assert issue is not None
-    assert issue["field"] == "target"
-
-
 # --- parseTags:標籤輸入的切分 ------------------------------------------
 
 
@@ -545,76 +404,6 @@ def test_parse_tags_agrees_with_the_corpus_tags(module_page) -> None:
     )
 
 
-# --- suggestDescription:描述的建議值(3.6、3.7)------------------------
-
-
-@pytest.mark.parametrize(
-    ("position_id", "expected"),
-    [
-        (1, "適情雅趣 第一局 局名"),
-        (10, "適情雅趣 第一〇局 局名"),  # 逐字,不是「十」
-        (20, "適情雅趣 第二〇局 局名"),
-        (21, "適情雅趣 第二一局 局名"),
-        (25, "適情雅趣 第二五局 局名"),  # 不是「二十五」
-        (100, "適情雅趣 第一〇〇局 局名"),
-        (200, "適情雅趣 第二〇〇局 局名"),
-    ],
-)
-def test_suggest_description_writes_the_number_digit_by_digit(
-    module_page, position_id: int, expected: str
-) -> None:
-    """3.6:局號採**逐字**中文數字,與既有題目的寫法一致(`25` → 「二五」)。"""
-    got = with_check(
-        module_page,
-        f"  return check.suggestDescription('適情雅趣', {position_id}, '局名');",
-    )
-
-    assert got == expected
-
-
-def test_suggest_description_reproduces_every_existing_description(
-    module_page,
-) -> None:
-    """3.6 的回歸網:題庫既有的每一則描述都必須是建議值本身,逐字相同。
-
-    書名取自書目資料夾名稱在 `~` 之前的部分 —— 資料夾帶卷次(`適情雅趣~卷一`)而
-    描述只寫書名。這個換算屬組裝層(tasks 4.3),不是本模組的職責,故在測試裡明寫。
-    """
-    entries = corpus_entries()
-    calls = [
-        [path.parent.name.split("~")[0], entry["id"], entry["title"]]
-        for path, entry in entries
-    ]
-
-    got = with_check(
-        module_page,
-        f"  return {js(calls)}.map(([source, id, title]) =>\n"
-        "    check.suggestDescription(source, id, title));",
-    )
-
-    assert got == [entry["description"] for _, entry in entries]
-
-
-@pytest.mark.parametrize(
-    "call",
-    [
-        "check.suggestDescription('', 25, '患在几席')",  # 沒有書名
-        "check.suggestDescription('適情雅趣', 25, '')",  # 沒有局名
-        "check.suggestDescription('適情雅趣', 0, '患在几席')",  # 題號不是正整數
-        "check.suggestDescription('適情雅趣', -1, '患在几席')",
-        "check.suggestDescription('適情雅趣', 2.5, '患在几席')",
-        "check.suggestDescription('適情雅趣', NaN, '患在几席')",
-        "check.suggestDescription('適情雅趣', '25', '患在几席')",  # 契約是數字
-        "check.suggestDescription()",
-    ],
-)
-def test_suggest_description_returns_empty_when_it_cannot_suggest(
-    module_page, call: str
-) -> None:
-    """3.6 只在題號與局名皆已填時才有建議值可言;湊不出來就回空字串,不拋例外。"""
-    assert with_check(module_page, f"  return {call};") == ""
-
-
 # --- 契約與純函式的性質 -------------------------------------------------
 
 
@@ -626,10 +415,7 @@ def test_module_exports_exactly_the_designed_interface(module_page) -> None:
         [
             "checkForm",
             "checkFenStructure",
-            "checkTargetPath",
             "parseTags",
-            "sideFromFen",
-            "suggestDescription",
         ]
     )
 
@@ -644,16 +430,13 @@ def test_no_function_throws_on_hostile_input(module_page) -> None:
         "  const inputs = [undefined, null, 0, 1, true, {}, [], '', '   ',\n"
         "    'a'.repeat(5000), '/'.repeat(50), '\\u0000', '\\n\\r\\t',\n"
         "    '../../../etc/passwd', '4k4/9', '中文'];\n"
-        "  const calls = ['checkForm', 'checkFenStructure', 'checkTargetPath',\n"
-        "    'parseTags', 'sideFromFen'];\n"
+        "  const calls = ['checkForm', 'checkFenStructure', 'parseTags'];\n"
         "  const bad = [];\n"
         "  for (const name of calls) {\n"
         "    for (const input of inputs) {\n"
         "      try { check[name](input); }\n"
         "      catch (error) { bad.push(`${name}: ${String(error)}`); }\n"
         "    }\n"
-        "    try { check.suggestDescription(inputs[0], inputs[1], inputs[2]); }\n"
-        "    catch (error) { bad.push(`suggestDescription: ${String(error)}`); }\n"
         "  }\n"
         "  return bad;",
     )
@@ -733,7 +516,7 @@ NEW_ENTRY = {
 #: `NEW_ENTRY` 序列化後應有的文字,逐字寫死。
 #:
 #: 刻意不由程式產生期望值:期望值若也是「照排版規則組出來的」,兩邊會一起錯。
-#: 這一段是照著 `positions/適情雅趣~卷一/25.json` 手抄的 —— 兩格縮排、欄位各自
+#: 這一段是照著題庫裡一個真實的題目檔手抄的 —— 兩格縮排、欄位各自
 #: 一行、`tags` 單行、中文不轉義。
 NEW_ENTRY_TEXT = (
     "  {\n"
@@ -924,6 +707,49 @@ def test_serialize_position_writes_only_schema_fields(module_page) -> None:
     assert text == NEW_ENTRY_TEXT
 
 
+def test_serialize_position_omits_a_field_the_entry_does_not_have(module_page) -> None:
+    """`description` 選填之後(3.10),沒有它的題目就少寫一行 —— 其餘完全不變。
+
+    收題頁自 R3 的修訂起不再產生描述,所以這是**新題的常態形狀**。斷言的是「把
+    描述那一行從預期文字裡拿掉」之後逐字相同:縮排、逗號的位置、`tags` 仍在同一行,
+    全都不因為少了一個欄位而漂移。
+    """
+    entry = {name: value for name, value in NEW_ENTRY.items() if name != "description"}
+
+    text = serialize(module_page, entry)
+
+    expected = "\n".join(
+        line for line in NEW_ENTRY_TEXT.split("\n") if '"description"' not in line
+    )
+    assert text == expected
+    assert "description" not in text
+
+
+@pytest.mark.parametrize(
+    ("case", "value"),
+    [("整個沒有這個鍵", None), ("鍵在但值是 undefined", "undefined")],
+    ids=["整個沒有這個鍵", "鍵在但值是 undefined"],
+)
+def test_an_absent_and_an_undefined_field_are_treated_alike(
+    module_page, case: str, value: str | None
+) -> None:
+    """兩者都算「沒有這個欄位」,而**後者是呼叫端最容易產生的形狀**。
+
+    判準若寫成 `in`,`{description: undefined}` 會走進序列化,而
+    `JSON.stringify(undefined)` 回的是 `undefined` 而不是一個字串 —— 產出的會是
+    `"description": undefined`,一份解析不開的 JSON,下一次會讓服務啟動不起來。
+    """
+    entry = {name: v for name, v in NEW_ENTRY.items() if name != "description"}
+    literal = js(entry)
+    if value is not None:
+        literal = literal[:-1] + ", description: undefined }"
+
+    text = with_corpus(module_page, f"  return corpus.serializePosition({literal});")
+
+    assert "description" not in text, case
+    assert json.loads(f"[{text}]"), f"{case}:產出的不是合法 JSON"
+
+
 def test_serialize_position_writes_fields_in_the_corpus_order(module_page) -> None:
     """欄位順序與既有題目檔一致 —— 順序不同不是錯誤,但會讓每一題長得不一樣。"""
     text = serialize(module_page, NEW_ENTRY)
@@ -997,7 +823,9 @@ def test_append_position_inserts_into_an_empty_array_without_a_comma(
 
 def test_append_position_appends_to_a_non_empty_array(module_page) -> None:
     """5.5:目標檔已存在時,新題附加到陣列的**末端**,前一個元素補上逗號。"""
-    existing = (POSITIONS_DIR / "適情雅趣~卷一" / "25.json").read_text(encoding="utf-8")
+    # 取題庫裡第一個題目檔而不是寫死某一個檔名:題目檔會被併檔改名
+    # (`25.json` 併進了 `25-48.json`),寫死的路徑會在那一天無聲地變成 FileNotFound。
+    existing = corpus_files()[0].read_text(encoding="utf-8")
 
     got = append(module_page, existing, NEW_ENTRY)
 

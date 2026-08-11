@@ -1,5 +1,5 @@
 /**
- * 收題頁的組裝層:把七個欄位接到盤面、難度選項、描述建議值、淺層檢查、撞號檢查與
+ * 收題頁的組裝層:把五個欄位接到盤面、難度選項、淺層檢查、撞號檢查、權威驗證與
  * 權威驗證上(tasks 4.2、4.3、5.1、5.2;requirements 2.1–2.6、3.2、3.3、3.6、3.7、
  * 4.1–4.9、8.3、8.4)。
  *
@@ -15,10 +15,9 @@
  * 層再存一份狀態,而那份狀態遲早與輸入框裡的字分家 —— 使用者核對的會是一個已經
  * 不在輸入框裡的局面,那比什麼都不畫更危險(收題工具存在的理由就是肉眼核對 FEN)。
  *
- * 因此畫面該長什麼樣幾乎完全是七個欄位當下那些字的函式。模組層的狀態變數只有七個,
+ * 因此畫面該長什麼樣幾乎完全是五個欄位當下那些字的函式。模組層的狀態變數只有六個,
  * 它們記的都**不是畫面**,而是幾件無法由當下的值看出來的事:
  *
- * - `suggested` —— 描述欄裡那句話是誰打的
  * - `writtenIds` —— 本分頁已經成功寫入過哪些題號
  * - `collidedId` —— 上一次寫入嘗試指認了哪個題號撞號
  * - `candidateVerdict` —— 權威驗證對哪一份候選題目說了什麼
@@ -26,24 +25,10 @@
  * - `successNote` —— 上一次寫入成功的是哪一題、進了哪個檔
  * - `writing` —— 此刻有沒有一次嘗試正在進行
  *
- * 七者一律只經 `render()` 反映到畫面上。**目錄控制代碼不在其中** —— 它是 `fs.js` 的
- * 模組層狀態(design 的 Invariants:同一分頁內只詢問一次目錄)。本檔每次寫入都照樣
- * 呼叫 `acquireCorpusDirectory()`,已取得者由那一層直接兌現;在這裡再記一份就是第二
- * 個真相來源,而兩者遲早會分家。
- *
- * ## 描述建議值:每一次都算,但只在沒有人動過它時才寫回去
- *
- * requirement 3.6 要在題號與局名皆已填而描述仍為空時給出建議值,3.7 要最終值以維護者
- * 輸入的內容為準。兩者合起來的難處在於**建議值每一次輸入變動都會重算**:重算若無條件
- * 寫回描述欄,維護者打好的那一句話會在他去改標籤時被蓋掉,而 3.7 就等於沒有實作。
- *
- * 判準是「描述欄裡的字是不是本檔上一次放進去的那一句」(`suggested`)。是的話那一欄
- * 仍屬**自動狀態**,可以照著新的題號局名更新;不是的話它已經是維護者的內容,本檔不再
- * 碰它。空字串同樣算自動狀態 —— 那正是 3.6 的觸發條件。
- *
- * 還有一條:**使用者正在改描述欄時一律不寫回去**(`render()` 的 `origin`)。少了它,
- * 維護者全選刪掉想重寫時,那一刻描述變成空的、建議值立刻補回來,他的下一個字就接在
- * 建議值後面。3.6 講的是描述為空時「提供」建議值,不是「不准它空著」。
+ * 六者一律只經 `render()` 反映到畫面上。**選定的檔案不在其中** —— 它是 `fs.js` 的
+ * 模組層狀態(design 的 Invariants:同一次分頁使用期間沿用)。本檔每次要用時都問
+ * `selectedFile()`;在這裡再記一份就是第二個真相來源,而分家時畫面說的檔名會與真正
+ * 寫進去的那個檔不同。
  *
  * ## 未通過的項目呈現在兩個地方,而且是同一份清單
  *
@@ -73,7 +58,8 @@
  * ## 寫入是一條序列
  *
  * 寫入一題的完整次序是(design 的 System Flows):**取題庫索引 → 撞號 → 送權威驗證
- * → 取目錄授權 → 重讀目標檔 → 文字層追加 → 寫回 → 記下題號並清空欄位**。
+ * → 重讀目標檔 → 文字層追加 → 寫回 → 記下題號並清空欄位**;選檔則是序列**之外**
+ * 的一個獨立操作(5.1)。
  *
  * 序列分成兩段函式:`runWriteSequence()` 是**擋得下來的那些檢查**(索引、撞號、
  * 驗證),`writeCandidate()` 是**通過之後真的動到磁碟的那幾步**。切在這裡是因為前段
@@ -83,7 +69,7 @@
  * 停用寫入操作(避免重複送出),以及把預期內的停止翻成畫面上的一句話。兩者都寫在
  * `try`/`finally` 裡,所以任何一條例外路徑都不會讓按鈕永遠灰著。
  *
- * 淺層檢查未通過時 `#write` 仍然是停用的(4.1),所以序列跑得起來就代表七個欄位
+ * 淺層檢查未通過時 `#write` 仍然是停用的(4.1),所以序列跑得起來就代表五個欄位
  * 都已填妥 —— 撞號檢查不必再驗一次題號的寫法。
  *
  * ## 淺層檢查不是放行判準,權威在服務端
@@ -171,21 +157,16 @@ import { renderBoard } from '../board.js';
 import { CatalogError, loadCatalog } from '../catalog.js';
 import { DIFFICULTY_LABELS } from '../difficulty.js';
 import { parseFen } from '../fen.js';
-import {
-  checkForm,
-  checkFenStructure,
-  parseTags,
-  sideFromFen,
-  suggestDescription,
-} from './check.js';
+import { checkForm, checkFenStructure, parseTags } from './check.js';
 import { CorpusFileError, appendPosition } from './corpus-file.js';
 import {
   PermissionDeniedError,
   UnsupportedBrowserError,
-  acquireCorpusDirectory,
   isSupported,
-  readTextAt,
-  writeTextAt,
+  pickCorpusFile,
+  readText,
+  selectedFile,
+  writeText,
 } from './fs.js';
 
 /**
@@ -202,11 +183,14 @@ const EMPTY_FEN = '9/9/9/9/9/9/9/9/9/9 w - - 0 1';
  */
 const NO_LEGAL_MOVES = Object.freeze([]);
 
-/** 起手方那一行的說法(2.6)。 */
-const SIDE_TO_MOVE_LABEL = '起手方:';
-
-/** FEN 讀不出走子方時的佔位符號 —— 不猜一個,黑先的排局會被靜默標錯。 */
-const UNKNOWN_SIDE = '—';
+/*
+ * **起手方不再有呈現。** 原本 FEN 底下印著「起手方:紅先」,由 `check.js` 的
+ * `sideFromFen()` 推出來(該函式已一併移除)。拿掉的理由是它不告訴收題的人任何他不
+ * 知道的事:走子方就在他剛貼上的那串字裡,而盤面畫出來時紅方永遠在下。
+ *
+ * **這不改變起手方的來源** —— 它仍只由 FEN 表達,題目檔裡沒有這個欄位
+ * (`corpus-file.js` 寫出的欄位裡沒有 `side_to_move`),畫面上也仍然沒有它的輸入。
+ */
 
 /**
  * 盤面被清掉時放在那一格的說法(2.4)。
@@ -217,29 +201,25 @@ const UNKNOWN_SIDE = '—';
 const CLEARED_BOARD_NOTE = 'FEN 目前無法解析,盤面已清空。';
 
 /**
- * 七個欄位的名稱,**順序即表單欄位順序**,也就是 `checkForm()` 回傳清單的順序
+ * 五個欄位的名稱,**順序即表單欄位順序**,也就是 `checkForm()` 回傳清單的順序
  * (該函式明載這件事)。寫入操作旁的點名匯總照這個順序念,使用者由上往下找得到。
+ *
+ * **FEN 排第三**(8.5):它是唯一需要對著盤面逐字核對的欄位,而盤面就在左邊。
+ * 描述與目標檔案路徑不在其中 —— 前者整欄移除(3.9),後者改由檔案選擇框選定(5.1)。
  */
-const FIELD_NAMES = Object.freeze([
-  'id',
-  'title',
-  'description',
-  'difficulty',
-  'tags',
-  'fen',
-  'target',
-]);
+const FIELD_NAMES = Object.freeze(['id', 'title', 'fen', 'difficulty', 'tags']);
 
 /**
- * 書名與卷次的分隔符號(`structure.md` 的 Naming Conventions)。
+ * 載入時預設選中的難度(`renderDifficultyOptions`)。
  *
- * 資料夾是 `適情雅趣~卷一`,而題目的描述只寫書名(「適情雅趣 第二五局 患在几席」)。
- * 分隔符是 `~` 而不是 `-`,以與檔名的局號區間(`20-24.json`)區隔開。
+ * 取的是 `difficulty.js` 那份對照表的**中間一個鍵**,不是寫死的 `2`:分級若有增減,
+ * 這裡跟著動,而不是留下一個指向不存在選項的數字。三級以外的長度也算得出一個中間
+ * 值,`Math.floor` 讓偶數個時偏向較容易的那一邊 —— 猜錯難度時,猜低的那一邊比較不會
+ * 讓人卡在一題上。
  */
-const VOLUME_SEPARATOR = '~';
-
-/** 目標路徑的分段符號。路徑相對於題庫根目錄,一律以 `/` 分段(5.1)。 */
-const PATH_SEPARATOR = '/';
+const DEFAULT_DIFFICULTY = [...DIFFICULTY_LABELS.keys()][
+  Math.floor((DIFFICULTY_LABELS.size - 1) / 2)
+];
 
 /** 停用寫入時那一行的開頭(8.4)。後面接上未通過項目的欄位名稱。 */
 const WRITE_NOTE_PREFIX = '無法寫入,尚未通過:';
@@ -262,20 +242,13 @@ const VALIDATE_PATH = '/api/editor/validate';
  * 候選題目**由人工編輯**的六個 schema 欄位,順序即寫進題目檔的順序
  * (與 `corpus-file.js` 的 `SCHEMA_FIELDS` 同一份約定)。
  *
- * 取這個名字是為了讓「送出去的是哪六個欄位」在程式碼裡看得見。三個**不在**裡面的
- * 欄位各有理由:`max_dtm` 由驗證工具回填、`source` 由所在資料夾表達、`side_to_move`
- * 由 FEN 表達(design 的「候選題目的資料契約」)。後端對未知欄位是直接拒絕的,多送
- * 一個就會讓一份完全沒問題的題目被判為不合格。目標檔案路徑同樣不在裡面 —— 它是
- * 「寫到哪個檔」,不是題目的內容。
+ * 取這個名字是為了讓「送出去的是哪五個欄位」在程式碼裡看得見。四個**不在**裡面的
+ * 欄位各有理由:`description` 整欄移除(3.9,schema 已改為選填)、`max_dtm` 由驗證
+ * 工具回填、`source` 由所在資料夾表達、`side_to_move` 由 FEN 表達(design 的「候選
+ * 題目的資料契約」)。後端對未知欄位是直接拒絕的,多送一個就會讓一份完全沒問題的
+ * 題目被判為不合格。目標題目檔同樣不在裡面 —— 它是「寫到哪個檔」,不是題目的內容。
  */
-const CANDIDATE_FIELDS = Object.freeze([
-  'id',
-  'title',
-  'description',
-  'fen',
-  'difficulty',
-  'tags',
-]);
+const CANDIDATE_FIELDS = Object.freeze(['id', 'title', 'fen', 'difficulty', 'tags']);
 
 /**
  * 後端契約承認的七種類別碼(`service/errors.py` 的 `ErrorCode`)。
@@ -343,17 +316,38 @@ const WRITE_FAILURE_NOTE = '寫入未完成。請確認目標檔案目前的內�
  * 寫入成功那一句(requirement 7.1)。
  *
  * **題號與目標檔案都要出現在句子裡** —— 7.1 的要求就是這兩件事。理由在連續收題:
- * 目標檔案路徑是唯一留著不清空的一欄(7.2),也因此是最容易在不知不覺間寫錯地方的
- * 一欄。指名道姓,維護者掃一眼就知道剛才那一題落在哪。
+ * 選定的檔案是唯一留著不清空的東西(7.2),也因此是最容易在不知不覺間寫錯地方的
+ * 那一個。指名道姓,維護者掃一眼就知道剛才那一題落在哪。
+ *
+ * 檔名取自控制代碼的 `name`,那是平台肯給的**全部**資訊 —— 它不帶所在位置,所以
+ * 這句話講得出「26.json」而講不出它在哪個資料夾底下。這是選檔取代路徑之後的已知
+ * 代價(見 `fs.js` 的模組說明)。
  *
  * @param {number} id 寫入的題號。
- * @param {string} target 目標檔案路徑。
+ * @param {string} name 目標題目檔的檔名。
  * @returns {string}
  */
-const successText = (id, target) => `第 ${id} 題已寫入 ${target}。可以接著收下一題。`;
+const successText = (id, name) => `第 ${id} 題已寫入 ${name}。可以接著收下一題。`;
 
 /**
- * 拒絕授權或取消目錄選擇之後那一行(requirement 6.2)。
+ * 尚未選定目標題目檔時那一行(requirement 5.10)。
+ *
+ * 它與其餘的失敗說法**不同類**:那些講的是「出了什麼事」,這一句講的是「還有一步
+ * 沒做」。因此它明講下一步是什麼 —— 畫面上那顆按鈕就在旁邊,而維護者此刻的注意力
+ * 在寫入鈕上。
+ */
+const NO_FILE_NOTE = '尚未選定存檔位置,寫入未進行。請先按「選擇檔案」。';
+
+/**
+ * 尚未選定時,檔名顯示位置說的話(5.1)。
+ *
+ * **不留空白。** 一個空白的位置看起來像壞掉,而這是一個必要的步驟 —— 說出來才知道
+ * 它在等什麼。
+ */
+const NO_FILE_CHOSEN = '尚未選定';
+
+/**
+ * 拒絕授權或取消檔案選擇之後那一行(requirement 6.2)。
  *
  * 6.2 要的是兩件事:**保留已填入的全部內容**,以及**告知寫入未進行**。內容的保留
  * 由本檔什麼都不做達成(只有寫入成功才清空,見 `clearPuzzleFields`),所以這裡只剩下說話。
@@ -361,7 +355,7 @@ const successText = (id, target) => `第 ${id} 題已寫入 ${target}。可以�
  * 句子裡明講「再按一次寫入」:按 Esc 關掉對話框是最容易誤觸的一個動作,而維護者
  * 此刻看著一個沒有反應的畫面,不會知道下一步該做什麼。
  */
-const DENIED_NOTE = '未取得題庫目錄的存取授權,寫入未進行。已填入的內容都還在,再按一次寫入可以重新選擇目錄。';
+const DENIED_NOTE = '未取得題目檔的寫入授權,沒有選定檔案。已填入的內容都還在,可以再按一次「選擇檔案」。';
 
 /**
  * 平台不支援時,寫入操作旁那一行(requirement 6.3)。
@@ -369,7 +363,7 @@ const DENIED_NOTE = '未取得題庫目錄的存取授權,寫入未進行。已�
  * 與 `#unsupported` 那句常駐說明講的是同一件事。**兩處都要有**:常駐的那一句在頁面
  * 上方,可能已經被捲出視野,而按下寫入之後維護者的眼睛在按鈕附近。
  */
-const UNSUPPORTED_NOTE = '這個瀏覽器不支援由網頁寫入本機檔案,寫入未進行。請改用桌面版的 Chrome、Edge 或 Opera。';
+const UNSUPPORTED_NOTE = '這個瀏覽器不支援由網頁寫入本機檔案。請改用桌面版的 Chrome、Edge 或 Opera。';
 
 /**
  * 判定為不合格、卻一項可顯示的未通過項目都沒有時的退路。
@@ -416,7 +410,7 @@ function field(name) {
  * 使用者每打一個字版面就抖一次。
  *
  * 認槽位用 `data-message-for` 而不是 id,取值即 `check.js` 的 `CheckIssue.field`,
- * 與控制項的 `data-field` 同名 —— 七個欄位因此共用這一個查詢,增減欄位時要動的是
+ * 與控制項的 `data-field` 同名 —— 五個欄位因此共用這一個查詢,增減欄位時要動的是
  * `FIELD_NAMES` 與 HTML 裡的槽,本函式一個字都不必改。
  *
  * @param {string} name 欄位名,例如 `'fen'`。
@@ -433,9 +427,6 @@ const elements = {
   // 日後增減欄位也只動 `FIELD_NAMES` 一處。
   controls: new Map(FIELD_NAMES.map((name) => [name, field(name)])),
   messages: new Map(FIELD_NAMES.map((name) => [name, fieldMessage(name)])),
-  // 起手方(2.6)。它在 HTML 裡就排在 FEN 那一欄底下 —— **不能擺進 `#board`**,
-  // `renderBoard()` 以 `replaceChildren` 畫盤,擺在那裡的話第一次繪盤就會被換掉。
-  sideToMove: document.getElementById('side-to-move'),
   // 寫入操作與它的停用說明(4.1、8.4)。click 跑的是寫入序列,本輪走到權威驗證
   // 為止(見檔首)。`writeNote` 同時承接上一次嘗試的頁面層級說法(4.9)。
   write: document.getElementById('write'),
@@ -443,19 +434,11 @@ const elements = {
   // 平台不支援的常駐說明(6.3)。**不進 `render()`** —— 它顯示與否是
   // `isSupported()` 的函式,而那個答案在分頁存續期間不會變(見模組末尾的接線)。
   unsupported: document.getElementById('unsupported'),
+  // 選檔操作與目前選定的檔名(5.1、5.11)。**兩者都宣告在 HTML 裡**,本檔只寫內容
+  // 與接事件 —— 與訊息槽同一條規矩。
+  pickFile: document.getElementById('pick-file'),
+  selectedFile: document.getElementById('selected-file'),
 };
-
-/**
- * 描述欄裡那句話,若它是本檔放進去的建議值。
- *
- * 五個模組層狀態變數之一(見檔首),而且它記的不是畫面而是來源:描述欄當下的值等於它時,
- * 那一欄仍屬自動狀態、可以隨題號局名更新;不等於時,那是維護者自己的內容,3.7 要求
- * 以它為準,本檔不再碰。空字串(初始值)同樣算自動狀態 —— 那正是 3.6 的觸發條件。
- *
- * 維護者剛好把描述改成與建議值一字不差時,這兩者分不出來,而那沒有任何後果:接下來
- * 對那一欄做的事與「它還是建議值」完全相同。
- */
-let suggested = '';
 
 /**
  * 本分頁**已成功寫入**的題號(requirement 4.4;design 的 State Management)。
@@ -493,7 +476,7 @@ let collidedId = null;
  * **候選題目**而不是七個輸入框的字面:把標籤的分隔符由頓號改成空白不會改變送出去的
  * 那份陣列,一句成立的判定不該因此消失。
  *
- * 目標檔案路徑不在候選題目裡,所以改它不會撤下判定 —— 那是對的:判定講的是這一題
+ * 選定的檔案不在候選題目裡,所以換檔不會撤下判定 —— 那是對的:判定講的是這一題
  * 的內容,與它要寫到哪個檔無關。
  */
 let candidateVerdict = null;
@@ -545,7 +528,7 @@ function valueOf(name) {
 }
 
 /**
- * 七個欄位的當下值,形狀即 `check.js` 的 `FormValues`。
+ * 五個欄位的當下值,形狀即 `check.js` 的 `FormValues`。
  *
  * @returns {Record<string, string>}
  */
@@ -568,7 +551,7 @@ function labelOf(name) {
 }
 
 /**
- * @typedef {{board: (string|null)[][]|null, message: string, side: string|null}} FenView
+ * @typedef {{board: (string|null)[][]|null, message: string}} FenView
  */
 
 /**
@@ -583,11 +566,12 @@ function labelOf(name) {
  *   內容的局面 —— 呼叫端拿到的 `board` 是 `null`,畫不出東西是必然而不是選擇。
  * - **其餘** -> 照著畫(2.1)。
  *
- * 起手方三條路共用同一行:`sideFromFen()` 刻意不先跑結構檢查(見該函式說明),
- * 一個列數還沒打完的 FEN 仍可能已經打完走子方,先給出起手方沒有壞處。
+ * **這裡不再推導起手方。** 那一行呈現已經移除(見檔首附近的說明),`check.js` 的
+ * `sideFromFen()` 也隨之刪掉了 —— 沒有呼叫端的推導留著只會讓人以為畫面上還有一處
+ * 在印它。走子方那一欄仍由 `checkFenStructure()` 驗(認不得就是一項未通過)。
  *
- * **前後的空白在最上面就去掉一次,這一行是必要的。** `checkFenStructure()` 與
- * `sideFromFen()` 內部都先 `trim()`,而 `parseFen()` 是以**字面的半形空格**切欄位的
+ * **前後的空白在最上面就去掉一次,這一行是必要的。** `checkFenStructure()` 內部
+ * 先 `trim()`,而 `parseFen()` 是以**字面的半形空格**切欄位的
  * (`fen.js` 的 `fen.split(' ')[0]`)—— 把沒有去過空白的字串同時交給兩邊,一個前導
  * 空白就會讓結構檢查照樣通過、盤面段卻取到空字串,於是畫出一個全空的盤面:訊息沒
  * 出現、棋子也沒出現,與「還沒開始填」完全分不出來,而使用者手上那串 FEN 是對的。
@@ -602,18 +586,17 @@ function labelOf(name) {
  */
 function readFenView(raw) {
   const text = (typeof raw === 'string' ? raw : '').trim();
-  const side = sideFromFen(text);
 
   if (text === '') {
-    return { board: parseFen(EMPTY_FEN), message: '', side };
+    return { board: parseFen(EMPTY_FEN), message: '' };
   }
 
   const issue = checkFenStructure(text);
   if (issue !== null) {
-    return { board: null, message: issue.message, side };
+    return { board: null, message: issue.message };
   }
 
-  return { board: parseFen(text), message: '', side };
+  return { board: parseFen(text), message: '' };
 }
 
 /**
@@ -658,9 +641,23 @@ function renderBoardArea(view) {
  * 值用題目 schema 的數字(1/2/3)轉成字串:`<option>` 的值只能是字串,而寫進題目檔
  * 時要的是數字 —— 那一步屬第 5 組的序列化,不在這裡先轉。
  *
- * **接在既有的「尚未選擇」之後,不動它、也不重排。** 那一個選項的值是空字串,
- * `checkForm()` 以它判定「還沒選」;插到最前面會讓維護者在沒有做過選擇的情況下
- * 寫進一個難度。
+ * ## 這三個就是全部的選項,而且預設選中中間那一級
+ *
+ * 這個 `<select>` 在 HTML 裡是空的,三個選項全由這裡產生 —— **不再有「尚未選擇」
+ * 那一個空選項**。它原本排在最前面,由 `checkForm()` 以空字串判定「還沒選」;難度
+ * 改為有預設值之後,它只剩一個用途:把一格已經填好的東西清成未填,而清成未填之後
+ * 這一題就寫不出去。收題頁的難度因此**恆有值**。
+ *
+ * 預設值原本是「尚未選擇」,理由是「不做選擇就不該寫進一個難度」—— 而實際收題時
+ * 每一題都得手動點一次同一個選項,那個保護擋到的只有維護者自己。中間那一級是
+ * **不特別判斷時最可能對的答案**,判斷得出來的那幾題照樣改得動;這與標籤的預設值
+ * (`index.html` 的 `#field-tags`)是同一個取捨。
+ *
+ * `checkForm()` 那條空值檢查仍留著,不因此刪:規則是「難度必須是三個分級之一」,
+ * 而不是「畫面上剛好選不到空的」。
+ *
+ * 值取自 `DIFFICULTY_LABELS` 的鍵而不是寫一個 `2` 在這裡:那份對照表是難度分級的
+ * 唯一出處,分級若有增減,這裡跟著動而不是留下一個指向不存在選項的數字。
  *
  * 這是本檔第二個、也是最後一個自己生節點的地方(另一個是 `renderBoardArea`)。理由
  * 與那裡不同:選項的**內容**不能寫在 HTML 裡,否則說法就有了第二份。它只在載入時
@@ -674,83 +671,30 @@ function renderDifficultyOptions() {
     option.textContent = label;
     difficulty.append(option);
   }
+  difficulty.value = String(DEFAULT_DIFFICULTY);
 }
 
 /**
- * 由目標檔案路徑取得書名(requirement 3.6)。
+ * 難度控制項當下該用哪一個分級的顏色(requirement 8.3 的「與列表一致」)。
  *
- * **書名沒有自己的輸入欄**(3.5):出處由題目所在的書目資料夾表達,因此描述建議值
- * 要用的書名只能從目標路徑推出來 —— 取第一段(書目資料夾),再切掉 `~` 之後的卷次。
- * 資料夾是 `適情雅趣~卷一`,而題庫既有的描述寫的是「適情雅趣 第二五局 患在几席」:
- * **卷次不入描述**,這條換算是 `structure.md` 的 Naming Conventions 載明的。
+ * **顏色本身一個字都不在這裡** —— 三個色值住在 `editor.css`,本函式只寫上
+ * `data-level`,與列表頁 `list.js` 的做法逐字相同(它也只寫 `dataset.level`,
+ * 顏色在 `list.css`)。呈現層的顏色屬樣式表,寫在 JS 裡就會有第二個要改的地方。
  *
- * 路徑還沒有資料夾那一段(空字串、或只打了 `26.json`)時回空字串,`suggestDescription`
- * 收到空書名就給不出建議值 —— 那是對的:此刻沒有任何線索指出這一題屬於哪一本書,
- * 猜一個書名會讓維護者收到一句看起來很像回事、卻寫錯出處的描述。建議值會在他填上
- * 目標路徑的那一刻出現,順序不拘。
- *
- * 以 `/` 開頭的路徑(`/適情雅趣~卷一/26.json`)第一段是空的,因而同樣給不出建議值。
- * **不為它補一條特例**:那條路徑本身就不合規(路徑相對於題庫根目錄),`checkTargetPath`
- * 已經在目標路徑那一欄說明了原因,而那一欄此刻是填了的、訊息看得見。先讓維護者把
- * 路徑改對,建議值隨即跟上 —— 對一個被判為不合規的路徑推敲書名,才是會誤導人的那條路。
- *
- * @param {string} target 目標檔案路徑,相對於題庫根目錄。
- * @returns {string} 取不到書名時為空字串。
+ * 值直接取自控制項當下的值,而不是另記一份狀態:畫面完全是當下那些值的函式
+ * (見 `render()`)。**沒有值時把屬性整個移除**,不是寫一個空字串 ——
+ * `[data-level=""]` 仍然是一個存在的屬性,日後多一條屬性選擇器就會誤中它。畫面上
+ * 現在選不出空的難度(三個選項就是全部),這一條因此是防禦性的:值的來源只有
+ * 控制項自己,而它在選項產生之前是空的。
  */
-function bookFromTarget(target) {
-  const segments = target.trim().split(PATH_SEPARATOR);
-  if (segments.length < 2) {
-    return '';
-  }
-  return segments[0].split(VOLUME_SEPARATOR)[0].trim();
-}
-
-/**
- * 描述建議值(requirements 3.6、3.7)。
- *
- * 兩道閘門,缺一不可:
- *
- * - **`origin === 'description'` 一律不寫**。使用者正在改那一欄,此刻補字進去會與他
- *   搶輸入框:全選刪掉想重寫的那一刻描述變成空的,建議值立刻補回來,他的下一個字
- *   就接在建議值後面。
- * - **只在自動狀態下寫**。描述欄裡的字不是本檔上一次放進去的那一句時,它已經是
- *   維護者的內容(3.7),本檔不再碰它。
- *
- * 湊得出建議值的前提是題號與局名都**通過檢查**,而不只是「非空」:判準沿用
- * `checkForm()`,組裝層不自己再寫一份「什麼是正整數」—— 寫一份就會與 `check.js`
- * 分家,而那正是 `1e3` 這種輸入被 `Number()` 收下、變成一個誰也沒打過的題號的來源。
- *
- * 湊不出來時寫回空字串而不是留著上一句:那一句是照舊的題號局名算出來的,留著就是
- * 一句**已知過期**的描述掛在自動狀態的欄位裡,而維護者會以為那是照他剛改的內容更新
- * 過的。描述欄在他動它之前,就是其餘三欄的函式。
- *
- * @param {string|null} origin 觸發本次重畫的欄位名;載入時為 `null`。
- */
-function applySuggestion(origin) {
-  if (origin === 'description') {
+function renderDifficultyLevel() {
+  const difficulty = elements.controls.get('difficulty');
+  const value = difficulty.value;
+  if (value === '') {
+    delete difficulty.dataset.level;
     return;
   }
-  const description = elements.controls.get('description');
-  if (description.value !== '' && description.value !== suggested) {
-    return;
-  }
-
-  const values = readValues();
-  // 這一次的檢查只為了「題號與局名可不可信」。清單完整地再算一次的成本是七個字串
-  // 的判斷,而換來的是判準只有一份。
-  const issues = checkForm(values);
-  const blocked = issues.some((issue) => issue.field === 'id' || issue.field === 'title');
-  const text = blocked
-    ? ''
-    : suggestDescription(bookFromTarget(values.target), Number(values.id.trim()), values.title);
-
-  // 值沒變就不寫回去:指派 `value` 會重設游標與捲動位置,而在別的欄位打字時本函式
-  // 每一個鍵入都會走到這裡。
-  if (text === description.value) {
-    return;
-  }
-  description.value = text;
-  suggested = text;
+  difficulty.dataset.level = value;
 }
 
 /**
@@ -977,20 +921,57 @@ function renderWriteAction(issues, success, failure) {
 }
 
 /**
+ * 目前選定的目標題目檔(requirements 5.1、5.10)。
+ *
+ * 真相來源是 `fs.js` 的 `selectedFile()`,本檔**不另存一份** —— 記兩份遲早分家,而
+ * 分家時畫面說的檔名會與真正寫進去的那個檔不同,那是這個工具最不能犯的錯。
+ *
+ * `selectedFile()` 不開對話框也沒有副作用,所以每一次重畫都問得起。
+ */
+function renderSelectedFile() {
+  const handle = selectedFile();
+  elements.selectedFile.textContent = handle === null ? NO_FILE_CHOSEN : handle.name;
+}
+
+/**
+ * 按下「選擇檔案」:開一次檔案選擇框(requirements 5.1、5.11、6.1、6.2)。
+ *
+ * **這是本檔唯一直接由使用者手勢驅動平台的地方**,而那正是它獨立成一顆按鈕的理由:
+ * 檔案選擇框必須開在手勢的呼叫堆疊內,所以這裡**不得在 `pickCorpusFile()` 之前
+ * `await` 任何東西**。舊設計把授權排在撞號與驗證之後 —— 那幾步是網路請求,而實測
+ * 手勢的有效期只有約 5 秒。
+ *
+ * 每按一次都重新詢問,因此它同時就是 5.11 的「更換目標題目檔」。
+ */
+async function choose() {
+  attemptNote = '';
+  successNote = '';
+  try {
+    await pickCorpusFile();
+  } catch (error) {
+    if (error instanceof UnsupportedBrowserError) {
+      attemptNote = UNSUPPORTED_NOTE;
+    } else if (error instanceof PermissionDeniedError) {
+      attemptNote = DENIED_NOTE;
+    } else {
+      throw error;
+    }
+  }
+  render();
+}
+
+/**
  * 把當下的輸入整份畫出來。畫面的每一次變動都只經過這裡。
  *
- * 建議值排在檢查**之前**:它可能改寫描述欄,而檢查要看的是改寫之後的值 —— 順序顛倒
- * 的話,一個剛被填上建議值的描述欄底下會掛著「請填入描述」。
- *
- * @param {string|null} origin 觸發本次重畫的欄位名;載入時為 `null`。用途只有一個:
- *   讓建議值不與正在改描述的使用者搶輸入框(見 `applySuggestion`)。
+ * **不再有 `origin` 參數。** 它唯一的用途是讓描述建議值不與正在打字的使用者搶輸入
+ * 框,而描述欄已整個移除(3.9)—— 畫面現在**完全**是當下那些值的函式,連「是誰觸發
+ * 的」都不必知道。
  */
-function render(origin) {
+function render() {
   const view = readFenView(valueOf('fen'));
   renderBoardArea(view);
-  elements.sideToMove.textContent = SIDE_TO_MOVE_LABEL + (view.side ?? UNKNOWN_SIDE);
-
-  applySuggestion(origin);
+  renderDifficultyLevel();
+  renderSelectedFile();
 
   const issues = checkForm(readValues());
   renderMessages(issues, view.message, [...collisionIssues(), ...verdictIssues()]);
@@ -1025,7 +1006,7 @@ export function recordWrittenId(id) {
  *
  * 三件事在這裡發生,而且只在這裡發生:
  *
- * - **欄位挑選**:正好六個由人工編輯的 schema 欄位(見 `CANDIDATE_FIELDS`)。
+ * - **欄位挑選**:正好五個由人工編輯的 schema 欄位(見 `CANDIDATE_FIELDS`)。
  * - **型別轉換**:題號與難度是**數字**。輸入框給的是字串,原樣送出會被題目 schema
  *   判為型別不符 —— 一份完全沒問題的題目因此被擋下,而維護者看不出哪裡錯。標籤是
  *   切分後的陣列,切法沿用 `check.js` 的 `parseTags`(那一層已經以它判定「至少一個」,
@@ -1044,7 +1025,6 @@ function buildCandidate() {
   return {
     id: Number(values.id.trim()),
     title: values.title.trim(),
-    description: values.description.trim(),
     fen: values.fen.trim(),
     difficulty: Number(values.difficulty),
     tags: parseTags(values.tags),
@@ -1215,32 +1195,35 @@ function applyFailure(code, key) {
 }
 
 /**
- * 序列的後半:取目錄授權 → 重讀目標檔 → 文字層追加 → 寫回 → 記下題號
+ * 序列的後半:重讀目標檔 → 文字層追加 → 寫回 → 記下題號
  * (requirements 6.1、6.2、6.3、5.4–5.9、7.4、7.5)。
  *
- * ## 授權要到這一步才問
+ * ## 選檔不在這裡,而那正是重點
  *
- * 對話框是整條序列裡唯一會打斷維護者的東西 —— 它蓋住整個視窗,要用鍵盤或滑鼠才
- * 關得掉。撞號或驗證擋下的題目根本寫不出去,為它跳一次對話框,代價完全落在人身上
- * (6.1 的「首次要求寫入時請求授權」講的是時機,不是頁面載入時)。
+ * 選定目標題目檔是使用者主動按下的一個**獨立操作**(5.1、5.11),由 `choose()` 承接。
+ * 本函式只問 `selectedFile()`,尚未選定就在動磁碟之前停下(5.10)。
  *
- * 反過來說,**授權尚未取得不妨礙任何事**(6.4):繪盤與七個欄位都不經過本函式,
- * 構造上碰不到平台。
+ * 這條分工解掉了一個舊設計裡的硬傷:平台要求檔案選擇框開在使用者手勢的呼叫堆疊內,
+ * 而舊設計把授權排在撞號與驗證之後 —— 那幾步是 `await` 過的網路請求,實測手勢的有效
+ * 期只有約 5 秒,一次引擎池滿就會讓對話框開不起來。**現在那個情形構造上不會發生。**
  *
- * ## 重讀擺在授權之後
+ * 反過來說,**尚未選檔不妨礙任何事**(6.4):繪盤與五個欄位都不經過本函式。
+ *
+ * ## 重讀與寫回之間沒有任何等待人的步驟
  *
  * 讀檔到寫檔之間目標檔若被編輯器或 git 改動,追加會蓋掉那次改動(design 的 Risks)。
- * 那個視窗壓不到零,但可以壓到最小 —— 而挑目錄要花的是**人的時間**,是這條序列裡
- * 最長的一段。先讀再等人挑目錄,等的那段時間全都算進視窗裡。
+ * 那個視窗壓不到零,但現在只剩兩次磁碟操作之間 —— 舊設計在這兩步中間還夾著一個目錄
+ * 選擇框,而挑目錄花的是人的時間,是整條序列裡最長的一段。
  *
- * ## 三種失敗,兩種歸屬
+ * ## 兩種失敗,兩種歸屬
  *
- * - **不支援**(6.3)與**拒絕授權**(6.2):requirement 明文要求告知,在這裡就翻成
- *   畫面上的說法。表單內容一字不動 —— 只有寫入成功才清空(7.3 對三類失敗一律要求保留)。
+ * - **尚未選定目標題目檔**(5.10):在這裡就翻成畫面上的說法,並指出下一步是按哪一
+ *   顆按鈕。不支援與拒絕授權那兩種(6.2、6.3)不會走到這裡 —— 它們發生在選檔那一刻,
+ *   由 `choose()` 承接。
  * - **其餘**(目標檔不是題目陣列、平台寫入失敗):原樣往上。它們的說法歸 7.3 的
- *   一般失敗處理,而那是 5.4 的事;在這裡先寫一句,同一件事就會有兩種講法。
+ *   一般失敗處理,寫在 `attemptWrite()`;在這裡先寫一句,同一件事就會有兩種講法。
  *
- * 三者的共同點是**都不記題號**:`recordWrittenId()` 只在寫回兌現之後才呼叫,失敗的
+ * 兩者的共同點是**都不記題號**:`recordWrittenId()` 只在寫回兌現之後才呼叫,失敗的
  * 嘗試不佔用題號(4.4)。佔走的話,維護者排除障礙後再送一次會被自己上一次的失敗
  * 擋下,而畫面說的是「這個題號重複」—— 一句與事實完全相反的話。
  *
@@ -1249,31 +1232,22 @@ function applyFailure(code, key) {
  * @throws {CorpusFileError} 目標檔的既有內容不是題目陣列(5.6)。
  */
 async function writeCandidate(candidate) {
-  const target = valueOf('target').trim();
-
-  let directory;
-  try {
-    directory = await acquireCorpusDirectory();
-  } catch (error) {
-    if (error instanceof UnsupportedBrowserError) {
-      attemptNote = UNSUPPORTED_NOTE;
-    } else if (error instanceof PermissionDeniedError) {
-      attemptNote = DENIED_NOTE;
-    } else {
-      throw error;
-    }
-    render(null);
+  const handle = selectedFile();
+  if (handle === null) {
+    // 5.10:尚未選定目標題目檔。**在動磁碟之前就停下**,而不是等寫檔那一步才炸開。
+    attemptNote = NO_FILE_NOTE;
+    render();
     return;
   }
 
-  // `readTextAt()` 對不存在的檔案回 `null`,而那個 `null` 一路傳進 `appendPosition()`
-  // ——**不折成空字串**:空字串是「檔案在,但裡面沒有東西」,那一種要報錯而不是產出
-  // 一份新檔(`corpus-file.js` 的三種形態)。一種狀態只有一個表示法。
-  const existing = await readTextAt(directory, target);
+  // 讀檔到寫回之間的視窗越小越好(design 的 Risks):目標檔若在期間被編輯器或 git
+  // 改動,追加會蓋掉那次改動。這兩行之間沒有任何等待人的步驟 —— 選檔早在寫入序列
+  // 之前就完成了,那正是這次修訂把它移出序列的附帶好處。
+  const existing = await readText(handle);
   const updated = appendPosition(existing, candidate);
-  await writeTextAt(directory, target, updated);
+  await writeText(handle, updated);
 
-  // 落盤之後才記(4.4)。`writeTextAt()` 兌現時內容已經在磁碟上(`fs.js` 的
+  // 落盤之後才記(4.4)。`writeText()` 兌現時內容已經在磁碟上(`fs.js` 的
   // Postconditions),所以這一行的前提是成立的。
   recordWrittenId(candidate.id);
 
@@ -1281,30 +1255,24 @@ async function writeCandidate(candidate) {
   // 是一份空表單配上「仍有項目未通過:題號、局名……」,而那句話是這個工具自己剛剛
   // 造成的。
   clearPuzzleFields();
-  successNote = successText(candidate.id, target);
-  render(null);
+  successNote = successText(candidate.id, handle.name);
+  render();
 }
 
 /**
- * 清空題目欄位,**保留目標檔案路徑**(requirement 7.2)。
+ * 清空題目欄位,**保留已選定的目標題目檔**(requirement 7.2)。
  *
- * 那一欄留著是因為連續收題抄的是同一本書的同一卷(requirement 7 的 Objective:
- * 「一次抄完一段書」)—— 路徑一個字都不會變,而它是七欄裡最長、最容易打錯的一欄。
- *
- * `suggested` 一併清掉:描述欄現在是空的,而空字串在 `applySuggestion()` 眼裡屬
- * 「自動狀態」。不清的話,下一題的題號與局名填好之後,那一欄會拿上一題的建議值去
- * 比對而錯過寫回的時機。
+ * 選定的檔案留著是因為連續收題抄的是同一本書的同一卷(requirement 7 的 Objective:
+ * 「一次抄完一段書」)。而這件事在本函式裡**看不到**:那個控制代碼是 `fs.js` 的模組
+ * 層狀態,本檔碰不到它 —— 五個題目欄位全部清空,選定的檔案自然就留著了。
  *
  * **以程式指派 `value` 不會發出 `input` 事件**,所以這一次清空不會觸發重畫、也撤
  * 不掉緊接著要設下的成功訊息。呼叫端負責在設好訊息之後重畫一次。
  */
 function clearPuzzleFields() {
-  for (const [name, control] of elements.controls) {
-    if (name !== 'target') {
-      control.value = '';
-    }
+  for (const control of elements.controls.values()) {
+    control.value = '';
   }
-  suggested = '';
 }
 
 /**
@@ -1341,14 +1309,14 @@ async function runWriteSequence() {
   candidateVerdict = null;
   attemptNote = '';
   successNote = '';
-  render(null);
+  render();
 
   const id = Number(valueOf('id').trim());
   const { positions } = await loadCatalog();
   const existingIds = new Set(positions.map((position) => Number(position.id)));
 
   collidedId = existingIds.has(id) || writtenIds.has(id) ? id : null;
-  render(null);
+  render();
   if (collidedId !== null) {
     return;
   }
@@ -1366,7 +1334,7 @@ async function runWriteSequence() {
       throw error;
     }
     applyFailure(error.code, key);
-    render(null);
+    render();
     return;
   }
 
@@ -1374,7 +1342,7 @@ async function runWriteSequence() {
   // **兩者矛盾時取嚴的那一邊。** `valid` 由 `issues` 導出,契約上不可能不一致;
   // 真的不一致時放行的代價是壞資料進題庫,擋下的代價只是維護者再按一次。
   if (payload.valid && issues.length === 0) {
-    // 驗證通過(4.7)—— 取目錄授權、重讀目標檔、追加、寫回(6.1–6.3、5.4–5.9)。
+    // 驗證通過(4.7)—— 重讀目標檔、追加、寫回(5.5–5.9、5.10)。
     await writeCandidate(candidate);
     return;
   }
@@ -1387,7 +1355,7 @@ async function runWriteSequence() {
       ? issues
       : [{ field: null, message: UNSPECIFIED_VERDICT_MESSAGE }],
   };
-  render(null);
+  render();
 }
 
 /**
@@ -1422,7 +1390,7 @@ async function runWriteSequence() {
  */
 async function attemptWrite() {
   writing = true;
-  render(null);
+  render();
 
   try {
     await runWriteSequence();
@@ -1441,7 +1409,7 @@ async function attemptWrite() {
     // 停用的解除與那句話的呈現在同一次重畫裡。`throw` 之後這裡照樣跑得到,所以
     // 「按鈕永遠灰著」不會因為某條例外路徑而發生。
     writing = false;
-    render(null);
+    render();
   }
 }
 
@@ -1462,12 +1430,12 @@ elements.unsupported.hidden = isSupported();
 // 七個欄位接的是同一個處理器,只是各自帶上自己的名字:畫面是**七個值一起**決定的
 // (難度沒選會讓寫入停用、題號會影響描述建議值),為每一欄各寫一段就會漏掉那些跨欄
 // 的關係。名字唯一的用途是讓建議值知道使用者此刻正在改哪一欄。
-for (const [name, control] of elements.controls) {
+for (const control of elements.controls.values()) {
   control.addEventListener('input', () => {
     // 動手收下一題,上一題的成功訊息就讓位(7.1;見 `successNote`)。那句話講的是
     // 一個已經不在畫面上的題號,留著只會與此刻表單裡的內容對不上。
     successNote = '';
-    render(name);
+    render();
   });
 }
 
@@ -1481,8 +1449,17 @@ elements.write.addEventListener('click', () => {
   void attemptWrite();
 });
 
-// 載入時就畫一次:此刻輸入框通常是空的,呈現的即是空盤面(2.5),而七項淺層檢查
-// 皆未通過,寫入停用。同一個輸入值不該因為「使用者有沒有打過字」而呈現兩種樣子 ——
+// 選檔(5.1、5.11)。與寫入同一個形態:處理器是同步的,只把 promise 丟出去。
+//
+// **但這一顆有一件寫入沒有的事** —— `choose()` 在第一個 `await` 之前必須把對話框
+// 開下去,否則手勢就沒了。那件事由 `pickCorpusFile()` 保證(它刻意不是 async),
+// 這裡要守的是:`choose()` 裡 `pickCorpusFile()` 之前不得插入任何 `await`。
+elements.pickFile.addEventListener('click', () => {
+  void choose();
+});
+
+// 載入時就畫一次:此刻輸入框通常是空的,呈現的即是空盤面(2.5),而五項淺層檢查
+// 皆未通過,寫入停用。檔名顯示也在這一次畫上「尚未選定」。同一個輸入值不該因為「使用者有沒有打過字」而呈現兩種樣子 ——
 // 那是把歷史記進了畫面。重新整理後瀏覽器回填輸入框的情形也一併涵蓋:畫出來的、
 // 檢查的仍是當下那些字。
-render(null);
+render();

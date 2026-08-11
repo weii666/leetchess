@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>收題工具</title>
+<title>LeetChess</title>
 <!--
   圖示走 `../`:本頁比兩個產品頁**深一層**,`./favicon.svg` 在這裡指的是
   `web/editor/favicon.svg`,那個檔案不存在。同一件事對後續任務同樣成立 ——
@@ -72,34 +72,40 @@
 -->
 
 <!--
-  頁首橫跨整個寬度(版面規則見 `editor.css` 的 `#page-head`),不參與左右兩欄:
-  它講的是「這一頁是什麼」,對盤面與表單都成立,擠進其中一欄會讓另一欄無故矮一截。
+  **這一頁沒有頁首。** 原本這裡有一個 `<h1>收題工具</h1>` 加一行說明,兩者一起橫跨
+  整行,把盤面往下推了一整塊 —— 而收題的人是拿這個盤面與對局頁的盤面對照的,兩頁
+  的盤面**落在螢幕上同一個位置、同一個大小**才對得起來(requirement 8.2 要的「外觀
+  與對局頁一致」,位置也算在內)。標題本身沒有這個代價換來的資訊:網址就在網址列,
+  而「這是什麼工具」現在由表單那一欄的抬頭講(見 `#entry` 的 `<h2>`)。
+
+  因此 `<body>` 的第一個 flex item 就是盤面,與對局頁一樣。**不要為了「補回標題」
+  在盤面之前塞任何佔一行的東西**,塞了盤面就又矮下去一截。
+
+  唯一排在盤面之前的是下面那段不支援的說明,而它預設 `hidden` —— `display: none`
+  的 flex item 既不佔位也不吃 gap,盤面的位置因此不受它影響。
 -->
-<header id="page-head">
-  <h1>收題工具</h1>
-  <p class="page-note">本頁供題庫維護者收題之用,不在產品的導覽動線上。</p>
 
-  <!--
-    平台不支援時的說明(requirement 6.3)。**位置固定、預設隱藏、文字是靜態的。**
+<!--
+  平台不支援時的說明(requirement 6.3)。**位置固定、預設隱藏、文字是靜態的。**
 
-    三件事各有理由:
+  三件事各有理由:
 
-    1. **位置固定且在表單之前。** 一段「這個瀏覽器寫不了檔」的話擺在表單底下,等於
-       等使用者把七個欄位填完才說。
-    2. **預設隱藏,由 tasks 5.3 掀開。** `fs.js` 的 `isSupported()` 在載入當下就評估
-       得出來,因此這一段不會在使用者操作到一半時忽然冒出來推動版面 —— 對局頁的
-       等待區塊正是栽在那件事上,已整條移除。`editor.css` 的
-       `[hidden] { display: none !important }` 保住這個預設值:任何給它 `display`
-       的版面規則都會讓這段話對**支援的**瀏覽器也永遠掛在畫面上,而那是絕大多數。
-    3. **文字寫在這裡而不是由 JS 產生。** 說法是靜態的,5.3 只負責拿掉 `hidden`。
-       說法要與 `fs.js` 的 `UnsupportedBrowserError` 一致 —— 兩處講的是同一件事,
-       使用者不該因為觸發路徑不同而讀到兩種說法。
+  1. **位置固定且在表單之前。** 一段「這個瀏覽器寫不了檔」的話擺在表單底下,等於
+     等使用者把七個欄位填完才說。
+  2. **預設隱藏,由 tasks 5.3 掀開。** `fs.js` 的 `isSupported()` 在載入當下就評估
+     得出來,因此這一段不會在使用者操作到一半時忽然冒出來推動版面 —— 對局頁的
+     等待區塊正是栽在那件事上,已整條移除。`editor.css` 的
+     `[hidden] { display: none !important }` 保住這個預設值:任何給它 `display`
+     的版面規則都會讓這段話對**支援的**瀏覽器也永遠掛在畫面上,而那是絕大多數。
+     少了那個預設值,盤面也會被它往下推(見上一段)。
+  3. **文字寫在這裡而不是由 JS 產生。** 說法是靜態的,5.3 只負責拿掉 `hidden`。
+     說法要與 `fs.js` 的 `UnsupportedBrowserError` 一致 —— 兩處講的是同一件事,
+     使用者不該因為觸發路徑不同而讀到兩種說法。
 
-    內容要**說得出原因**,不是一句「無法使用」:講清楚是瀏覽器缺了寫入本機檔案的
-    能力,使用者才知道下一步是換一個瀏覽器,而不是回頭檢查自己填了什麼。
-  -->
-  <p id="unsupported" hidden>這個瀏覽器不支援由網頁寫入本機檔案,收題工具無法在此使用。請改用桌面版的 Chrome、Edge 或 Opera。</p>
-</header>
+  內容要**說得出原因**,不是一句「無法使用」:講清楚是瀏覽器缺了寫入本機檔案的
+  能力,使用者才知道下一步是換一個瀏覽器,而不是回頭檢查自己填了什麼。
+-->
+<p id="unsupported" hidden>這個瀏覽器不支援由網頁寫入本機檔案,收題工具無法在此使用。請改用桌面版的 Chrome、Edge 或 Opera。</p>
 
 <!--
   盤面預覽(requirements 2.1–2.3、8.2)。**唯讀** —— tasks 4.2 會以 `board.js` 的
@@ -145,11 +151,61 @@
   兩者都不是漏做。給了輸入框,維護者就填得出一個後端會拒絕的欄位 —— 題目 schema
   的既有檢查對未知欄位是直接拒絕的。
 
-  起手方同理沒有獨立輸入(2.6):它讀自 FEN,呈現在 FEN 那一欄底下的 `#side-to-move`
-  (tasks 4.2)。
+  起手方同理沒有獨立輸入(2.6):它只由 FEN 表達。它**也不再呈現** —— 那一行原本
+  印在 FEN 底下,拿掉的理由寫在那一欄裡。不顯示與不提供輸入是兩件事,後者仍是硬規則。
 -->
 <section id="entry" aria-labelledby="entry-heading">
-  <h2 id="entry-heading">題目內容</h2>
+  <!--
+    抬頭講的是**這一頁是什麼**,不是「這一區是什麼」。
+
+    原本這裡寫的是「題目內容」—— 一個看得出來的事實:底下就是題號、局名、FEN,
+    沒有人需要一行字告訴他那是題目內容。那句真正要說的話原本在頁首,而頁首為了讓
+    盤面與對局頁對齊已經整塊拿掉(見上方),於是它搬到這裡:整頁唯一剩下的抬頭,
+    講整頁唯一需要先講清楚的事 —— **這是維護者的工具,不在產品的導覽動線上**。
+
+    仍然是 `<h2>` 且保留 `id`:`#entry` 的 `aria-labelledby` 指著它,換成 `<p>` 會讓
+    這一區在輔助技術上失去名字。字級與顏色由 `editor.css` 壓成註腳的樣子 —— 它是
+    說明而不是標題,不該比欄位本身還響。
+
+    **返回連結在上、說明在下**,各佔一行(版面規則見 `editor.css` 的 `#entry-head`)。
+    連結是這一欄唯一可以按的東西,擺在最上面才落在視線的起點;說明是讀一次就不必
+    再讀的一句話,排在它底下。兩者曾經並排在同一行 —— 那一行右端的連結與左邊那句
+    長說明擠在一起,看起來像同一句話的一部分。
+
+    多出來的這一行只在**表單那一欄**裡,不影響盤面的位置(盤面是另一個 flex item,
+    與對局頁對齊那件事只由「盤面之前有沒有東西」決定)。
+  -->
+  <div id="entry-head">
+    <!--
+      返回題庫列表。
+
+      ## 與對局頁同一種東西
+
+      形態、說法與樣式都照著對局頁那一條(`app.js` 的 `mountBackLink()`,以及對局頁
+      那一份共用樣式表裡的 `.back-to-list`):**真的 `<a href>`** —— 中鍵開新分頁、右鍵複製
+      網址、Enter 鍵、瀏覽器的上一頁全部隨之而來,攔 click 再改 `location` 則要一一
+      重做,而通常不會做。class 也沿用 `back-to-list`,樣式在 `editor.css` 裡照抄一份
+      (兩份樣式表刻意不共用,見檔首)。
+
+      ## 這不違反「收題頁沒有入口」
+
+      requirement 1.2 禁的是**反方向** —— 列表頁與對局頁不得有任何指向本頁的入口
+      (`tests/test_web_editor_entry.py` 反向釘住)。本頁指出去不在那條之內:維護者
+      收完題要回去看題庫,而網址列打字不是一條該讓人走的路。
+
+      ## 為什麼寫在 HTML 裡而不是由 JS 建
+
+      對局頁那一條由 `app.js` 動態建出,是因為它要 prepend 進側欄;這一頁的位置是
+      固定的,寫在容器裡就是本頁的規矩(「要出現的東西先在版面裡佔好位置」)。
+
+      `../index.html` 是**相對位址**,理由同對局頁的 `LIST_PAGE`:服務今天掛在網域
+      根目錄,寫死 `/` 開頭的路徑會在改掛子路徑那天一起壞掉。本頁比列表頁深一層,
+      故是 `../`(見檔首的路徑約定)。
+    -->
+    <a class="back-to-list" href="../index.html">返回題庫列表</a>
+
+    <h2 id="entry-heading">本頁供題庫維護者收題之用,不在產品的導覽動線上。</h2>
+  </div>
 
   <div class="field">
     <label for="field-id">題號</label>
@@ -185,56 +241,18 @@
   </div>
 
   <div class="field">
-    <label for="field-description">描述</label>
     <!--
-      **必須是 `<textarea>`**(requirement 3.8):描述允許換行,而 `<input>` 會把貼上
-      來的換行靜默吃掉 —— 沒有錯誤、沒有提示,使用者要等到題目檔寫出來才發現少了東西。
-      `editor.js` 會在這裡填入建議值(3.6,`check.js` 的 `suggestDescription`),而建議值
-      是可以自由改寫的(3.7),故此處**不設 `readonly` 也不設 `placeholder`** ——
-      建議值是真的填進值裡的字,不是一層灰色的示意:維護者要能直接在它上面改。
+      抬頭與它的提示排**同一行**(`editor.css` 的 `.field-head`),與標籤那一欄同一個
+      形態 —— **整頁只有這一種提示的擺法**:抬頭在左、提示在右,輸入框底下留給訊息。
+
+      統一之前這一句在輸入框下方、標籤那一句在抬頭右端,同一種東西兩個位置,眼睛
+      每欄都要重新找一次「這一格怎麼填」寫在哪。選右端而不是全部搬到輸入框下方,
+      是因為右邊那一欄的總高度有上限(8.6:不得低於盤面),而抬頭那一行本來就在。
     -->
-    <textarea id="field-description" data-field="description" rows="3"></textarea>
-    <p class="field-issue" data-message-for="description" hidden></p>
-  </div>
-
-  <div class="field">
-    <label for="field-difficulty">難度</label>
-    <!--
-      三選一而不是自由輸入的數值(requirement 3.2):`<select>` 在結構上就沒有「填一個
-      不存在的分級」這件事。
-
-      **三個分級的說法一個字都不寫在這裡。** 唯一出處是 `web/difficulty.js`,選項由
-      `editor.js` 自該模組產生(tasks 4.3)—— 寫死一份就是第二個真相來源,改了模組而
-      忘了這一頁時,兩邊會靜默分家。`tests/test_web_editor_layout.py` 與
-      `tests/test_web_editor_fields.py` 都直接掃本檔的文字反向釘住。
-
-      這是本頁**唯一**由 JS 生節點而不在版面裡先宣告的地方,理由正是上一段:節點的
-      內容不能寫在這裡。與訊息槽的差別在於它只在載入時產生一次,不隨輸入變動增減,
-      因此不會有推動版面的問題。
-
-      第一個選項的值刻意是空字串,而且必須留在最前面:`check.js` 以空字串判定「還沒
-      選」,預設就選中某一級會讓維護者在沒有做過選擇的情況下寫進一個難度。
-    -->
-    <select id="field-difficulty" data-field="difficulty">
-      <option value="">尚未選擇</option>
-    </select>
-    <p class="field-issue" data-message-for="difficulty" hidden></p>
-  </div>
-
-  <div class="field">
-    <label for="field-tags">標籤</label>
-    <input id="field-tags" data-field="tags" type="text" autocomplete="off">
-    <p class="field-issue" data-message-for="tags" hidden></p>
-    <!--
-      提示不放進 `<label>` 裡:標籤唸出來應該只有「標籤」兩個字,把分隔符號的說明
-      塞進去會讓螢幕閱讀器每次聚焦都唸一長串。分隔符號收得寬的理由見 `check.js`
-      的 `parseTags`。
-    -->
-    <p class="field-hint">可填多個,以逗號、頓號或空白分隔。</p>
-  </div>
-
-  <div class="field">
-    <label for="field-fen">FEN</label>
+    <div class="field-head">
+      <label for="field-fen">FEN</label>
+      <p class="field-hint">貼上完整的局面字串,盤面會照著重畫。</p>
+    </div>
     <input id="field-fen" data-field="fen" type="text" autocomplete="off" spellcheck="false">
     <!--
       這一欄的訊息槽(tasks 4.2;requirements 2.4、8.4)。
@@ -274,61 +292,146 @@
       操作旁邊的 `#write-note` 點名(8.4)。
     -->
     <p class="field-issue" data-message-for="fen" hidden></p>
-    <p class="field-hint">貼上完整的局面字串,盤面會照著重畫。</p>
     <!--
-      起手方(requirement 2.6)。內容由 `editor.js` 自 FEN 的走子方寫入
-      (`check.js` 的 `sideFromFen`),讀不出來時是一個破折號 —— 不猜一個,題庫容得下
-      黑先的排局,預設成紅先會讓那些題目靜默地標錯。
+      **這裡沒有起手方那一行了。** 原本 FEN 底下印著「起手方:紅先」,由 `editor.js`
+      自走子方推出來。拿掉的理由是它不告訴收題的人任何他不知道的事:走子方就在他
+      剛貼上的那串字裡(`… w - - 0 1` 的那個 `w`),而盤面畫出來時紅方永遠在下。
 
-      **它不能放進 `#board`**:`board.js` 以 `replaceChildren` 畫盤,每畫一次就會把
-      盤面容器裡的東西整份換掉,擺在那裡的起手方會在第一次繪盤時消失。放在 FEN 這一
-      欄裡也更合理 —— 它是那串字的推論結果,而不是另一件要填的事(2.6 明載起手方
-      **不提供獨立輸入**,所以這裡是一個 `<p>` 而不是一個控制項)。
+      **起手方本身沒有變成可填的東西** —— 它仍然只由 FEN 表達,題目檔裡也沒有這個
+      欄位(`side_to_move` 不在 `corpus-file.js` 寫出的欄位裡)。不顯示與不提供輸入是
+      兩件不同的事,後者仍由 `tests/test_web_editor_board.py` 反向釘住。
+
+      `check.js` 的 `sideFromFen()` 連同「紅先」「黑先」兩個顯示字樣都已移除:沒有
+      呼叫端的推導留著,只會讓下一個人以為畫面上還有一處在印它。
     -->
-    <p class="field-hint" id="side-to-move"></p>
+  </div>
+
+
+  <div class="field">
+    <label for="field-difficulty">難度</label>
+    <!--
+      三選一而不是自由輸入的數值(requirement 3.2):`<select>` 在結構上就沒有「填一個
+      不存在的分級」這件事。
+
+      **三個分級的說法一個字都不寫在這裡。** 唯一出處是 `web/difficulty.js`,選項由
+      `editor.js` 自該模組產生(tasks 4.3)—— 寫死一份就是第二個真相來源,改了模組而
+      忘了這一頁時,兩邊會靜默分家。`tests/test_web_editor_layout.py` 與
+      `tests/test_web_editor_fields.py` 都直接掃本檔的文字反向釘住。
+
+      這是本頁**唯一**由 JS 生節點而不在版面裡先宣告的地方,理由正是上一段:節點的
+      內容不能寫在這裡。與訊息槽的差別在於它只在載入時產生一次,不隨輸入變動增減,
+      因此不會有推動版面的問題。
+
+      **這裡不再有「尚未選擇」那一個空選項。** 它原本排在最前面,由 `check.js` 以空
+      字串判定「還沒選」。難度改為預設選中中間那一級之後,那個選項只剩一個用途:讓
+      維護者把一格已經填好的東西清成未填 —— 而清成未填之後這一題就寫不出去。收題頁
+      的難度因此**恆有值**,三選一是真的三選一。
+
+      `check.js` 那條空值檢查仍留著:規則是「難度必須是三個分級之一」,而不是「畫面
+      上剛好選不到空的」。
+    -->
+    <select id="field-difficulty" data-field="difficulty"></select>
+    <p class="field-issue" data-message-for="difficulty" hidden></p>
   </div>
 
   <div class="field">
-    <label for="field-target">目標檔案路徑</label>
-    <input id="field-target" data-field="target" type="text" autocomplete="off" spellcheck="false">
-    <p class="field-issue" data-message-for="target" hidden></p>
     <!--
-      路徑相對於使用者選定的題庫根目錄,而且**必須落在某一個書目資料夾內** ——
-      那個資料夾決定了這一題歸在哪一本書底下,所以這一頁不需要、也不提供對應的
-      文字欄位(requirement 3.5)。完整規則與說法都在 `check.js` 的 `checkTargetPath`。
+      抬頭與它的提示排**同一行**(版面規則見 `editor.css` 的 `.field-head`),理由與
+      FEN 那兩個註腳並排相同:右邊那一欄的總高度不得超過盤面(8.6),而這一句提示
+      獨佔一行只是為了一句「怎麼分隔」。
 
-      這一欄還有第二個用途:**描述建議值的書名取自它的第一段**(3.6)。資料夾名帶
-      卷次而描述只寫書名,換算(切掉 `~` 之後)在 `editor.js`,理由見那裡。
+      提示仍**不放進 `<label>` 裡**:標籤唸出來應該只有「標籤」兩個字,把分隔符號的
+      說明塞進去會讓螢幕閱讀器每次聚焦都唸一長串。並排的是兩個節點,不是一個。
+
+      **提示只舉逗號與空白兩種,而 `check.js` 的 `parseTags` 其實連頓號也吃。** 這不是
+      漏寫:一句提示要短到掃過去就記得住,把每一種收得下的寫法都列出來反而沒有人讀。
+      收得寬是為了「打了也不會錯」,不是為了教人怎麼打。
     -->
-    <p class="field-hint">相對於題庫根目錄,例如 適情雅趣~卷一/26.json。</p>
+    <div class="field-head">
+      <label for="field-tags">標籤</label>
+      <p class="field-hint">可填多個,以逗號或空白分隔。</p>
+    </div>
+    <!--
+      預設值是「連將殺」:題庫裡絕大多數題目是連將殺,一題一題重打同三個字是純粹的
+      手工。**這與難度的預設(`editor.js` 的 `renderDifficultyOptions`)是同一個取捨** ——
+      預設值會被寫進題目檔,因此只放「不填也對」的那一個,不同的那幾題照樣改得動。
+
+      寫在 `value` 而不是由 JS 塞:它是靜態的初始內容,沒有任何條件。由 JS 塞的話,
+      使用者有機會在 module 執行前就開始打字,那一下會被蓋掉。
+    -->
+    <input id="field-tags" data-field="tags" type="text" autocomplete="off" value="連將殺">
+    <p class="field-issue" data-message-for="tags" hidden></p>
   </div>
+
 
   <!--
-    寫入操作與它的停用說明(tasks 4.3 只做到「可停用」;requirements 4.1、8.4)。
+    存檔位置的選定(requirements 5.1、5.10、5.11)與寫入操作(4.1、8.4)。
 
-    ## 這顆按鈕現在什麼都不做
+    ## 說法是「存檔位置」而不是「目標題目檔」
 
-    真正的寫入屬第 5 組(撞號檢查、權威驗證、目錄授權、文字層追加)。**本輪刻意
-    不接任何 click 處理** —— 它存在的理由是 4.1 的「不執行寫入」需要一個看得見的
-    東西可以停用:一個沒有寫入操作的畫面,「停用寫入」是無從呈現、也無從驗證的。
+    後者是 requirements 與 design 裡的說法,寫在文件裡精確,唸出來卻饒舌 —— 而這一格
+    問的其實就是「這一題要存到哪」。兩顆按鈕跟著收短成「選擇檔案」與「寫入」:
+    上下文已經整頁都在講題目檔,每一顆按鈕再重複一次「題目檔」三個字只是雜訊。
+    `editor.js` 的 `NO_FILE_NOTE` 與 `DENIED_NOTE` 指路時提的也是「選擇檔案」,
+    畫面上按鈕叫什麼、訊息裡就說什麼。
+    **兩顆按鈕排同一行,自左而右並肩**(版面規則見 `editor.css` 的 `#action-row`)。
 
+    ## 為什麼是一顆按鈕而不是一個路徑輸入框
+
+    這裡原本是 `#field-target` —— 一個手打相對路徑的輸入框。人工驗收時發現它反直覺:
+    系統對話框問的是「哪個資料夾」,而畫面問的是「哪個檔案」,同一件事被拆成兩個
+    步驟問兩次。改成直接選那一個 `.json` 之後,**打錯路徑寫到別的檔**這個最危險的
+    失敗模式在構造上不再存在,而授權範圍也從整個題庫目錄縮到單一檔案。
+
+    ## 它刻意不在寫入序列裡
+
+    選檔是使用者主動按下的一個獨立操作。平台要求檔案選擇框開在使用者手勢的呼叫堆疊
+    內,而舊設計把授權排在撞號與驗證之後 —— 那幾步是 `await` 過的網路請求,實測手勢
+    的有效期只有約 5 秒,一次引擎池滿就會讓對話框開不起來。獨立成一顆按鈕之後,那個
+    缺口構造上不再發生。
+
+    ## 兩顆按鈕並肩,而不是推到一行的兩端
+
+    它們是收題的最後兩步、照左而右的順序做:先選檔,再寫入。推到兩端的話中間空出
+    一大片,兩顆按鈕看起來像分屬兩個不同的區塊 —— 而它們是同一件事的兩步。並肩也
+    讓兩顆的上下緣對得起來(高度由 `editor.css` 的 `align-items: stretch` 拉齊,
+    兩顆的內距本來不同)。
+
+    這一行**不含**檔名與停用說明:那兩段字各自會長短不一,擠進按鈕那一行就會把它
+    推高。它們排在按鈕底下,見下方。
+
+    ## 這顆寫入按鈕預設是停用的
+
+    欄位沒填妥的表單過不了淺層檢查,載入當下停用是**正確的初始狀態**而不是保守
+    起見。寫在 HTML 裡也讓沒有 JavaScript 時的樣子是誠實的:那時什麼都寫不了。
     `type="button"` 是必要的:容器雖然是 `<section>` 而非 `<form>`,但寫死型別才不會
     在日後有人改用 `<form>` 時變成一顆送出鈕。
-
-    ## 預設就是停用的
-
-    七欄全空的表單本來就過不了淺層檢查,載入當下停用是**正確的初始狀態**而不是
-    保守起見。寫在 HTML 裡也讓沒有 JavaScript 時的樣子是誠實的:那時什麼都寫不了。
-
-    ## 說明排在按鈕之後
-
-    它講的是「為什麼這顆按鈕按不下去」。排在按鈕上方的話,它每次出現與消失都會把
-    按鈕上下推;排在下方則只在頁尾長出一行,按鈕本身不動。
   -->
-  <div id="actions">
-    <button id="write" type="button" disabled>寫入題目檔</button>
-    <p id="write-note" hidden></p>
+  <div class="field">
+    <span class="field-label">存檔位置</span>
+
+    <div id="action-row">
+      <button id="pick-file" type="button">選擇檔案</button>
+      <button id="write" type="button" disabled>寫入</button>
+    </div>
+
+    <!--
+      選定的檔名,**排在按鈕正下方**。
+
+      它曾經搭在抬頭那一行的右端,與提示同一個位置 —— 而它不是提示:提示是「這一格
+      怎麼填」,這一句是「現在選的是哪一個檔」,是一個會變的狀態。擺在右上角時它離
+      那顆改變它的按鈕最遠,看起來像飄在那裡的一段字;排在按鈕底下,按一次就在原地
+      換一次,兩者的因果一眼看得出來。
+
+      位置固定,與訊息槽同一條規矩:節點自始就在,`editor.js` 只寫內容。尚未選定時
+      它說的是「尚未選定」而不是空白 —— 一個空白的位置看起來像壞掉,而這是一個必要
+      的步驟。
+    -->
+    <p class="field-hint" id="selected-file"></p>
+    <p class="field-issue" data-message-for="target" hidden></p>
   </div>
+
+  <p id="write-note" hidden></p>
 </section>
 
 <!--

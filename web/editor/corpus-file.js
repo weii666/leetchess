@@ -52,7 +52,17 @@
  * (後者要 `fen.js` 的常數)。
  */
 
-/** 題目 schema 中**由人工編輯**的欄位,順序即寫進題目檔的順序。 */
+/**
+ * 題目 schema 中**由人工編輯**的欄位,順序即寫進題目檔的順序。
+ *
+ * **`description` 留在清單裡,即使收題頁不再產生它**(3.9)。這份清單表達的是
+ * **次序**,不是「每一題都必須有這六個」—— 序列化時略過 entry 上不存在的欄位
+ * (見 `serializePosition`)。
+ *
+ * 把它刪掉的話,「對既有題庫檔中的每一題重新序列化後與原檔逐字相同」那道排版漂移
+ * 的回歸網會整組轉紅:既有題目**全部帶著描述**,少寫一個欄位就對不起來。而那道網
+ * 是本模組最強的一道,不該為了一個選填欄位放棄。
+ */
 const SCHEMA_FIELDS = ['id', 'title', 'description', 'fen', 'difficulty', 'tags'];
 
 /** 題目物件的縮排(在陣列裡一層)。 */
@@ -62,8 +72,8 @@ const ENTRY_INDENT = '  ';
 const FIELD_INDENT = '    ';
 
 /**
- * @typedef {{id: number, title: string, description: string, fen: string,
- *            difficulty: number, tags: string[]}} PositionEntry
+ * @typedef {{id: number, title: string, fen: string, difficulty: number,
+ *            tags: string[], description?: string}} PositionEntry
  */
 
 /**
@@ -92,12 +102,23 @@ export class CorpusFileError extends Error {
  * 本模組**不重複驗證**。多帶的欄位(例如呼叫端順手塞進來的 `max_dtm`)一律不寫出,
  * 這不是驗證而是 5.9 的直接後果:寫出的欄位是一份**寫死的清單**,不是輸入的翻版。
  *
+ * **entry 上沒有的欄位一律略過**,不寫成 `null` 也不寫成空字串。這是 `description`
+ * 改為選填(3.10)之後唯一正確的處置:寫出 `"description": null` 會讓那一題帶著一個
+ * 型別不符的欄位,而服務端對它的判定是「壞掉的題目檔」;寫出空字串則是憑空造一個
+ * **判準是「值是不是 `undefined`」而不是 `in`。** 兩者對 `{description: undefined}`
+ * 的答案不同,而那正是呼叫端最容易產生的形狀(組裝層組物件時漏填一個鍵)。用 `in`
+ * 的話那一種會走進序列化,而 `JSON.stringify(undefined)` 回的是 `undefined` 而不是
+ * 一個字串 —— 產出的會是 `"description": undefined`,一份**解析不開的 JSON**,
+ * 而它下一次會讓服務啟動不起來。
+ *
  * @param {PositionEntry} entry 要寫進題庫檔的一題。
  * @returns {string} 例如 `  {\n    "id": 26,\n    ...\n  }`。
  */
 export function serializePosition(entry) {
   const source = entry == null ? {} : entry;
-  const lines = SCHEMA_FIELDS.map(
+  const lines = SCHEMA_FIELDS.filter(
+    (name) => source[name] !== undefined,
+  ).map(
     (name) => `${FIELD_INDENT}${quote(name)}: ${valueText(name, source[name])}`,
   );
   return `${ENTRY_INDENT}{\n${lines.join(',\n')}\n${ENTRY_INDENT}}`;

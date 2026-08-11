@@ -60,19 +60,19 @@ NARROW = [(390, 844), (768, 900)]
 #: 表單欄位的順序,即 `web/editor/check.js` 的 `checkForm()` 回傳清單的順序
 #: (該檔明載「清單順序即表單欄位順序」)。8.4 要把未通過項目定位到欄位,兩邊
 #: 的順序一旦分家,使用者每改一欄就得重新找一次訊息在哪。
-FORM_FIELDS = ["id", "title", "description", "difficulty", "tags", "fen", "target"]
+FORM_FIELDS = ["id", "title", "fen", "difficulty", "tags"]
 
-#: 每一欄該用哪一種元素。**描述是 `textarea`** —— 3.8 要求描述允許換行,而
-#: `<input>` 收不下換行(貼上時會被靜默吃掉)。**難度是 `select`** —— 3.2 要求
-#: 三選一而非自由輸入的數值。
+#: 每一欄該用哪一種元素。**難度是 `select`** —— 3.2 要求三選一而非自由輸入的數值。
+#:
+#: 順序即 8.5 要求的順序:**FEN 排在題號與局名之後、其餘欄位之前**。它是唯一需要
+#: 對著盤面逐字核對的欄位,而盤面就在左邊 —— 排在下面的話,核對時眼睛要在畫面上
+#: 上下跑。
 FIELD_ELEMENTS = {
     "id": "input",
     "title": "input",
-    "description": "textarea",
+    "fen": "input",
     "difficulty": "select",
     "tags": "input",
-    "fen": "input",
-    "target": "input",
 }
 
 #: 7.6 是整個功能的硬邊界:本工具**只新增**。任何帶著這些字眼的控制項都表示有人
@@ -142,6 +142,19 @@ def open_editor(page, size: tuple[int, int] = DESKTOP, plant_board: bool = True)
     return page
 
 
+def open_at(page, html: pathlib.Path, size: tuple[int, int]):
+    """以 `size` 這個視窗尺寸載入**任一**交付頁面,並種一個替身盤面進 `#board`。
+
+    存在的理由只有一個:把收題頁的盤面拿去與**對局頁**的盤面比位置(8.2)。對局頁
+    的盤面同樣要 JS 才畫得出來,而兩頁在這裡都以 `file://` 載入,因此兩邊種的是同
+    一個替身 —— 量到的差別純粹來自兩份樣式表與盤面之前有沒有東西。
+    """
+    page.set_viewport_size({"width": size[0], "height": size[1]})
+    page.goto(html.as_uri())
+    page.evaluate(PLANT_BOARD)
+    return page
+
+
 def box_of(page, selector: str) -> dict[str, float]:
     """`selector` 排版後的邊界盒(CSS 像素,相對於視窗)。"""
     rect = page.evaluate(
@@ -176,7 +189,10 @@ def viewport_metrics(page) -> dict[str, float]:
 
 
 def test_every_manual_field_has_a_control(browser_page) -> None:
-    """3.1:題號、局名、描述、難度、標籤五項,加上 FEN(2.1)與目標檔案路徑(5.1)。
+    """3.1:題號、局名、難度、標籤四項,加上 FEN(2.1)。
+
+    **順序即 8.5**:FEN 排在題號與局名之後、其餘欄位之前。目標題目檔不在這份清單裡
+    —— 它自 R5 的修訂起是一顆按鈕而不是一個輸入格(5.1)。
 
     以 `data-field` 認欄位而不是以 id:`data-field` 的取值就是 `check.js` 的
     `CheckIssue.field`,兩邊同名才讓 8.4「指出是哪一項未通過」有得對應。
@@ -223,33 +239,52 @@ def test_every_field_is_labelled(browser_page, field: str) -> None:
     assert label, f"{field} 沒有任何關聯到它的 <label>"
 
 
-def test_the_description_accepts_newlines(browser_page) -> None:
-    """3.8:描述允許換行。
+def test_the_form_has_no_description_field(browser_page) -> None:
+    """3.9:**不提供描述的輸入。**
 
-    斷言的是**行為**而不是元素名:真的打進兩行,再把值讀回來。`<input>` 會把
-    換行靜默吃掉,這一條因此換成 `<input>` 就會紅。
+    它曾經是表單上唯一的多行輸入,而它佔掉的高度正是把 FEN 擠出第一屏的原因
+    (8.6)。移除的理由不只是版面:產品的兩個畫面都不渲染描述,而它的內容就是
+    「出處 + 局號 + 局名」的串接,與局名重複。
     """
     open_editor(browser_page)
 
-    browser_page.fill('[data-field="description"]', "第一行\n第二行")
+    assert browser_page.locator('[data-field="description"]').count() == 0
+    assert browser_page.locator("textarea").count() == 0, (
+        "表單上還有多行輸入 —— 描述是唯一需要它的欄位"
+    )
 
-    assert (
-        browser_page.input_value('[data-field="description"]') == "第一行\n第二行"
-    ), "描述欄位吃掉了換行"
+
+def test_the_target_file_is_chosen_with_a_button(browser_page) -> None:
+    """5.1、5.11:目標題目檔由**系統檔案選擇框**選定,不是一個手打的路徑。
+
+    畫面上因此只有兩樣東西:一顆開對話框的按鈕,以及一個位置固定的檔名顯示。
+    路徑輸入框若還在,維護者就有兩條互相矛盾的路可走。
+    """
+    open_editor(browser_page)
+
+    assert browser_page.locator('[data-field="target"]').count() == 0, (
+        "目標檔案路徑的輸入框還在"
+    )
+    assert browser_page.locator("#pick-file").count() == 1
+    assert browser_page.locator("#selected-file").count() == 1
 
 
 def test_the_difficulty_control_is_a_choice_not_free_text(browser_page) -> None:
     """3.2:難度只能自三個合法分級中擇一,不接受自由輸入的數值。
 
-    `<select>` 在結構上就沒有「自由輸入」這件事。同時確認初始值是空的 ——
-    `check.js` 的 `checkForm()` 以空字串判定「還沒選」,預設就選中某一級會讓
-    維護者在沒有做過選擇的情況下寫進一個難度。
+    `<select>` 在結構上就沒有「自由輸入」這件事。同時確認**選項一個都不寫在 HTML
+    裡**:三個分級由 `editor.js` 自 `difficulty.js` 產生,而那個曾經排在最前面的
+    「尚未選擇」空選項已經移除 —— 難度有了預設值之後,它只剩「把一格填好的東西清成
+    未填」這一個用途。本檔以 `file://` 載入、模組不執行,因此這裡量得到的正是 HTML
+    自己宣告了什麼。
+
+    預設值與三個選項的內容由 `tests/test_web_editor_fields.py` 在真的跑得動模組的
+    頁面上驗。
     """
     open_editor(browser_page)
 
-    assert browser_page.input_value('[data-field="difficulty"]') == "", (
-        "難度預設就選了一級,維護者不做選擇也會寫進去"
-    )
+    options = browser_page.locator('[data-field="difficulty"] option').count()
+    assert options == 0, f"難度的選項寫在 HTML 裡({options} 個),而不是由模組產生"
 
 
 def test_the_difficulty_labels_are_not_duplicated_in_the_markup() -> None:
@@ -409,6 +444,27 @@ def test_the_form_sits_to_the_right_of_the_board_on_a_desktop_viewport(
     assert form["top"] < board["bottom"], "表單被推到盤面下方,不是兩欄"
 
 
+def test_every_field_fits_on_one_desktop_screen(browser_page) -> None:
+    """8.6:全部欄位在桌面視窗尺寸下**不需捲動即可見**。
+
+    收題是一個對照的動作:眼睛在 FEN、盤面與題號之間來回。任何一樣要捲動才看得到,
+    這個來回就變成「捲上去、記住、捲下來」——而記錯一個字正是這個工具存在的理由。
+
+    斷言的是**最底下那個東西的底邊**在視窗高度之內。量的是寫入按鈕:它排在所有欄位
+    之後,所以它進得了畫面就代表全部都進得了。
+    """
+    open_editor(browser_page, DESKTOP)
+
+    bottom = browser_page.evaluate(
+        "() => document.getElementById('write').getBoundingClientRect().bottom"
+    )
+    height = viewport_metrics(browser_page)["clientHeight"]
+
+    assert bottom <= height, (
+        f"寫入按鈕的底邊在 {bottom}px,超出了 {height}px 的視窗 —— 有欄位要捲動才看得到"
+    )
+
+
 @pytest.mark.parametrize("size", NARROW + [DESKTOP])
 def test_no_horizontal_scrolling_at_any_width(browser_page, size) -> None:
     """任一寬度下都不得撐出橫向捲軸。
@@ -504,6 +560,93 @@ def test_the_board_fits_inside_a_narrow_viewport(browser_page, size) -> None:
     assert svg["right"] <= metrics["clientWidth"] + 1, (
         f"盤面右緣 {svg['right']}px 超出視窗寬 {metrics['clientWidth']}px"
     )
+
+
+def test_the_board_sits_exactly_where_the_play_page_puts_it(browser_page) -> None:
+    """8.2:盤面與**對局頁的盤面落在同一個位置、同一個大小**。
+
+    收題是一個對照的動作:維護者拿這一頁的盤面去對「這一題放進題庫之後長什麼樣」。
+    兩頁的盤面若差了一截高度,對照就變成在兩個分頁之間憑印象比對 —— 而這一頁存在的
+    理由正是不必憑印象。
+
+    這一條是**收題頁沒有頁首**的來源:原本 `<h1>收題工具</h1>` 加一行說明橫跨整行,
+    把盤面往下推了一整塊。往後任何「在盤面之前再擺一行字」的改動都會讓這裡轉紅,
+    而那正是要的。
+
+    兩頁都以 `file://` 載入、都種同一個替身 `<svg>`,量到的因此是兩份樣式表的差別
+    本身(`padding`、`gap`、`--board-max-width` 與盤面之前有沒有東西)。
+    """
+    play = open_at(browser_page, WEB_DIR / "play.html", DESKTOP)
+    expected = box_of(play, "#board")
+
+    editor = open_editor(browser_page, DESKTOP)
+    actual = box_of(editor, "#board")
+
+    assert actual["top"] == pytest.approx(expected["top"], abs=1), (
+        f"盤面上緣在 {actual['top']}px,對局頁是 {expected['top']}px"
+    )
+    assert actual["width"] == pytest.approx(expected["width"], abs=1), (
+        f"盤面寬 {actual['width']}px,對局頁是 {expected['width']}px"
+    )
+    assert actual["height"] == pytest.approx(expected["height"], abs=1), (
+        f"盤面高 {actual['height']}px,對局頁是 {expected['height']}px"
+    )
+
+
+def test_the_form_never_reaches_below_the_board(browser_page) -> None:
+    """8.6:表單那一欄的底邊不得低於盤面的底邊。
+
+    盤面是這一頁的量尺:它有多高,右邊那一欄就有多少高度可用。表單一旦長過它,
+    最底下那幾個東西(選檔、寫入、停用說明)就落到盤面之外 —— 在 800px 高的視窗上
+    那就是要捲動才看得到,而收題的人正是在 FEN、盤面與寫入之間來回。
+
+    量的是**常態下最高的那個狀態**:檔案選好了,而停用說明仍掛著(剛開頁填完 FEN
+    就是這個樣子)。這兩段字在 `file://` 下都還是空的 —— 它們由 `editor.js` 寫入 ——
+    所以這裡先把它們填上,量在空的狀態等於量了一個使用者看不到的版面。
+
+    逐欄的錯誤訊息不算在內:那是暫時的,而且同時掀開五欄的錯誤本來就會長過盤面。
+
+    選檔與寫入排同一行(`#action-row`)、標籤的提示搭在抬頭那一行、起手方那一行整條
+    移除,三件事都讓這一條有餘裕。
+    """
+    page = open_editor(browser_page, DESKTOP)
+    page.evaluate(
+        """() => {
+          document.getElementById('selected-file').textContent =
+            '適情雅趣~卷一/25-48.json';
+          const note = document.getElementById('write-note');
+          note.textContent = '無法寫入,尚未通過:題號、局名、FEN';
+          note.hidden = false;
+        }"""
+    )
+
+    board = box_of(page, "#board")
+    form = box_of(page, "#entry")
+
+    assert form["bottom"] <= board["bottom"] + 1, (
+        f"表單底邊在 {form['bottom']}px,比盤面的 {board['bottom']}px 還低"
+    )
+
+
+def test_picking_a_file_and_writing_share_one_row(browser_page) -> None:
+    """選檔與寫入排在同一行的左右兩端。
+
+    兩者是收題的最後兩步,中間沒有要填的東西;並排省下的那一塊高度是上一條
+    (表單不得低於盤面)成立的關鍵。
+
+    「同一行」量的是**兩顆按鈕的垂直區間有重疊**,不是兩者的 top 相等:左邊那一塊
+    上頭多了抬頭、下頭多了檔名,底邊對齊時 top 本來就不同。
+    """
+    page = open_editor(browser_page, DESKTOP)
+
+    pick = box_of(page, "#pick-file")
+    write = box_of(page, "#write")
+
+    assert pick["top"] < write["bottom"] and write["top"] < pick["bottom"], (
+        f"兩顆按鈕沒有排在同一行:選檔 {pick['top']}–{pick['bottom']}px、"
+        f"寫入 {write['top']}–{write['bottom']}px"
+    )
+    assert pick["right"] < write["left"], "寫入沒有排在選檔右邊"
 
 
 # --- 樣式表確實是交付的一部分 -------------------------------------------

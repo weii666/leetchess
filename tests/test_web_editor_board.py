@@ -25,7 +25,8 @@
 
 - `[data-message-for="fen"]` —— FEN 欄位的訊息槽,`hidden` 表示沒話說。屬性形式是
   刻意的:8.4 要把每一項未通過定位到欄位,4.3 為其餘六欄在 HTML 補上同形狀的槽即可。
-- `#side-to-move` —— 起手方(2.6)。它讀自 FEN,沒有、也不得有獨立輸入。
+- 起手方(2.6)—— **不呈現**,但仍不得有獨立輸入:它只由 FEN 表達,題目檔裡沒有
+  這個欄位。兩件事分開釘住,見下方那兩條。
 """
 
 from __future__ import annotations
@@ -59,9 +60,8 @@ CONTENT_TYPES = {
 #: 欄位一律以 `data-field` 查詢(tasks 4.1 的 DOM 契約),id 前綴只給 `<label for>` 用。
 FEN_FIELD = '[data-field="fen"]'
 
-#: 4.2 新增的兩個槽(見模組說明)。
+#: 4.2 新增的訊息槽(見模組說明)。
 FEN_MESSAGE = '[data-message-for="fen"]'
-SIDE_TO_MOVE = "#side-to-move"
 
 #: 《適情雅趣》第 21 局(`positions/適情雅趣/0001.json`)的起始局面,紅先。
 PUZZLE_FEN = "3ak4/3RaR3/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 w - - 0 1"
@@ -278,7 +278,6 @@ def test_a_fen_padded_with_whitespace_draws_the_same_position(editor_page, fen: 
 
     assert drawn_pieces(editor_page) == EXPECTED_PIECES
     assert message_text(editor_page) == "", "前後的空白不是錯誤,不該有訊息"
-    assert "紅先" in editor_page.locator(SIDE_TO_MOVE).inner_text()
 
 
 def test_the_board_redraws_on_every_change_not_only_on_blur(editor_page) -> None:
@@ -486,37 +485,13 @@ def test_an_untouched_page_shows_an_empty_board_without_an_error(editor_page) ->
 
 
 # --- 起手方(2.6)-------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("fen", "expected"),
-    [
-        (PUZZLE_FEN, "紅先"),
-        (PUZZLE_FEN.replace(" w ", " b "), "黑先"),
-    ],
-)
-def test_the_side_to_move_is_read_from_the_fen(editor_page, fen: str, expected: str) -> None:
-    """2.6:起手方依 FEN 的走子方顯示。
-
-    題庫容得下黑先的排局,因此兩種都要測 —— 只測紅先的話,一個永遠印「紅先」的
-    實作照樣會綠。
-    """
-    type_fen(editor_page, fen)
-
-    side = editor_page.locator(SIDE_TO_MOVE)
-    assert side.count() == 1, "起手方沒有固定的呈現位置"
-    assert expected in side.inner_text()
-
-
-def test_the_side_to_move_updates_when_the_fen_changes(editor_page) -> None:
-    """走子方改了,顯示要跟著改 —— 不能停在第一次讀到的值。"""
-    type_fen(editor_page, PUZZLE_FEN)
-    assert "紅先" in editor_page.locator(SIDE_TO_MOVE).inner_text()
-
-    type_fen(editor_page, PUZZLE_FEN.replace(" w ", " b "))
-
-    assert "黑先" in editor_page.locator(SIDE_TO_MOVE).inner_text()
-    assert "紅先" not in editor_page.locator(SIDE_TO_MOVE).inner_text()
+#
+# **起手方不再呈現**(requirement 2.6 的修訂),而那件事在構造上已經成立:`check.js`
+# 連同顯示字樣(「紅先」「黑先」)一起移除了,收題頁沒有任何一處算得出起手方。因此
+# 這裡不留「畫面上沒有起手方」那種反向測試 —— 它沒有可以失敗的路徑。
+#
+# **仍然留著的是下面這一條**:不得有起手方的獨立輸入。那是硬規則而非呈現決定 ——
+# 給了輸入框,維護者就填得出一個與 FEN 矛盾的起手方,而題目檔裡根本沒有這個欄位。
 
 
 def test_the_side_to_move_has_no_input_of_its_own(editor_page) -> None:
@@ -567,8 +542,8 @@ def test_the_page_loads_the_editor_module(editor_page) -> None:
     ), f"index.html 沒有以 module 掛上 ./editor.js:{scripts}"
 
 
-def test_the_message_and_side_slots_are_declared_in_the_markup() -> None:
-    """兩個槽位寫在 HTML 裡,不由 JS 生出來。
+def test_the_message_slot_is_declared_in_the_markup() -> None:
+    """訊息槽寫在 HTML 裡,不由 JS 生出來。
 
     這一頁已經有一條規矩(`#unsupported`):**要出現的東西先在版面裡佔好位置**,JS
     只決定它顯示與否。一頁上同時存在兩種相反的做法,4.3 要為其餘六欄補訊息槽時就得
@@ -582,9 +557,6 @@ def test_the_message_and_side_slots_are_declared_in_the_markup() -> None:
     slot = re.search(r"<p[^>]*data-message-for=\"fen\"[^>]*>", html)
     assert slot is not None, "FEN 的訊息槽必須宣告在 index.html 裡"
     assert "hidden" in slot.group(0), f"訊息槽預設就掛在畫面上:{slot.group(0)}"
-    assert re.search(r"<p[^>]*id=\"side-to-move\"[^>]*>", html) is not None, (
-        "起手方的位置必須宣告在 index.html 裡"
-    )
 
 
 def test_the_editor_module_only_depends_on_its_designated_modules() -> None:
@@ -613,7 +585,6 @@ def test_the_editor_module_does_not_reimplement_the_fen_structure_check() -> Non
     source = EDITOR_JS.read_text(encoding="utf-8")
 
     assert "checkFenStructure" in source, "結構檢查必須呼叫 check.js 的那一份"
-    assert "sideFromFen" in source, "起手方必須讀 check.js 的那一份"
     assert "split('/')" not in source and 'split("/")' not in source, (
         "組裝層自己在拆 FEN 的盤面段,結構判準因此有了第二份"
     )

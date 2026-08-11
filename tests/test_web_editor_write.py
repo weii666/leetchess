@@ -94,16 +94,17 @@ CONTENT_TYPES = {
 }
 
 #: 表單欄位的順序,即 `check.js` 的 `checkForm()` 回傳清單的順序。
-FORM_FIELDS = ["id", "title", "description", "difficulty", "tags", "fen", "target"]
+FORM_FIELDS = ["id", "title", "fen", "difficulty", "tags"]
 
-#: **題目**欄位 —— 寫入成功後要清空的那些(7.2)。
+#: 寫入成功後要清空的欄位(7.2)—— 自 R5 的修訂起就是全部五欄。
 #:
-#: 目標檔案路徑刻意不在裡面:它是「寫到哪個檔」,而**連續收題抄的是同一本書的同一卷**
-#: (requirement 7 的 Objective:「一次抄完一段書」)。每收一題就要重打一次路徑,是這
-#: 個工具最容易讓人放棄的地方。
-PUZZLE_FIELDS = [name for name in FORM_FIELDS if name != "target"]
+#: 目標題目檔不在裡面,因為它**不是一個欄位**:它是 `fs.js` 的模組層狀態,由檔案
+#: 選擇框選定。而它留著正是「一次抄完一段書」的關鍵 —— 同一卷的下一題,選定的檔案
+#: 一模一樣。
+PUZZLE_FIELDS = FORM_FIELDS
 
 WRITE_BUTTON = "#write"
+PICK_BUTTON = "#pick-file"
 WRITE_NOTE = "#write-note"
 
 #: 《適情雅趣》第 21 局的起始局面,紅先(與其餘收題頁測試同一串)。
@@ -114,11 +115,9 @@ PUZZLE_FEN = "3ak4/3RaR3/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 w - - 0 1"
 VALID_FORM = {
     "id": "26",
     "title": "患在几席",
-    "description": "自己打的描述,不該被任何建議值蓋掉",
     "difficulty": "2",
     "tags": "解殺還殺 鐵門栓、悶宮",
     "fen": PUZZLE_FEN,
-    "target": "適情雅趣~卷一/26.json",
 }
 
 #: 表單裡那個題號的數值形式。撞號的訊息要**指出重複的題號**(4.3、4.4),
@@ -127,16 +126,16 @@ FORM_ID = 26
 
 #: `VALID_FORM` 送往驗證端點時該有的候選題目(design 的「候選題目的資料契約」)。
 #:
-#: **正好六個由人工編輯的 schema 欄位**,型別即題目檔裡的型別:`id` 與 `difficulty`
-#: 是數字而不是輸入框裡那串字,`tags` 是切分後的陣列。`max_dtm`(由驗證工具回填)、
-#: `source`(由資料夾表達)、`side_to_move`(由 fen 表達)三者都不在候選題目裡 ——
-#: 後端對未知欄位是直接拒絕的,多送一個就會讓一份好題目被判為不合格。
+#: **正好五個由人工編輯的 schema 欄位**,型別即題目檔裡的型別:`id` 與 `difficulty`
+#: 是數字而不是輸入框裡那串字,`tags` 是切分後的陣列。四個不在裡面的各有理由:
+#: `description`(整欄移除,3.9)、`max_dtm`(由驗證工具回填)、`source`(由資料夾
+#: 表達)、`side_to_move`(由 fen 表達)—— 後端對未知欄位是直接拒絕的,多送一個就會
+#: 讓一份好題目被判為不合格。
 #:
-#: 目標檔案路徑同樣不在裡面:它是**寫到哪個檔**,不是題目的欄位。
+#: 目標題目檔同樣不在裡面:它是**寫到哪個檔**,不是題目的欄位。
 EXPECTED_CANDIDATE = {
     "id": FORM_ID,
     "title": "患在几席",
-    "description": "自己打的描述,不該被任何建議值蓋掉",
     "fen": PUZZLE_FEN,
     "difficulty": 2,
     "tags": ["解殺還殺", "鐵門栓", "悶宮"],
@@ -244,14 +243,17 @@ class Validator:
 # --- 平台包裝替身 -------------------------------------------------------
 
 
-#: 題庫目錄裡那個目標檔的相對路徑,即 `VALID_FORM['target']`。
-TARGET_PATH = VALID_FORM["target"]
+#: 目標題目檔的檔名。**只有檔名,沒有路徑** —— 那是控制代碼帶得出來的全部資訊。
+TARGET_NAME = "25.json"
 
 #: 目標檔的既有內容 —— 一份**只有一題**的合法題目檔。
 #:
 #: 排版刻意照既有題目檔的樣子寫(兩格縮排、欄位各一行、標籤單行、中文不轉義),
 #: 因為 7.4 要問的是「既有的每一題逐字不變」,而逐字不變只有在既有內容本來就有
 #: 排版特徵時才問得出來 —— 一份被重新序列化過的檔案與原檔的差別正是排版。
+#:
+#: 它**帶著 `description`**:既有題目一律有描述(schema 只是改為選填,3.10),而
+#: 「新題不寫描述、既有題目逐字不變」正是這一版最容易寫壞的一件事。
 EXISTING_FILE = """[
   {
     "id": 21,
@@ -267,14 +269,15 @@ EXISTING_FILE = """[
 
 #: 注入的 `fs.js` 替身原始碼。
 #:
-#: design 的 Testing Strategy 明載這是**刻意接受的覆蓋缺口**:系統目錄選擇框無法由
+#: design 的 Testing Strategy 明載這是**刻意接受的覆蓋缺口**:系統檔案選擇框無法由
 #: 自動化工具操作,所以檔案系統那一層以替身驗證。`fs.js` 自己的每一行由
 #: `tests/test_web_editor_fs.py` 以平台替身驗證,本檔驗的是**組裝層有沒有照正確的
-#: 次序使用它**——什麼時候問授權、什麼時候重讀、寫出去的是哪一串位元組。
+#: 次序使用它**——什麼時候選檔、什麼時候重讀、寫出去的是哪一串位元組。
 #:
-#: 替身的形狀貼著 `fs.js` 的契約寫,兩處尤其要緊:`acquireCorpusDirectory()`
-#: **不是 async 函式**(它必須同步把對話框開下去,見該檔的 Preconditions),以及
-#: `readTextAt()` 對不存在的檔案**回 `null` 而不是拋出** —— 一種狀態只有一個表示法。
+#: 替身的形狀貼著 `fs.js` 的契約寫,三處尤其要緊:`pickCorpusFile()` **不是 async
+#: 函式**(它必須同步把對話框開下去)、`selectedFile()` **沒有副作用**(組裝層每次
+#: 重畫都會問它)、`readText()` 對消失的檔案**拋出而不是回 `null``(那個檔是使用者
+#: 剛選出來的,不存在是失敗不是狀態)。
 #:
 #: 狀態掛在 `globalThis.__fs` 上讓測試讀寫。`supported` 是唯一必須在模組求值**之前**
 #: 就定好的旗標(6.3 要求載入時就告知),所以它讀的是 `globalThis.__fsSupported`,
@@ -283,30 +286,33 @@ FS_FAKE_SOURCE = """
 const state = {
   supported: globalThis.__fsSupported !== false,
   denied: false,
+  name: '25.json',
   files: {},
   calls: [],
   // 平台自己的寫入失敗(權限中途失效、磁碟寫不進去)。它**沒有專屬的錯誤型別** ——
   // `fs.js` 只翻「使用者不給」與「瀏覽器做不到」那兩種,其餘原樣往上,所以替身這裡
   // 丟的也是一個普通的 `Error`(5.4)。
   writeError: null,
-  // 把授權那一步掛住,好在「嘗試進行中」的那一瞬間問畫面(5.4 的重複送出)。
+  // 把重讀那一步掛住,好在「嘗試進行中」的那一瞬間問畫面(5.4 的重複送出)。
   // 延遲刻意做在頁面這一側:讓 `page.route()` 的處理器睡覺會擋住整條驅動通道,
   // 那時候連問畫面都問不動。
-  hold: false,
+  holdRead: false,
   release: null,
 };
 globalThis.__fs = state;
 
+let selected = null;
+
 export class UnsupportedBrowserError extends Error {
   constructor() {
-    super('這個瀏覽器沒有本機目錄選取');
+    super('這個瀏覽器沒有本機檔案選取');
     this.name = 'UnsupportedBrowserError';
   }
 }
 
 export class PermissionDeniedError extends Error {
   constructor() {
-    super('未取得題庫目錄的存取授權');
+    super('未取得題目檔的寫入授權');
     this.name = 'PermissionDeniedError';
   }
 }
@@ -315,29 +321,36 @@ export function isSupported() {
   return state.supported;
 }
 
-export function acquireCorpusDirectory() {
-  state.calls.push(['acquire']);
+export function selectedFile() {
+  return selected;
+}
+
+export function pickCorpusFile() {
+  state.calls.push(['pick']);
   if (!state.supported) return Promise.reject(new UnsupportedBrowserError());
   if (state.denied) return Promise.reject(new PermissionDeniedError());
-  if (state.hold) {
-    return new Promise((resolve) => {
-      state.release = () => resolve({ name: 'positions' });
-    });
+  selected = { name: state.name };
+  return Promise.resolve(selected);
+}
+
+export async function readText(handle) {
+  state.calls.push(['read', handle.name]);
+  if (state.holdRead) {
+    await new Promise((resolve) => { state.release = resolve; });
   }
-  return Promise.resolve({ name: 'positions' });
+  const content = state.files[handle.name];
+  if (typeof content !== 'string') {
+    const error = new Error('替身:檔案不見了');
+    error.name = 'NotFoundError';
+    throw error;
+  }
+  return content;
 }
 
-export async function readTextAt(dir, relativePath) {
-  state.calls.push(['read', relativePath]);
-  return Object.prototype.hasOwnProperty.call(state.files, relativePath)
-    ? state.files[relativePath]
-    : null;
-}
-
-export async function writeTextAt(dir, relativePath, text) {
-  state.calls.push(['write', relativePath]);
+export async function writeText(handle, text) {
+  state.calls.push(['write', handle.name]);
   if (state.writeError !== null) throw new Error(state.writeError);
-  state.files[relativePath] = text;
+  state.files[handle.name] = text;
 }
 """
 
@@ -449,16 +462,23 @@ def put(page, name: str, value: str) -> None:
     page.fill(control(name), value)
 
 
-def fill_valid_form(page, **overrides: str) -> None:
-    """填出一份七項全過的表單,`overrides` 逐欄覆寫。
+def fill_valid_form(page, *, choose: str | None = "", **overrides: str) -> None:
+    """把這一頁備妥到「按下寫入就會成功」的狀態,`overrides` 逐欄覆寫。
 
-    描述**刻意最後填**:前面填局名時會冒出建議值,最後這一次覆寫讓它成為維護者
-    自己的內容(3.7),後續的斷言才問得出「按下寫入之後內容有沒有被動過」。
+    兩件事:填滿五個欄位,以及**選定目標題目檔**。後者自 R5 的修訂起是一個獨立的
+    使用者操作(一顆按鈕開系統對話框),不再是表單上的一欄 —— 但對絕大多數測試而言
+    它與填欄位一樣只是前提,所以併在這裡。
+
+    `choose` 給的是目標檔的既有內容;`None` 表示**不要選檔**(那正是 5.10 要問的
+    情形)。預設是 `EXISTING_FILE` 以外的空陣列 —— 一份合法但沒有題目的題目檔,
+    讓「寫進去的是哪一題」在斷言裡只剩一個元素,不必每次都跳過既有的那一題。
     """
     values = dict(VALID_FORM)
     values.update(overrides)
-    for name in ["id", "title", "difficulty", "tags", "fen", "target", "description"]:
+    for name in FORM_FIELDS:
         put(page, name, values[name])
+    if choose is not None:
+        choose_file(page, choose if choose != "" else "[]\n")
 
 
 def value_of(page, name: str) -> str:
@@ -542,18 +562,37 @@ def unsupported_is_shown(page) -> bool:
     return page.evaluate("() => !document.getElementById('unsupported').hidden")
 
 
-def wait_for_acquire(page) -> None:
-    """等到嘗試走進授權那一步 —— 掛住的那一次會停在這裡(5.4)。"""
+def choose_file(page, content: str | None = None) -> None:
+    """按下「選擇題目檔」,並選好目標檔的既有內容(5.1)。
+
+    走的是**真實的按鈕**而不是直接改替身的狀態:選檔是使用者手勢驅動的一個獨立操作
+    (那正是這一版把它移出寫入序列的理由),繞過按鈕就驗不到那條接線。
+    """
+    if content is not None:
+        fs_setup(page, files={TARGET_NAME: content})
+    page.click(PICK_BUTTON)
     page.wait_for_function(
-        "() => globalThis.__fs.calls.some(call => call[0] === 'acquire')",
+        "() => globalThis.__fs.calls.some(call => call[0] === 'pick')", timeout=5000
+    )
+
+
+def wait_for_read(page) -> None:
+    """等到嘗試走進重讀那一步 —— 掛住的那一次會停在這裡(5.4)。"""
+    page.wait_for_function(
+        "() => globalThis.__fs.calls.some(call => call[0] === 'read')",
         timeout=5000,
     )
 
 
 def release_hold(page) -> None:
-    """放掉被掛住的授權,讓那一次嘗試跑完。"""
+    """放掉被掛住的重讀,讓那一次嘗試跑完。"""
     page.evaluate("() => globalThis.__fs.release()")
     page.wait_for_timeout(SETTLE_MS)
+
+
+def selected_name(page) -> str:
+    """畫面上顯示的目前選定檔名(5.1)。"""
+    return page.evaluate("() => document.getElementById('selected-file').textContent.trim()")
 
 
 def wait_for_catalog(page, catalog: Catalog, expected: int) -> None:
@@ -1176,13 +1215,14 @@ def test_a_fen_the_service_refuses_to_send_is_not_a_busy_service(
 # --- 授權的時機:在驗證之後,不在之前(6.1)----------------------------
 
 
-def test_a_failed_verdict_never_opens_the_directory_picker(
+def test_a_failed_verdict_never_touches_the_disk(
     editor_page, catalog: Catalog, validator: Validator
 ) -> None:
-    """次序是設計的一部分:**不合格的題目不讓維護者先跳一次目錄選擇框**。
+    """次序是設計的一部分:**不合格的題目不動磁碟**。
 
-    對話框是這條序列裡唯一會打斷維護者的東西 —— 它蓋住整個視窗、要用鍵盤或滑鼠
-    才關得掉。為一份根本寫不出去的題目跳一次,代價完全落在人身上。
+    選檔在這一版是使用者主動做的一個獨立操作,所以「不讓他先跳一次對話框」已經不再
+    是這條序列的責任。剩下的責任更硬:一份被判為不合格的題目,連目標檔都不該被開啟
+    ——讀一次是白讀,而讀了才發現不寫更容易在日後被改成「順手也寫了」。
     """
     validator.rejects([{"field": "fen", "message": "引擎載不進這個 fen"}])
     catalog.ids = []
@@ -1191,58 +1231,123 @@ def test_a_failed_verdict_never_opens_the_directory_picker(
     attempt_write(editor_page, catalog, validator)
 
     assert message(editor_page, "fen") != ""
-    assert fs_calls(editor_page) == [], "不合格的題目卻已經去要了目錄授權"
+    assert fs_kinds(editor_page) == ["pick"], "不合格的題目卻已經動了磁碟"
 
 
-def test_a_collision_never_opens_the_directory_picker(
+def test_a_collision_never_touches_the_disk(
     editor_page, catalog: Catalog, validator: Validator
 ) -> None:
-    """撞號擋下的嘗試同樣不碰平台 —— 理由與上一條相同,只是擋在更前面一步。"""
+    """撞號擋下的嘗試同樣不動磁碟 —— 理由與上一條相同,只是擋在更前面一步。"""
     catalog.ids = [FORM_ID]
     fill_valid_form(editor_page)
 
     attempt_write(editor_page, catalog)
 
     assert str(FORM_ID) in message(editor_page, "id")
-    assert fs_calls(editor_page) == [], "撞號已經擋下這一次嘗試,不該再去要授權"
+    assert fs_kinds(editor_page) == ["pick"], "撞號已經擋下這一次嘗試,不該再動磁碟"
 
 
-def test_the_target_file_is_read_only_after_the_directory_is_granted(
+def test_the_read_and_the_write_are_adjacent(
     editor_page, catalog: Catalog, validator: Validator
 ) -> None:
-    """授權 → 重讀 → 寫回,而且**就是這個次序**。
+    """重讀與寫回之間**沒有任何等待人的步驟**。
 
-    重讀擺在授權之後才把「讀檔到寫檔」的視窗壓到最小(design 的 Risks):那段期間
-    目標檔若被編輯器或 git 改動,追加會蓋掉那次改動。先讀再等使用者挑目錄,等的
-    那段時間全都算在視窗裡,而挑目錄要花的正是人的時間 —— 那是這條序列裡最長的
-    一段。
+    那段期間目標檔若被編輯器或 git 改動,追加會蓋掉那次改動(design 的 Risks)。
+    舊設計在這兩步之間夾著目錄選擇框 —— 而挑目錄花的是人的時間,是整條序列裡最長的
+    一段。選檔移出序列之後,那個視窗縮到只剩兩次磁碟操作之間。
     """
     catalog.ids = []
-    fs_setup(editor_page, files={TARGET_PATH: EXISTING_FILE})
-    fill_valid_form(editor_page)
+    fill_valid_form(editor_page, choose=EXISTING_FILE)
 
     attempt_write(editor_page, catalog, validator)
 
-    assert fs_kinds(editor_page) == ["acquire", "read", "write"]
-    assert fs_calls(editor_page)[1] == ["read", TARGET_PATH], "重讀的不是目標檔"
-    assert fs_calls(editor_page)[2] == ["write", TARGET_PATH], "寫回的不是目標檔"
+    assert fs_kinds(editor_page) == ["pick", "read", "write"]
+    assert fs_calls(editor_page)[1] == ["read", TARGET_NAME], "重讀的不是選定的檔"
+    assert fs_calls(editor_page)[2] == ["write", TARGET_NAME], "寫回的不是選定的檔"
 
 
-def test_drawing_and_typing_work_before_any_authorisation(
+def test_drawing_and_typing_work_before_a_file_is_chosen(
     editor_page, catalog: Catalog
 ) -> None:
-    """6.4:授權尚未取得時,繪盤與全部欄位的填寫**仍然可用**。
+    """6.4:目標題目檔尚未選定時,繪盤與全部欄位的填寫**仍然可用**。
 
-    這是「授權只在按下寫入時才要」的可觀察後果。頁面載入時就跳對話框的實作會在
-    這裡被抓到:那時維護者連要不要用這個工具都還沒決定。
+    頁面載入時就跳對話框的實作會在這裡被抓到:那時維護者連要不要用這個工具都還沒
+    決定。選檔與填表因此互不相干 —— 兩者哪個先做都行(5.10 只在按下寫入時才要求)。
     """
-    fill_valid_form(editor_page)
+    fill_valid_form(editor_page, choose=None)
 
-    assert editor_page.locator("#board .piece").count() > 0, "沒有授權就畫不出盤面"
+    assert editor_page.locator("#board .piece").count() > 0, "沒選檔就畫不出盤面"
     for name in FORM_FIELDS:
         assert value_of(editor_page, name) == VALID_FORM[name], f"{name} 填不進去"
-    assert write_is_enabled(editor_page), "七欄都填妥了,寫入卻按不下去"
-    assert fs_calls(editor_page) == [], "還沒按下寫入就去要了目錄授權"
+    assert fs_calls(editor_page) == [], "還沒按下選檔就開了對話框"
+
+
+# --- 尚未選定與更換檔案(5.10、5.11)------------------------------------
+
+
+def test_writing_without_a_chosen_file_is_stopped_and_explained(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """5.10:尚未選定目標題目檔時**不執行寫入**,並說明尚未選定。
+
+    這是這一版新開的一條路:舊設計裡目標檔是一個必填欄位,沒填就過不了淺層檢查、
+    寫入根本按不下去。現在它不是欄位了,五欄填妥就按得下去 —— 所以「還沒選檔」必須
+    在序列裡自己擋一次,而且要說得出下一步是按哪一顆按鈕。
+    """
+    catalog.ids = []
+    fill_valid_form(editor_page, choose=None)
+    assert write_is_enabled(editor_page), "五欄都填妥了,寫入卻按不下去"
+
+    editor_page.click(WRITE_BUTTON)
+    editor_page.wait_for_timeout(SETTLE_MS)
+
+    assert "尚未選定" in note(editor_page), f"沒說是還沒選檔:{note(editor_page)!r}"
+    assert fs_calls(editor_page) == [], "還沒選檔卻已經動了磁碟"
+    for name in FORM_FIELDS:
+        assert value_of(editor_page, name) == VALID_FORM[name], f"{name} 的內容變了"
+
+
+def test_the_chosen_file_is_shown_before_anything_is_written(editor_page) -> None:
+    """5.1:畫面上要看得見**目前選定的是哪一個檔**。
+
+    選定之前說的是「尚未選定」而不是一片空白 —— 空白看起來像壞掉,而這是一個必要
+    的步驟。維護者靠這一行確認自己等一下會寫到哪裡去。
+    """
+    assert selected_name(editor_page) == "尚未選定"
+
+    choose_file(editor_page, "[]\n")
+
+    assert selected_name(editor_page) == TARGET_NAME
+
+
+def test_changing_the_file_sends_the_next_write_to_the_new_one(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """5.11:更換目標題目檔之後,寫入落到**新的那一個**。
+
+    換書、換卷都走這條路。留著舊控制代碼的實作在這裡會被抓到:畫面上顯示新檔名,
+    而題目靜靜寫進了舊檔 —— 那是最難察覺的一種錯,因為兩個檔看起來都很正常。
+    """
+    catalog.ids = []
+    fill_valid_form(editor_page)
+    attempt_write(editor_page, catalog, validator)
+
+    # 兩個檔並存 —— 換檔之後**舊的那一個必須原封不動**,而那正是這條要問的事。
+    editor_page.evaluate(
+        "() => { globalThis.__fs.name = '30-34.json';"
+        " globalThis.__fs.files['30-34.json'] = '[]\\n'; }"
+    )
+    choose_file(editor_page)
+    assert selected_name(editor_page) == "30-34.json"
+
+    fill_valid_form(editor_page, id="30", choose=None)
+    attempt_write(editor_page, catalog, validator)
+
+    files = fs_files(editor_page)
+    assert [entry["id"] for entry in json.loads(files["30-34.json"])] == [30]
+    assert [entry["id"] for entry in json.loads(files[TARGET_NAME])] == [FORM_ID], (
+        "換檔之後仍然寫進了舊的那一個"
+    )
 
 
 # --- 平台不支援(6.3)--------------------------------------------------
@@ -1287,38 +1392,41 @@ def test_an_unsupported_browser_that_is_pressed_anyway_says_why(
     """
     reload_as_unsupported(editor_page)
 
-    catalog.ids = []
-    fill_valid_form(editor_page)
-    attempt_write(editor_page, catalog, validator)
+    # 表單先填妥。淺層點名的優先序高於上一次嘗試的結果(見 `renderWriteAction`),
+    # 而那是對的 —— 一份還沒填完的表單,該講的是它還缺什麼。
+    fill_valid_form(editor_page, choose=None)
+    editor_page.click(PICK_BUTTON)
+    editor_page.wait_for_timeout(SETTLE_MS)
 
     assert "不支援" in note(editor_page), f"按下之後說的是 {note(editor_page)!r}"
-    assert fs_kinds(editor_page) == ["acquire"], "不支援卻仍然去讀寫了檔案"
+    assert fs_kinds(editor_page) == ["pick"], "不支援卻仍然去讀寫了檔案"
 
 
 # --- 拒絕授權或取消選擇(6.2)------------------------------------------
 
 
-def test_a_refused_authorisation_keeps_everything_and_says_nothing_was_written(
+def test_a_refused_authorisation_keeps_everything_and_says_so(
     editor_page, catalog: Catalog, validator: Validator
 ) -> None:
-    """6.2:拒絕授權或取消選擇時,**保留已填入的全部內容**,並告知寫入未進行。
+    """6.2:拒絕授權或取消選擇時,**保留已填入的全部內容**,並告知沒有選定。
 
     兩件事缺一不可。只保留內容而不說話,畫面看起來與什麼都沒按一樣;只說話而清空
     內容,維護者要重抄一次 FEN —— 而按 Esc 關掉對話框是最容易誤觸的一個動作。
     """
-    catalog.ids = []
-    fs_setup(editor_page, denied=True, files={TARGET_PATH: EXISTING_FILE})
-    fill_valid_form(editor_page)
+    fill_valid_form(editor_page, choose=None)
+    fs_setup(editor_page, denied=True, files={TARGET_NAME: EXISTING_FILE})
 
-    attempt_write(editor_page, catalog, validator)
+    editor_page.click(PICK_BUTTON)
+    editor_page.wait_for_timeout(SETTLE_MS)
 
     assert note(editor_page) != "", "拒絕授權之後畫面一句話都沒說"
     for name in FORM_FIELDS:
         assert value_of(editor_page, name) == VALID_FORM[name], (
             f"拒絕授權之後 {name} 的內容變了"
         )
-    assert fs_kinds(editor_page) == ["acquire"], "沒拿到授權卻仍然動了檔案"
-    assert fs_files(editor_page) == {TARGET_PATH: EXISTING_FILE}, "目標檔被動過了"
+    assert selected_name(editor_page) == "尚未選定"
+    assert fs_kinds(editor_page) == ["pick"], "沒拿到授權卻仍然動了檔案"
+    assert fs_files(editor_page) == {TARGET_NAME: EXISTING_FILE}, "目標檔被動過了"
 
 
 def test_a_refused_authorisation_does_not_reserve_the_id(
@@ -1330,12 +1438,14 @@ def test_a_refused_authorisation_does_not_reserve_the_id(
     是「這個題號重複」——一句與事實完全相反的話。
     """
     catalog.ids = []
-    fs_setup(editor_page, denied=True)
-    fill_valid_form(editor_page)
-    attempt_write(editor_page, catalog, validator)
+    fill_valid_form(editor_page, choose=None)
+    fs_setup(editor_page, denied=True, files={TARGET_NAME: "[]\n"})
+    editor_page.click(PICK_BUTTON)
+    editor_page.wait_for_timeout(SETTLE_MS)
     assert note(editor_page) != ""
 
     fs_setup(editor_page, denied=False)
+    choose_file(editor_page)
     attempt_write(editor_page, catalog, validator)
 
     assert message(editor_page, "id") == "", "被拒絕的那一次嘗試把題號佔走了"
@@ -1356,18 +1466,19 @@ def test_a_successful_write_keeps_every_existing_position_byte_for_byte(
     在資料層做事的理由。
     """
     catalog.ids = [21]
-    fs_setup(editor_page, files={TARGET_PATH: EXISTING_FILE})
-    fill_valid_form(editor_page)
+    fill_valid_form(editor_page, choose=EXISTING_FILE)
 
     attempt_write(editor_page, catalog, validator)
 
-    written = fs_files(editor_page)[TARGET_PATH]
+    written = fs_files(editor_page)[TARGET_NAME]
     kept = EXISTING_FILE[: EXISTING_FILE.rindex("]")].rstrip()
     assert written.startswith(kept), "既有內容被重新序列化過了"
 
     entries = json.loads(written)
     assert len(entries) == 2, "追加之後不是兩題"
     assert entries[1] == EXPECTED_CANDIDATE, "寫進去的那一題與送去驗證的那一份不同"
+    assert "description" not in entries[1], "新題不該帶描述(3.9)"
+    assert entries[0]["description"], "既有那一題的描述被弄丟了"
 
 
 def test_a_missing_target_file_becomes_a_single_element_array(
@@ -1384,7 +1495,7 @@ def test_a_missing_target_file_becomes_a_single_element_array(
 
     attempt_write(editor_page, catalog, validator)
 
-    assert json.loads(fs_files(editor_page)[TARGET_PATH]) == [EXPECTED_CANDIDATE]
+    assert json.loads(fs_files(editor_page)[TARGET_NAME]) == [EXPECTED_CANDIDATE]
 
 
 def test_every_attempt_re_reads_the_target_file(
@@ -1399,12 +1510,12 @@ def test_every_attempt_re_reads_the_target_file(
     fill_valid_form(editor_page)
     attempt_write(editor_page, catalog, validator)
 
-    # 成功之後題目欄位是空的(7.2),第二題從頭填 —— 這正是連續收題的樣子。
-    fill_valid_form(editor_page, id="27")
+    # 成功之後題目欄位是空的(7.2),第二題從頭填 —— 但**檔案不必重選**。
+    fill_valid_form(editor_page, id="27", choose=None)
     attempt_write(editor_page, catalog, validator)
 
-    assert fs_kinds(editor_page) == ["acquire", "read", "write"] * 2
-    entries = json.loads(fs_files(editor_page)[TARGET_PATH])
+    assert fs_kinds(editor_page) == ["pick", "read", "write", "read", "write"]
+    entries = json.loads(fs_files(editor_page)[TARGET_NAME])
     assert [entry["id"] for entry in entries] == [26, 27], "第二次寫入沒有讀到第一次的結果"
 
 
@@ -1418,13 +1529,12 @@ def test_a_target_that_is_not_a_position_array_is_not_written(
     """
     junk = '{"這不是": "題目陣列"}\n'
     catalog.ids = []
-    fs_setup(editor_page, files={TARGET_PATH: junk})
-    fill_valid_form(editor_page)
+    fill_valid_form(editor_page, choose=junk)
 
     attempt_write(editor_page, catalog, validator)
 
-    assert fs_kinds(editor_page) == ["acquire", "read"], "非題目陣列的檔案被寫過了"
-    assert fs_files(editor_page) == {TARGET_PATH: junk}, "目標檔的內容變了"
+    assert fs_kinds(editor_page) == ["pick", "read"], "非題目陣列的檔案被寫過了"
+    assert fs_files(editor_page) == {TARGET_NAME: junk}, "目標檔的內容變了"
 
 
 def test_a_failed_append_does_not_reserve_the_id(
@@ -1432,16 +1542,15 @@ def test_a_failed_append_does_not_reserve_the_id(
 ) -> None:
     """追加失敗同樣不佔用題號 —— 與拒絕授權那一條是同一條規則的另一個入口。"""
     catalog.ids = []
-    fs_setup(editor_page, files={TARGET_PATH: "不是 JSON"})
-    fill_valid_form(editor_page)
+    fill_valid_form(editor_page, choose="不是 JSON")
     attempt_write(editor_page, catalog, validator)
-    assert fs_kinds(editor_page) == ["acquire", "read"]
+    assert fs_kinds(editor_page) == ["pick", "read"]
 
-    fs_setup(editor_page, files={})
+    fs_setup(editor_page, files={TARGET_NAME: "[]\n"})
     attempt_write(editor_page, catalog, validator)
 
     assert message(editor_page, "id") == "", "追加失敗的那一次嘗試把題號佔走了"
-    assert json.loads(fs_files(editor_page)[TARGET_PATH]) == [EXPECTED_CANDIDATE]
+    assert json.loads(fs_files(editor_page)[TARGET_NAME]) == [EXPECTED_CANDIDATE]
 
 
 def test_a_written_id_is_reserved_for_the_rest_of_the_tab(
@@ -1488,7 +1597,7 @@ def test_a_successful_write_names_the_id_and_the_target_file(
 
     said = note(editor_page)
     assert str(FORM_ID) in said, f"成功訊息沒有指出題號:{said!r}"
-    assert VALID_FORM["target"] in said, f"成功訊息沒有指出目標檔案:{said!r}"
+    assert TARGET_NAME in said, f"成功訊息沒有指出目標檔案:{said!r}"
 
 
 def test_a_successful_write_clears_the_puzzle_fields_and_keeps_the_target(
@@ -1507,9 +1616,7 @@ def test_a_successful_write_clears_the_puzzle_fields_and_keeps_the_target(
 
     for name in PUZZLE_FIELDS:
         assert value_of(editor_page, name) == "", f"成功之後 {name} 沒有清空"
-    assert value_of(editor_page, "target") == VALID_FORM["target"], (
-        "目標檔案路徑被一起清掉了"
-    )
+    assert selected_name(editor_page) == TARGET_NAME, "選定的檔案被一起清掉了"
 
 
 def test_the_success_message_is_not_buried_by_the_empty_form_it_just_created(
@@ -1570,9 +1677,10 @@ def test_two_puzzles_in_a_row_only_need_the_target_typed_once(
         put(editor_page, name, "27" if name == "id" else VALID_FORM[name])
     attempt_write(editor_page, catalog, validator)
 
-    entries = json.loads(fs_files(editor_page)[TARGET_PATH])
+    entries = json.loads(fs_files(editor_page)[TARGET_NAME])
     assert [entry["id"] for entry in entries] == [26, 27]
-    assert value_of(editor_page, "target") == VALID_FORM["target"]
+    assert selected_name(editor_page) == TARGET_NAME
+    assert fs_kinds(editor_page).count("pick") == 1, "第二題又跳了一次對話框"
 
 
 # --- 寫入失敗的呈現(7.3)----------------------------------------------
@@ -1597,7 +1705,7 @@ def test_an_index_that_cannot_be_fetched_says_so_instead_of_going_quiet(
     for name in FORM_FIELDS:
         assert value_of(editor_page, name) == VALID_FORM[name], f"{name} 的內容變了"
     assert write_is_enabled(editor_page), "失敗之後應該還能再按一次"
-    assert fs_calls(editor_page) == [], "索引都取不到,不該碰到檔案"
+    assert fs_kinds(editor_page) == ["pick"], "索引都取不到,不該碰到檔案"
 
 
 def test_a_target_that_is_not_a_position_array_says_why(
@@ -1610,15 +1718,14 @@ def test_a_target_that_is_not_a_position_array_says_why(
     """
     junk = '{"這不是": "題目陣列"}\n'
     catalog.ids = []
-    fs_setup(editor_page, files={TARGET_PATH: junk})
-    fill_valid_form(editor_page)
+    fill_valid_form(editor_page, choose=junk)
 
     attempt_write(editor_page, catalog, validator)
 
     assert "陣列" in note(editor_page), f"沒有說出原因:{note(editor_page)!r}"
     for name in FORM_FIELDS:
         assert value_of(editor_page, name) == VALID_FORM[name], f"{name} 的內容變了"
-    assert fs_files(editor_page) == {TARGET_PATH: junk}
+    assert fs_files(editor_page) == {TARGET_NAME: junk}
 
 
 def test_a_platform_write_failure_is_reported_and_keeps_everything(
@@ -1645,22 +1752,21 @@ def test_a_platform_write_failure_is_reported_and_keeps_everything(
         assert value_of(editor_page, name) == VALID_FORM[name], f"{name} 的內容變了"
 
 
-def test_a_failure_leaves_the_target_path_alone_too(
+def test_a_failure_leaves_the_chosen_file_alone_too(
     editor_page, catalog: Catalog, validator: Validator
 ) -> None:
-    """7.3 的「全部內容」包含目標檔案路徑 —— 清空**只在成功時**發生。
+    """失敗之後**選定的檔案還在** —— 不必為了重試再選一次。
 
-    分開問是因為 7.2 為那一欄開了特例(成功時保留),而特例最容易被寫成「不管成功
-    失敗都不動它」或「不管成功失敗都清掉」。這一條與上面那條成功的測試合起來,才把
-    那一欄的兩種情形都釘住。
+    這與 7.2 的「成功時保留」是同一件事的另一半:選定的檔案在**任何**情況下都不因
+    一次寫入嘗試而改變,只有維護者自己按下更換才會。
     """
     catalog.ids = []
-    fs_setup(editor_page, denied=True)
-    fill_valid_form(editor_page)
+    fill_valid_form(editor_page, choose="不是 JSON")
 
     attempt_write(editor_page, catalog, validator)
 
-    assert value_of(editor_page, "target") == VALID_FORM["target"]
+    assert note(editor_page) != ""
+    assert selected_name(editor_page) == TARGET_NAME
 
 
 # --- 寫入期間不得重複送出 ----------------------------------------------
@@ -1675,15 +1781,15 @@ def test_the_write_action_is_disabled_while_an_attempt_is_running(
     再各自整檔寫回,而**後寫的那一次讀到的是前一次寫回之前的內容** —— 先寫進去的那
     一題就這樣被蓋掉了。停用是把這條競態關掉最便宜的地方。
 
-    把授權那一步掛住來製造「進行中」:那是序列裡唯一等得住人的一步,真實情境裡它
-    等的正是維護者在對話框前面挑目錄的那幾秒。
+    把重讀那一步掛住來製造「進行中」:選檔已經不在序列裡了(它由自己的按鈕觸發),
+    所以序列裡等得最久的是磁碟與網路,而重讀是其中最好掛住的一步。
     """
     catalog.ids = []
-    fs_setup(editor_page, hold=True)
     fill_valid_form(editor_page)
+    fs_setup(editor_page, holdRead=True)
 
     editor_page.click(WRITE_BUTTON)
-    wait_for_acquire(editor_page)
+    wait_for_read(editor_page)
 
     assert not write_is_enabled(editor_page), "嘗試還在跑,寫入卻按得下去"
 

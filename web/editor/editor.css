@@ -54,6 +54,18 @@
   --text-base: 16px;
   --text-sm: 14px;
 
+  /*
+   * 三個難度分級的字色,**與列表頁、對局頁逐位元組相同**(`list.css` 是主要出處,
+   * 取捨的理由都寫在那裡:三色都是為深色底重新提亮過的,參考圖的白底色不能照抄)。
+   *
+   * 這一頁的難度是一個 `<select>`,不是一段唯讀的字,但顏色仍要一致 —— 收題的人
+   * 挑的就是「這一題在列表上會顯示成哪一色」。與檔首那段自訂屬性的說明同一個
+   * 前提:這是抄過來的一份副本,不是共用的一份。
+   */
+  --difficulty-easy-text: #3fd0c9;
+  --difficulty-medium-text: #ffc01e;
+  --difficulty-hard-text: #ff6363;
+
   /* 盤面的 `viewBox` 寬度 —— 放大超過原尺寸只會讓線條變糊。 */
   --board-max-width: 576px;
 
@@ -104,42 +116,29 @@ body {
   align-items: flex-start;
 }
 
-/* --- 頁首 ------------------------------------------------------------- */
+/* --- 不支援的說明 ----------------------------------------------------- */
 
 /*
- * `flex-basis: 100%` 讓頁首**獨佔第一行**,盤面與表單從第二行起排。
+ * **這一頁沒有頁首了。** 原本 `#page-head` 以 `flex-basis: 100%` 獨佔第一行,標題與
+ * 那段「這是維護工具」擺在裡面 —— 代價是盤面被往下推了一整塊,而收題的人是拿它與
+ * 對局頁的盤面對照的,兩頁的盤面**要落在同一個位置、同一個大小**。整塊拿掉之後,
+ * 本頁 `<body>` 的第一個排得出來的 flex item 就是 `#board`,與 `style.css` 那一頁
+ * 相同(兩份的 `padding`、`gap`、`--board-max-width` 本來就是同一組值)。
  *
- * 不把它塞進其中一欄:標題與那段「這是維護工具」講的是整頁,而不支援的說明
- * (`#unsupported`)更是 —— 它掀開時整頁都用不了,擠在表單欄裡會讓它看起來只是某
- * 一個欄位的錯誤。獨佔一行也讓它在窄畫面上仍然是第一眼看到的東西。
- */
-#page-head {
-  flex: 0 0 100%;
-  display: flex;
-  flex-direction: column;
-  gap: var(--stack-tight);
-}
-
-#page-head h1 {
-  margin: 0;
-  font-size: var(--text-lg);
-  line-height: 1.4;
-}
-
-.page-note {
-  margin: 0;
-  font-size: var(--text-sm);
-  color: var(--text-muted);
-}
-
-/*
- * 不支援的說明用與錯誤同一個形態(紅底)—— 它講的是「這一頁在這裡做不了事」,
- * 語氣不該比一個欄位填錯還輕。
+ * 那段說明搬進 `#entry` 的抬頭,標題本身則不再存在。
+ *
+ * `flex-basis: 100%` 留給不支援的說明自己:它掀開時整頁都用不了,擠在表單欄裡會
+ * 讓它看起來只是某一個欄位的錯誤。**它平時 `hidden`,`display: none` 的 flex item
+ * 既不佔位也不吃 gap**,盤面的位置因此不受它影響。
+ *
+ * 形態與錯誤相同(紅底)—— 它講的是「這一頁在這裡做不了事」,語氣不該比一個欄位
+ * 填錯還輕。
  *
  * **這裡不寫 `display`**:它只在 `hidden` 為假時才排得出來,而上方的
  * `[hidden] { display: none !important }` 是保險,規則本身不去挑戰它。
  */
 #unsupported {
+  flex: 0 0 100%;
   margin: 0;
   padding: 10px 14px;
   border-radius: var(--radius);
@@ -213,12 +212,60 @@ body {
   max-width: var(--entry-max-width);
 }
 
+/*
+ * 抬頭那一區是**兩行**:返回連結在上,說明在下。
+ *
+ * 連結是這一欄唯一可以按的東西,擺在最上面才落在視線的起點;說明是讀一次就不必
+ * 再讀的一句話,排在它底下。兩者曾經並排在同一行 —— 那一行右端的連結與左邊那句
+ * 長說明擠在一起,讀起來像同一句話的尾巴。
+ *
+ * `align-items: flex-start` 讓兩者都**靠左**,對齊底下每一個欄位的左緣 —— 這一欄
+ * 的內容自上而下就是一條直線,連結不該是唯一凸出去的那一個。連結只佔它自己的寬度
+ * (`align-items` 的預設 `stretch` 會讓它撐滿整欄,連結的可點區域就變成整行寬)。
+ *
+ * 多出來的這一行只在表單那一欄裡,**不影響盤面的位置** —— 盤面是另一個 flex item,
+ * 與對局頁對齊那件事只由「盤面之前有沒有東西」決定。
+ */
+#entry-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
 #entry h2 {
   margin: 0;
   font-size: var(--text-sm);
   font-weight: 700;
   letter-spacing: 1px;
   color: var(--text-muted);
+}
+
+/*
+ * 返回題庫列表。**這是 `style.css` 的 `.back-to-list` 抄過來的一份副本**,不是共用的
+ * 那一份 —— 兩份樣式表刻意不互相依賴(見檔首),而使用者在兩頁之間走動時,同一條
+ * 返回連結長得一樣才不會像兩個不同的東西。
+ *
+ * 不上樣式的話它會吃瀏覽器預設的藍紫底線,成為這個橘色調介面裡唯一的藍紫,看起來
+ * 像沒接上樣式。hover 才給底線:靜止時它是一段註腳,不該與旁邊的說明搶。
+ */
+.back-to-list {
+  flex: 0 0 auto;
+  display: inline-block;
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  text-decoration: none;
+}
+
+.back-to-list:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.back-to-list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /*
@@ -232,21 +279,50 @@ body {
   gap: 4px;
 }
 
-.field label {
+/*
+ * 欄位的抬頭。`.field-label` 是給**沒有控制項可以指**的那一欄用的 —— 目標題目檔那一
+ * 欄的操作是一顆按鈕加一段檔名,`<label for>` 沒有對象。兩者長得一樣是刻意的:對
+ * 使用者而言它們都是「這一格叫什麼」。
+ */
+.field label,
+.field .field-label {
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
 /*
- * 三種控制項共用同一套外觀:它們是同一張表單上的同一種東西,長得不一樣只會讓人
+ * 選檔按鈕(requirement 5.1)。**不填滿欄寬** —— 它是一個動作而不是一個輸入格,
+ * 與底下那些填滿的控制項長得一樣會讓人以為它是可以打字的。寬度因此由文字決定:
+ * 它與寫入那一顆同在 `#action-row` 裡,兩顆都只佔自己該有的寬度。
+ */
+#pick-file {
+  font: inherit;
+  padding: 6px 14px;
+  border: 1px solid #4f4f4f;
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+#pick-file:hover {
+  border-color: var(--accent);
+}
+
+#pick-file:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/*
+ * 兩種控制項共用同一套外觀:它們是同一張表單上的同一種東西,長得不一樣只會讓人
  * 以為填法不同。`font: inherit` 是必要的 —— 表單控制項預設用系統字型,不繼承 body
  * 的字族與字級,不寫的話中文會與頁面其餘部分明顯不同體。
  *
- * `width: 100%` 讓三者都填滿欄寬。`<input>` 的預設寬度來自 `size` 屬性、`<textarea>`
- * 來自 `cols`,兩者都與版面無關;交給容器決定才會隨著折行一起變。
+ * `width: 100%` 讓兩者都填滿欄寬。`<input>` 的預設寬度來自 `size` 屬性,與版面無關;
+ * 交給容器決定才會隨著折行一起變。
  */
 .field input,
-.field textarea,
 .field select {
   font: inherit;
   width: 100%;
@@ -257,22 +333,61 @@ body {
   color: var(--text);
 }
 
+/*
+ * 難度的三個分級各自帶顏色,**與列表頁、對局頁同一組色**(1 / 2 / 3 依序為簡單、
+ * 中等、困難,見 `.kiro/steering/structure.md` 的題目 schema;三個分級的**說法**
+ * 只出自 `web/difficulty.js`,收題頁的三個檔案裡一個字都不得寫)。收題的人挑的就是
+ * 「這一題在列表上會顯示成哪一色」,那一眼在這裡就該對得起來。
+ *
+ * 上色的是**收合狀態下的那個 `<select>` 自己**,由 `editor.js` 依當下的值寫上
+ * `data-level`(`renderDifficultyLevel`)—— `<select>` 的文字色不會跟著被選中的
+ * `<option>` 走,不寫這個屬性的話收合起來永遠是一般的白字。
+ *
+ * 展開的清單則靠 `<option>` 自己的 `value` 上色。那一份是**同一組色的第二個去處**,
+ * 不是備援:平台對展開清單的樣式支援不一(某些平台畫的是原生選單,顏色不吃),
+ * 收合狀態那一條因此不能省。
+ *
+ * 三個分級就是全部的選項(沒有「尚未選擇」那一個空選項),因此正常情形下這三條
+ * 必有一條命中。沒有 `data-level` 時吃的是控制項的一般字色。
+ */
+.field select[data-level="1"],
+.field select option[value="1"] {
+  color: var(--difficulty-easy-text);
+}
+
+.field select[data-level="2"],
+.field select option[value="2"] {
+  color: var(--difficulty-medium-text);
+}
+
+.field select[data-level="3"],
+.field select option[value="3"] {
+  color: var(--difficulty-hard-text);
+}
+
 .field input:focus-visible,
-.field textarea:focus-visible,
 .field select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
+
 /*
- * 描述可以很長(requirement 3.8 要它收得下換行),但這一欄不該把底下的欄位推到
- * 看不見的地方。`resize: vertical` 把調整權交給維護者,同時擋掉橫向拉寬 ——
- * 橫向拉寬會撐破欄寬而在整頁拉出橫向捲軸。
+ * 抬頭與它的提示排成一行(`.field-head`,標籤那一欄)。
+ *
+ * **這是為了高度。** 右邊那一欄的底邊不得低於盤面(requirement 8.6,由
+ * `tests/test_web_editor_layout.py` 釘住),而一句獨佔一行的提示要 22px。
+ * 兩段的字級與顏色相同、各自都短,並排讀起來仍是兩件事。
+ *
+ * `align-items: baseline` 讓兩段字坐在同一條基線上;`space-between` 把它們推到
+ * 兩端。`flex-wrap` 是窄畫面的保險:擠不下就折回上下兩行,而不是把字壓扁。
  */
-.field textarea {
-  min-height: 4.5em;
-  resize: vertical;
-  line-height: 1.6;
+.field-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--stack-tight);
 }
 
 /*
@@ -318,15 +433,25 @@ body {
 /* --- 寫入操作(4.1 的「不執行寫入」要有東西可停用)--------------------- */
 
 /*
- * 按鈕與它的停用說明是一組,間距用組內的那一階。
+ * 選檔與寫入排同一行,**自左而右並肩**。
  *
- * `align-items: flex-start` 讓按鈕只佔它自己的寬度:表單控制項撐滿欄寬是因為
- * 「打字的地方越寬越好填」,而一顆按鈕拉成 420px 寬只會讓點擊目標大得沒有道理。
+ * 兩者原本各佔一整塊上下疊著,而它們是收題的最後兩步,中間沒有要填的東西。並排
+ * 省下的那一塊高度**是這一頁塞得下的關鍵**:表單整欄因此收在盤面的高度之內,
+ * 收題的人在 FEN、盤面與這兩顆按鈕之間來回時不必捲動(requirement 8.6)。
+ *
+ * **不用 `space-between`**:推到兩端的話中間空出一大片,兩顆按鈕看起來像分屬兩個
+ * 不同的區塊,而它們是同一件事的兩步(先選檔、再寫入)。並肩之後那一行只有兩顆
+ * 按鈕該有的寬度,順序本身就說明了流程。
+ *
+ * `align-items: stretch` 把兩顆的**上下緣都拉齊** —— 它們的內距不同(選檔 6px、
+ * 寫入 8px),各自撐各自的高度時會差幾 px,那正是「看起來很醜」的來源。
+ *
+ * `flex-wrap` 是給極窄畫面的保險:塞不下就折成上下兩顆,而不是把按鈕壓扁。
  */
-#actions {
+#action-row {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
+  flex-wrap: wrap;
+  align-items: stretch;
   gap: var(--stack-tight);
 }
 
@@ -364,6 +489,9 @@ body {
  * 停用的理由(8.4)。它是整頁唯一一處**匯總**未通過項目的地方,存在的理由有二:
  * 一是被停用的按鈕本身說不出自己為什麼按不下去;二是 FEN 欄位空著時那一欄刻意
  * 不掛訊息(2.5),少了這一行就會有一項未通過完全不出現在畫面上。
+ *
+ * 它排在 `#action-row` **之外**、橫跨整欄:那句點名比按鈕本身寬得多,塞進右半欄
+ * 只會折成三四行,把那一行整個撐高。
  */
 #write-note {
   margin: 0;

@@ -55,7 +55,15 @@ CONTENT_TYPES = {
 }
 
 #: 表單欄位的順序,即 `check.js` 的 `checkForm()` 回傳清單的順序。
-FORM_FIELDS = ["id", "title", "description", "difficulty", "tags", "fen", "target"]
+FORM_FIELDS = ["id", "title", "fen", "difficulty", "tags"]
+
+#: 一開頁就已經有值的兩欄:難度預設中間那一級(`editor.js` 的 `DEFAULT_DIFFICULTY`),
+#: 標籤預設「連將殺」(`index.html` 的 `#field-tags`)。兩者都是「不填也對」的值 ——
+#: 題庫裡絕大多數題目就是這個組合,而它們照樣改得動。
+PREFILLED_FIELDS = ["difficulty", "tags"]
+
+#: 一開頁是空的、非填不可的三欄。它們才是「剛開頁時未通過」的那幾項。
+BLANK_FIELDS = [name for name in FORM_FIELDS if name not in PREFILLED_FIELDS]
 
 #: 各欄在畫面上的名稱。寫入操作旁的點名照著這些字念(8.4),維護者要靠它們回頭找到
 #: 是哪一格。**期望值寫在這裡,不回頭讀受測頁面的 `<label>`** —— 拿受測物自己的字
@@ -63,11 +71,9 @@ FORM_FIELDS = ["id", "title", "description", "difficulty", "tags", "fen", "targe
 FIELD_LABELS = {
     "id": "題號",
     "title": "局名",
-    "description": "描述",
     "difficulty": "難度",
     "tags": "標籤",
     "fen": "FEN",
-    "target": "目標檔案路徑",
 }
 
 #: 寫入操作(4.1「不執行寫入」要有東西可停用)與它旁邊那句說明(8.4)。
@@ -85,16 +91,12 @@ PUZZLE_FEN = "3ak4/3RaR3/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 w - - 0 1"
 VALID_FORM = {
     "id": "26",
     "title": "患在几席",
-    "description": "自己打的描述,不該被任何建議值蓋掉",
     "difficulty": "2",
     "tags": "解殺還殺 鐵門栓、悶宮",
     "fen": PUZZLE_FEN,
-    "target": "適情雅趣~卷一/26.json",
 }
 
 #: 題號 26、局名「患在几席」、書名「適情雅趣」時的描述建議值(3.6)。
-#: 寫法沿用既有題目:局號逐字中文數字,且**不含卷次**。
-EXPECTED_SUGGESTION = "適情雅趣 第二六局 患在几席"
 
 
 # --- 夾具與操作 ---------------------------------------------------------
@@ -162,7 +164,7 @@ def fill_valid_form(page, **overrides: str) -> None:
     """
     values = dict(VALID_FORM)
     values.update(overrides)
-    for name in ["id", "title", "difficulty", "tags", "fen", "target", "description"]:
+    for name in FORM_FIELDS:
         put(page, name, values[name])
 
 
@@ -242,26 +244,57 @@ def test_the_difficulty_options_come_from_the_difficulty_module(editor_page) -> 
         )"""
     )
 
-    assert [option["value"] for option in options] == ["", "1", "2", "3"], (
-        f"難度選項的取值不是「尚未選擇 + 三個分級」:{options}"
+    assert [option["value"] for option in options] == ["1", "2", "3"], (
+        f"難度選項的取值不是三個分級:{options}"
     )
-    assert [option["text"] for option in options[1:]] == labels, (
+    assert [option["text"] for option in options] == labels, (
         f"難度選項的說法與 difficulty.js 不一致:{options}"
     )
 
 
-def test_the_difficulty_starts_unchosen(editor_page) -> None:
-    """3.2:預設是「尚未選擇」,而且它必須留在第一個。
+def test_the_difficulty_starts_at_the_middle_level(editor_page) -> None:
+    """3.2:載入時預設選中中間那一級,而三個分級就是**全部**的選項。
 
-    `check.js` 的 `checkForm()` 以空字串判定「還沒選」;產生選項時若插到最前面,
-    維護者不做選擇也會寫進一個難度。
+    預設值原本是「尚未選擇」那一個空選項,理由是「不做選擇就不該寫進一個難度」——
+    實際收題時那個保護擋到的只有維護者自己:每一題都得手動點一次同一個選項。中間
+    那一級是不特別判斷時最可能對的答案,判斷得出來的那幾題照樣改得動。
 
-    還沒選是**還沒填**而不是填錯,因此難度那一格旁邊不掛訊息 —— 這一項未通過由
-    寫入操作旁的點名表達(見 `test_an_untouched_page_says_nothing_beside_any_field`)。
+    那個空選項也一併移除了:難度有了預設值之後,它只剩「把一格已經填好的東西清成
+    未填」這一個用途,而清成未填之後這一題就寫不出去。收題頁的難度因此**恆有值**,
+    三選一是真的三選一 —— 後半段釘住的就是這件事。
+
+    預設已經是一個合法的值,因此難度不再列在寫入操作旁的點名裡。
     """
-    assert value_of(editor_page, "difficulty") == ""
-    assert message(editor_page, "difficulty") == "", "還沒選難度不是填錯,不該掛訊息"
-    assert "難度" in note(editor_page), f"點名漏了還沒選的難度:{note(editor_page)!r}"
+    assert value_of(editor_page, "difficulty") == "2", "難度的預設不是中間那一級"
+    assert message(editor_page, "difficulty") == "", "難度預設就選好了,不該掛訊息"
+    assert "難度" not in note(editor_page), (
+        f"難度已有預設值,卻仍被點名為未通過:{note(editor_page)!r}"
+    )
+
+    blank = editor_page.evaluate(
+        """() => [...document.querySelectorAll('[data-field="difficulty"] option')]
+          .filter(option => option.value === '').length"""
+    )
+    assert blank == 0, "難度裡還有一個空選項"
+
+
+def test_the_tags_field_starts_at_the_commonest_tag(editor_page) -> None:
+    """標籤的預設值是「連將殺」。
+
+    題庫裡絕大多數題目就是連將殺,一題一題重打同三個字是純粹的手工。與難度的預設
+    同一個取捨:預設值會被寫進題目檔,因此只放「不填也對」的那一個,而不同的那幾題
+    照樣改得動 —— 後半段就是在驗這件事。
+
+    有預設值也表示它一開頁就是通過的:那一格不掛訊息,也不列在寫入操作旁的點名裡。
+    """
+    assert value_of(editor_page, "tags") == "連將殺"
+    assert message(editor_page, "tags") == "", "標籤預設就填好了,不該掛訊息"
+    assert "標籤" not in note(editor_page), (
+        f"標籤已有預設值,卻仍被點名為未通過:{note(editor_page)!r}"
+    )
+
+    put(editor_page, "tags", "解殺還殺、悶宮")
+    assert value_of(editor_page, "tags") == "解殺還殺、悶宮", "預設值改不掉"
 
 
 def test_the_difficulty_field_accepts_no_value_outside_the_three_levels(
@@ -281,7 +314,9 @@ def test_the_difficulty_field_accepts_no_value_outside_the_three_levels(
     with pytest.raises(PlaywrightError):
         editor_page.select_option(control("difficulty"), "4", timeout=1000)
 
-    assert value_of(editor_page, "difficulty") == ""
+    assert value_of(editor_page, "difficulty") == "2", (
+        "選不到的那一個值把難度改掉了 —— 它該停在原本的預設上"
+    )
 
 
 def test_the_difficulty_labels_are_written_in_no_editor_file() -> None:
@@ -297,6 +332,39 @@ def test_the_difficulty_labels_are_written_in_no_editor_file() -> None:
         text = path.read_text(encoding="utf-8")
         found = [label for label in labels if label in text]
         assert not found, f"{path.name} 裡寫死了難度說法 {found}"
+
+
+#: 三個難度分級在列表頁上的字色(`web/list.css` 是主要出處,對局頁的 `style.css`
+#: 已與它逐位元組相同)。收題頁抄的是同一組值 —— 收題的人挑的就是「這一題在列表上
+#: 會顯示成哪一色」,差一階就對不起來。
+DIFFICULTY_COLOURS = {
+    "1": "rgb(63, 208, 201)",
+    "2": "rgb(255, 192, 30)",
+    "3": "rgb(255, 99, 99)",
+}
+
+
+@pytest.mark.parametrize("level", ["1", "2", "3"])
+def test_the_chosen_difficulty_is_coloured_like_the_list(editor_page, level: str) -> None:
+    """8.3:選中的難度以**與列表頁相同的顏色**顯示。
+
+    量的是收合狀態下那個 `<select>` 的實際字色,不是樣式表的文字 —— `<select>` 的
+    顏色不會跟著被選中的 `<option>` 走,少了 `editor.js` 寫上的 `data-level` 就永遠
+    是一般的白字,而那正是這一條要抓的失敗。
+
+    期望值寫在測試裡(`DIFFICULTY_COLOURS`),不回頭讀受測頁面自己的自訂屬性:拿受
+    測物當期望值的話,兩邊一起改壞也不會轉紅。
+    """
+    put(editor_page, "difficulty", level)
+
+    colour = editor_page.evaluate(
+        """selector => getComputedStyle(document.querySelector(selector)).color""",
+        control("difficulty"),
+    )
+
+    assert colour == DIFFICULTY_COLOURS[level], (
+        f"難度 {level} 的顏色是 {colour},與列表頁的 {DIFFICULTY_COLOURS[level]} 不同"
+    )
 
 
 # --- 多個標籤(3.3)-----------------------------------------------------
@@ -324,119 +392,6 @@ def test_several_tags_can_be_entered_in_one_go(editor_page) -> None:
     assert parsed == ["解殺還殺", "鐵門栓", "悶宮"], f"標籤沒有被切成三個:{parsed}"
 
 
-# --- 描述建議值(3.6、3.7)---------------------------------------------
-
-
-def test_a_description_is_suggested_once_the_id_and_title_are_filled(
-    editor_page,
-) -> None:
-    """3.6:題號與局名皆已填而描述仍為空時,給出一個描述建議值。
-
-    書名取自目標路徑的第一段(切掉 `~` 之後的卷次),寫法沿用既有題目 ——
-    局號是**逐字**中文數字。
-    """
-    put(editor_page, "target", VALID_FORM["target"])
-    put(editor_page, "id", VALID_FORM["id"])
-    put(editor_page, "title", VALID_FORM["title"])
-
-    assert value_of(editor_page, "description") == EXPECTED_SUGGESTION
-
-
-def test_the_suggested_description_leaves_the_volume_out(editor_page) -> None:
-    """3.6:資料夾帶卷次,描述只寫書名(`structure.md` 的 Naming Conventions)。
-
-    這一條與上一條分開寫:上一條整串比對,壞掉時看不出是哪一部分錯了;而「卷次
-    跟著跑進描述」是這裡最可能出的一種錯,值得單獨說一句。
-    """
-    put(editor_page, "target", VALID_FORM["target"])
-    put(editor_page, "id", VALID_FORM["id"])
-    put(editor_page, "title", VALID_FORM["title"])
-
-    suggestion = value_of(editor_page, "description")
-    assert "~" not in suggestion and "卷" not in suggestion, (
-        f"建議值帶出了卷次:{suggestion}"
-    )
-    assert message(editor_page, "description") == "", "描述已有建議值,不該再說它沒填"
-
-
-def test_the_suggestion_appears_even_when_the_target_is_filled_last(
-    editor_page,
-) -> None:
-    """3.6:三欄的填寫順序不影響建議值 —— 它是當下那三個值的函式。
-
-    書名來自目標路徑,因此「先填題號局名、後填路徑」是很自然的順序,而只在填局名
-    那一刻算一次的實作會在這個順序下永遠給不出建議值。
-    """
-    put(editor_page, "id", VALID_FORM["id"])
-    put(editor_page, "title", VALID_FORM["title"])
-    assert value_of(editor_page, "description") == "", "還不知道書名就先湊了一個建議值"
-
-    put(editor_page, "target", VALID_FORM["target"])
-
-    assert value_of(editor_page, "description") == EXPECTED_SUGGESTION
-
-
-def test_a_typed_description_is_never_replaced_by_a_suggestion(editor_page) -> None:
-    """3.7:描述的最終值以維護者輸入的內容為準。
-
-    先打自己的描述,再回頭填題號與局名 —— 建議值每一次輸入變動都會重算,重算若
-    蓋掉這一句,3.7 就等於沒有實作。
-    """
-    put(editor_page, "description", "自己打的描述")
-
-    put(editor_page, "target", VALID_FORM["target"])
-    put(editor_page, "id", VALID_FORM["id"])
-    put(editor_page, "title", VALID_FORM["title"])
-
-    assert value_of(editor_page, "description") == "自己打的描述"
-
-
-def test_the_suggestion_can_be_overwritten_and_the_overwrite_survives(
-    editor_page,
-) -> None:
-    """3.6 + 3.7:建議值出現後可被覆寫,覆寫值不因後續的每一次鍵入而消失。
-
-    這是本任務最細的一處:改寫之後再去動別的欄位,每一次都會重算建議值,而此刻
-    描述欄裡的字已經不是工具給的那一句了。
-    """
-    put(editor_page, "target", VALID_FORM["target"])
-    put(editor_page, "id", VALID_FORM["id"])
-    put(editor_page, "title", VALID_FORM["title"])
-    assert value_of(editor_page, "description") == EXPECTED_SUGGESTION
-
-    put(editor_page, "description", "改寫過的描述")
-    put(editor_page, "title", "另一個局名")
-    put(editor_page, "id", "27")
-    put(editor_page, "tags", "悶宮")
-
-    assert value_of(editor_page, "description") == "改寫過的描述"
-
-
-def test_no_suggestion_before_both_the_id_and_the_title_are_filled(editor_page) -> None:
-    """3.6:條件是**兩者皆已填**,只填一個時不猜一個描述出來。"""
-    put(editor_page, "target", VALID_FORM["target"])
-
-    put(editor_page, "id", VALID_FORM["id"])
-    assert value_of(editor_page, "description") == "", "只填了題號就湊出建議值"
-
-    put(editor_page, "id", "")
-    put(editor_page, "title", VALID_FORM["title"])
-    assert value_of(editor_page, "description") == "", "只填了局名就湊出建議值"
-
-
-def test_no_suggestion_while_the_id_is_not_a_positive_integer(editor_page) -> None:
-    """3.6 的前提:題號不合格式時湊不出局號,不得給出一個帶著壞題號的建議值。
-
-    判準沿用 `check.js` —— 組裝層不自己再寫一份「什麼是正整數」。
-    """
-    put(editor_page, "target", VALID_FORM["target"])
-    put(editor_page, "title", VALID_FORM["title"])
-    put(editor_page, "id", "二六")
-
-    assert value_of(editor_page, "description") == ""
-    assert message(editor_page, "id"), "題號不合格式,畫面卻沒有指出這一項"
-
-
 # --- 未通過項目的呈現與寫入停用(4.1、4.2、4.6、8.4)--------------------
 
 
@@ -453,7 +408,7 @@ def test_a_complete_form_says_nothing_and_enables_writing(editor_page) -> None:
     assert write_is_enabled(editor_page), "七項全過,寫入操作卻仍停用"
 
 
-@pytest.mark.parametrize("missing", FORM_FIELDS)
+@pytest.mark.parametrize("missing", BLANK_FIELDS + ["tags"])
 def test_a_missing_required_field_is_named_in_the_note_and_stops_writing(
     editor_page, missing: str
 ) -> None:
@@ -463,8 +418,13 @@ def test_a_missing_required_field_is_named_in_the_note_and_stops_writing(
     的說明),這一條因此同時釘住兩件事:那一格安靜,而那一項未通過並沒有消失。
     兩者少了任何一件,4.1 或 8.4 就有一個不成立。
 
-    逐欄參數化涵蓋全部七欄(含難度與 FEN):只把點名接到其中一兩欄的實作,單一案例
-    照樣會綠。難度的「空」是選回第一個選項,`put()` 已經吸收掉這個差別。
+    逐欄參數化涵蓋每一個清得空的欄位(含 FEN):只把點名接到其中一兩欄的實作,單一
+    案例照樣會綠。
+
+    **難度不在其中,而且不是漏了**:它的選項就是三個分級,畫面上選不出空的
+    (見 `test_the_difficulty_starts_at_the_middle_level`)。`check.js` 那條空值檢查
+    仍留著,由 `tests/test_web_editor_pure.py` 直接對純函式驗 —— 規則是「難度必須是
+    三個分級之一」,而不是「畫面上剛好選不到空的」。
     """
     fill_valid_form(editor_page, **{missing: ""})
 
@@ -478,34 +438,41 @@ def test_a_missing_required_field_is_named_in_the_note_and_stops_writing(
 
 
 def test_an_untouched_page_says_nothing_beside_any_field(editor_page) -> None:
-    """4.1、8.4:剛開頁時七個欄位一句話都不說,但七項全數列在寫入操作旁。
+    """4.1、8.4:剛開頁時每一個欄位一句話都不說,而空著的那幾項列在寫入操作旁。
 
     這是本輪定案的規則:**還沒填不是填錯**。一開頁就在每一格旁邊掛一句紅字,等於在
-    維護者還沒開始之前先說了七次錯,而之後真正的錯字反而混在裡面看不出來。表單還沒
-    填完是一件事,整份講一次就夠。
+    維護者還沒開始之前先說了好幾次錯,而之後真正的錯字反而混在裡面看不出來。表單還
+    沒填完是一件事,整份講一次就夠。
 
-    「沒有變成看不見」由後半段保證:寫入停用,而且每一項都點得出名字。
+    「沒有變成看不見」由後半段保證:寫入停用,而且空著的每一項都點得出名字。
+
+    **有預設值的兩欄不在點名裡**(難度與標籤,見 `PREFILLED_FIELDS`)—— 它們一開頁
+    就是通過的,點名它們等於指著一格已經填好的東西說未通過。
     """
     for name in FORM_FIELDS:
+        assert message(editor_page, name) == "", f"{name} 還沒動過就掛著訊息"
+
+    for name in BLANK_FIELDS:
         assert value_of(editor_page, name) == "", f"{name} 一開頁就有值,前提不成立"
-        assert message(editor_page, name) == "", f"{name} 還沒填就掛著訊息"
 
     text = note(editor_page)
-    for name in FORM_FIELDS:
+    for name in BLANK_FIELDS:
         assert label_of(name) in text, f"點名漏了 {name}:{text!r}"
-    assert not write_is_enabled(editor_page), "七欄全空,寫入操作卻可用"
+    for name in PREFILLED_FIELDS:
+        assert label_of(name) not in text, f"{name} 有預設值卻被點名:{text!r}"
+    assert not write_is_enabled(editor_page), "還有欄位空著,寫入操作卻可用"
 
 
-#: 填了、但填錯的七種輸入。**這些必須留在欄位旁** —— 維護者已經寫了東西而那個東西
-#: 不對,訊息離那一格越遠越難對照(8.4)。描述與難度不在此列:兩者的淺層檢查只有
-#: 「有沒有填」,不存在「填錯」的形態。
+#: 填了、但填錯的四種輸入。**這些必須留在欄位旁** —— 維護者已經寫了東西而那個東西
+#: 不對,訊息離那一格越遠越難對照(8.4)。難度不在此列:它的淺層檢查只有「有沒有
+#: 選」,不存在「填錯」的形態。
+#:
+#: 目標檔案路徑那兩個案例隨 R5 的修訂消失了 —— 沒有路徑可以打錯(5.2、5.3 已移除)。
 WRONGLY_FILLED = [
     pytest.param("id", "26.5", id="id-not-an-integer"),
     pytest.param("id", "0", id="id-not-positive"),
     pytest.param("tags", "、,  ", id="tags-only-separators"),
     pytest.param("fen", "9/9/9 w - - 0 1", id="fen-three-rows"),
-    pytest.param("target", "26.json", id="target-outside-a-book-folder"),
-    pytest.param("target", "/適情雅趣~卷一/26.json", id="target-absolute"),
 ]
 
 

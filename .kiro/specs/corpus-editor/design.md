@@ -233,7 +233,7 @@ sequenceDiagram
 | 2.1, 2.2, 2.5 | 貼上即重繪、紅方在下、清空即空盤 | `editor.js`、`board.js`(重用) | `renderBoard` | 寫入流程前段 |
 | 2.3 | 盤面不可互動 | `board.js`(重用) | `renderBoard` 傳空 `legalMoves` | — |
 | 2.4 | 無法解析要顯示訊息且不留舊盤面 | `check.js` | `checkFenStructure` | — |
-| 2.6 | 起手方由 FEN 顯示,無獨立輸入 | `editor.js`、`check.js` | `sideFromFen` | — |
+| 2.6 | 起手方無獨立輸入(不呈現) | `index.html` | — | — |
 | 3.1, 3.3 | 四欄位、多標籤 | `web/editor/index.html`、`editor.js` | DOM 契約 | — |
 | 3.2 | 難度三選一 | `editor.js`、`difficulty.js`(重用) | `DIFFICULTY_LABELS` | — |
 | 3.4, 3.5 | 不提供 `max_dtm` 與出處輸入 | `web/editor/index.html` | DOM 契約 | — |
@@ -326,8 +326,6 @@ interface CheckModule {
   checkFenStructure(fen: string): CheckIssue | null;
   /** 把標籤輸入切成陣列,去除空白與空項。 */
   parseTags(raw: string): string[];
-  /** 由 FEN 的走子方欄位取得起手方顯示字樣;無法判定時回 null。 */
-  sideFromFen(fen: string): '紅先' | '黑先' | null;
 }
 ```
 
