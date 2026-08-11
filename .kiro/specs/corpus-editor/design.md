@@ -2,13 +2,13 @@
 
 ## Overview
 
-**Purpose**:本功能為題庫維護者提供收題工具,把「手打 JSON 收題」這件事變成畫面上看得見、送出前擋得住的流程。貼上 FEN 立刻畫出盤面供肉眼核對,五個欄位填齊並通過驗證後,一鍵把新題附加進指定的題目檔。
+**Purpose**:本功能為題庫維護者提供收題工具,把「手打 JSON 收題」這件事變成畫面上看得見、送出前擋得住的流程。貼上 FEN 立刻畫出盤面供肉眼核對,四個欄位填齊並通過驗證後,一鍵把新題附加進選定的題目檔。
 
 **Users**:題庫維護者(目前為單人)。工具只由網址進入,產品的列表頁與對局頁不提供任何入口。
 
 **Impact**:`web/` 新增一個獨立的頁面目錄 `web/editor/`;`service/` 新增一個**唯讀**的候選題目驗證端點。服務端**不取得任何寫入題庫的能力** —— 檔案由瀏覽器透過 File System Access API 直接寫入,上線題庫仍只經由 git commit 進版本庫。
 
-收題頁**不設存取控制**:它能寫的只有使用者自己以系統對話框選定的本機目錄,伺服器的題庫碰不到,因此頁面被公開存取不構成風險。驗證端點同理不設開關 —— 它只列出合法著法、不搜尋、不回評分,成本低於既有且已公開的對局端點。**真正新增的風險是它讓使用者文字第一次到達引擎的輸入**,對策是字元層級的把關而非存取控制。
+收題頁**不設存取控制**:它能寫的只有使用者自己以系統對話框選定的那一個本機檔案,伺服器的題庫碰不到,因此頁面被公開存取不構成風險。驗證端點同理不設開關 —— 它只列出合法著法、不搜尋、不回評分,成本低於既有且已公開的對局端點。**真正新增的風險是它讓使用者文字第一次到達引擎的輸入**,對策是字元層級的把關而非存取控制。
 
 ### Goals
 
@@ -22,9 +22,10 @@
 - 修改或刪除既有題目 —— 本工具只新增
 - 判斷題目是否紅先必勝、產生或回填 `max_dtm` —— 屬 corpus-verification
 - 圖形化擺子產生 FEN —— 本輪只接受貼上的 FEN 字串
-- 跨頁面重載保留目錄授權 —— 平台的寫入權限本就隨分頁關閉而失效
+- 跨頁面重載保留檔案授權 —— 平台的寫入權限本就隨分頁關閉而失效
 - 服務端寫入題庫的任何能力
-- 支援 Firefox 與 Safari —— 兩者不實作本機目錄選取,已知且接受
+- 支援 Firefox 與 Safari —— 兩者不實作本機檔案選取,已知且接受
+- **新建題目檔** —— 檔案選擇框只選得到既有檔案(requirements 5.4 移出範圍)
 
 ## Boundary Commitments
 
@@ -52,7 +53,7 @@
 
 - 前端:`web/fen.js`(`parseFen`、`FILES`、`RANKS`)、`web/board.js`(`renderBoard`)、`web/difficulty.js`(`DIFFICULTY_LABELS`)、`web/api.js`(`ApiErrorCode`)—— 全部唯讀匯入
 - 後端:`service/positions.py`(新增的公開驗證包裝)、`service/engine/pool.py`(借引擎)、`service/models.py`(請求模型)、`service/config.py`(逾時設定,唯讀取用)、`service/errors.py`
-- 平台:File System Access API(`showDirectoryPicker` 及其控制代碼)
+- 平台:File System Access API(`showOpenFilePicker` 及其檔案控制代碼)
 - **依賴方向不變**:`types / errors -> config -> positions / engine -> game | editor -> models -> main`。`service/editor.py` 與 `game.py` 同層,**不得互相匯入**
 
 ### Revalidation Triggers
@@ -132,7 +133,7 @@ graph TB
 | Layer | Choice / Version | Role in Feature | Notes |
 |-------|------------------|-----------------|-------|
 | Frontend | vanilla JS ES modules + SVG | 收題頁的全部行為 | 無新增依賴,無建置步驟 |
-| Frontend 平台 API | File System Access API | 目錄授權與檔案讀寫 | Chrome / Edge / Opera 86+;Firefox 與 Safari 不支援 |
+| Frontend 平台 API | File System Access API | 檔案選取、授權與讀寫 | Chrome / Edge / Opera 86+;Firefox 與 Safari 不支援 |
 | Backend | FastAPI(既有版本) | 候選題目的驗證端點與 FEN 字元把關 | 無新增套件 |
 | Backend 驗證 | `service/positions.py` 既有實作 | 題目 schema 的唯一權威 | 加一層公開包裝,規則不複製 |
 | Engine | Pikafish(既有版本鎖定) | 裸 FEN 的可載入性判定 | 重用 `legal_moves`,不改引擎層 |
@@ -149,7 +150,7 @@ web/
     ├── editor.css            # 收題頁專屬版面。須自帶盤面的尺寸規則(對局頁的
     │                         # `#board svg` 那組在 style.css,不會套到本頁)
     ├── editor.js             # 組裝與 DOM:事件、狀態、呼叫其餘三個模組
-    ├── check.js              # 純函式:表單淺層檢查、FEN 結構檢查、路徑檢查、描述建議值
+    ├── check.js              # 純函式:表單淺層檢查、FEN 結構檢查
     ├── corpus-file.js        # 純函式:一題的序列化、追加到既有檔案文字
     └── fs.js                 # File System Access API 的唯一接觸點
 
@@ -161,7 +162,11 @@ tests/
 ├── test_editor_service.py     # service/editor.py 與 validate_position()
 ├── test_editor_endpoint.py    # 驗證端點,含 FEN 字元把關的拒絕路徑
 ├── test_web_editor_pure.py    # check.js 與 corpus-file.js 的純函式,經 page.evaluate()
-├── test_web_editor.py         # 收題頁的互動與失敗路徑
+├── test_web_editor_write.py   # 收題頁的寫入流程:撞號、驗證、選檔、寫回、結果呈現
+├── test_web_editor_board.py   # 貼上 FEN 的繪盤與盤面不可互動
+├── test_web_editor_fields.py  # 欄位互動、難度選項與檢查結果呈現
+├── test_web_editor_fs.py      # fs.js 對平台 API 的分支(以平台替身)
+├── test_web_editor_layout.py  # 版面(以 file:// 供檔,不執行 editor.js)
 └── test_web_editor_entry.py   # 產品頁面不含收題頁入口的回歸檢查
 ```
 
@@ -169,9 +174,11 @@ tests/
 
 - `service/models.py` — 新增驗證端點的請求模型、`FEN_PATTERN` 與其欄位驗證器。**沿用 `UCI_MOVE_PATTERN` 加 `field_validator` 的既有形狀**,錯誤類別相同
 - `service/main.py` — 註冊 editor 路由;啟動掛鉤建立 `EditorService`
-- `service/positions.py` — 新增公開函式 `validate_position()`,是既有 `_read_position()` 的薄包裝。**模組的「唯讀」契約不變**
+- `service/positions.py` — 新增公開函式 `validate_position()`,是既有 `_read_position()` 的薄包裝。**模組的「唯讀」契約不變**;另**自必填欄位清單移除 `description`**(3.10)
+- `service/types.py` — `Position.description` 改為可空(3.10)
+- `.kiro/steering/structure.md` — schema 表格中 `description` 標為選填(3.10)。**定義權在此,程式碼只是跟著它走**
 
-> `web/fen.js`、`web/board.js`、`web/difficulty.js`、`web/api.js`、`web/style.css`、`service/config.py`、`service/game.py`、`service/engine/` **一律不修改**。`_WebFiles` 的既有遮蔽規則不變 —— 收題頁是普通靜態內容。
+> `web/fen.js`、`web/board.js`、`web/difficulty.js`、`web/api.js`、`web/style.css`、`service/config.py`、`service/game.py`、`service/engine/` **一律不修改**。`web/list.js` 與 `web/app.js` 同樣不動 —— 兩者都不渲染 `description`,schema 改選填對它們沒有影響(這一點須實測確認,不是推論)。`_WebFiles` 的既有遮蔽規則不變 —— 收題頁是普通靜態內容。
 
 ## System Flows
 
@@ -185,9 +192,14 @@ sequenceDiagram
     participant Fs as fs js
     participant Disk as 題目檔
 
+    User->>Page: 按下選擇題目檔
+    Page->>Fs: 開啟檔案選擇框
+    Fs-->>User: 系統檔案選擇框
+    User-->>Fs: 選定 json 並允許編輯
+    Page->>Page: 顯示目前選定的檔名
     User->>Page: 貼上 FEN
     Page->>Page: 結構檢查與繪盤
-    User->>Page: 填入五個欄位與目標路徑
+    User->>Page: 填入四個欄位
     Page->>Page: 淺層檢查,未過則停用寫入
     User->>Page: 按下寫入
     Page->>Api: 取題庫索引
@@ -195,12 +207,9 @@ sequenceDiagram
     Page->>Page: 撞號檢查,聯集本分頁已寫入題號
     Page->>Api: 送出候選題目
     Api-->>Page: 驗證結果
-    Page->>Fs: 取得目錄授權
-    Fs-->>User: 系統目錄選擇框
-    User-->>Fs: 選定並允許
     Page->>Fs: 重讀目標檔
     Fs->>Disk: 讀取
-    Disk-->>Fs: 既有文字或不存在
+    Disk-->>Fs: 既有文字
     Page->>Page: 文字層追加
     Page->>Fs: 寫回
     Fs->>Disk: 落盤
@@ -209,9 +218,10 @@ sequenceDiagram
 
 **流程層級的決定**:
 
-- **授權請求發生在按下寫入之後**,不在頁面載入時 —— 平台要求授權必須由使用者手勢觸發,且 6.4 要求未授權前仍可繪盤與填寫。
-- **目標檔在授權之後才重讀**,不在填表時先讀 —— 把「讀檔到寫檔」的視窗壓到最小,降低期間被外部改動而遭覆蓋的風險。
-- **撞號檢查與候選驗證都在取得授權之前完成** —— 不合格的題目不該讓使用者先跳一次目錄選擇框。
+- **選檔是一個獨立的、由使用者主動觸發的步驟**,不是寫入序列的一環(requirements R5 的修訂)。它因此天然落在使用者手勢的呼叫堆疊內 —— 舊設計把授權排在驗證之後,而驗證是一次網路往返,實測手勢的有效期只有約 5 秒(見 `tasks.md` 對 5.3 的筆記),一次引擎池滿就會讓對話框開不起來。**這條修訂順帶把那個缺口關掉了。**
+- **選檔在填表之前或之後都行**,只有按下寫入時才要求它已完成(5.10)。6.4 因此仍然成立:沒選檔照樣繪盤與填寫。
+- **目標檔在寫入序列中才重讀**,不在選檔時先讀 —— 把「讀檔到寫檔」的視窗壓到最小,降低期間被外部改動而遭覆蓋的風險。
+- **撞號檢查與候選驗證都在重讀之前完成** —— 不合格的題目不該讓工具去動磁碟。
 - **本分頁已寫入題號只在寫入成功後才記下** —— 失敗的嘗試不得佔用題號。
 
 ## Requirements Traceability
@@ -224,26 +234,32 @@ sequenceDiagram
 | 2.3 | 盤面不可互動 | `board.js`(重用) | `renderBoard` 傳空 `legalMoves` | — |
 | 2.4 | 無法解析要顯示訊息且不留舊盤面 | `check.js` | `checkFenStructure` | — |
 | 2.6 | 起手方由 FEN 顯示,無獨立輸入 | `editor.js`、`check.js` | `sideFromFen` | — |
-| 3.1, 3.3, 3.8 | 五欄位、多標籤、描述可換行 | `web/editor/index.html`、`editor.js` | DOM 契約 | — |
+| 3.1, 3.3 | 四欄位、多標籤 | `web/editor/index.html`、`editor.js` | DOM 契約 | — |
 | 3.2 | 難度三選一 | `editor.js`、`difficulty.js`(重用) | `DIFFICULTY_LABELS` | — |
 | 3.4, 3.5 | 不提供 `max_dtm` 與出處輸入 | `web/editor/index.html` | DOM 契約 | — |
-| 3.6, 3.7 | 描述建議值,可自由改寫 | `check.js` | `suggestDescription` | — |
+| 3.6–3.8 | ~~描述建議值、可自由改寫、可換行~~ **(已移除)** | — | `suggestDescription` 連同呼叫端一併刪除 | — |
+| 3.9 | 不提供描述輸入,亦不寫出描述 | `web/editor/index.html`、`corpus-file.js` | DOM 契約;`SCHEMA_FIELDS` | — |
+| 3.10 | 題目 schema 的描述改為選填 | `service/positions.py`、`service/types.py`、`service/main.py`、`structure.md` | `Position`、`CatalogEntry` | — |
 | 4.1, 4.2, 4.6 | 必填、題號正整數、標籤至少一個 | `check.js` | `checkForm` | 淺層檢查 |
 | 4.3, 4.4, 4.5 | 撞號檢查含本分頁已寫入者 | `editor.js` | `catalog.js` 的 `loadCatalog` + 分頁內集合 | 寫入流程 |
 | 4.7, 4.8, 4.9 | 權威驗證與引擎可載入性;確認失敗即不寫入 | `service/editor.py` | `POST /api/editor/validate` | 寫入流程 |
 | 4.10 | 不判斷紅先必勝 | `service/editor.py` | 驗證僅涵蓋 schema 與可載入性 | — |
-| 5.1, 5.2, 5.3 | 路徑輸入與範圍限制 | `check.js` | `checkTargetPath` | — |
-| 5.4, 5.5, 5.6 | 新建、追加、非陣列即拒絕 | `corpus-file.js` | `appendPosition` | 寫入流程 |
+| 5.1, 5.11 | 以檔案選擇框選定目標題目檔,並可更換 | `fs.js`、`editor.js` | `pickCorpusFile` | 選檔流程 |
+| 5.2, 5.3 | ~~路徑範圍限制~~ **(已移除)** | — | `checkTargetPath` 連同呼叫端一併刪除 | — |
+| 5.10 | 尚未選定時不寫入並說明 | `editor.js` | `selectedFile` | 寫入流程前段 |
+| 5.4 | ~~目標檔不存在即新建~~ **(移出範圍)** | — | `appendPosition` 的 `null` 分支不再有呼叫端 | — |
+| 5.5, 5.6 | 追加、非陣列即拒絕 | `corpus-file.js` | `appendPosition` | 寫入流程 |
 | 5.7 | 既有題目逐字不變 | `corpus-file.js` | 文字層追加 | 寫入流程 |
 | 5.8, 5.9 | 排版一致、只寫 schema 欄位 | `corpus-file.js` | `serializePosition` | — |
-| 6.1, 6.2 | 首次寫入才請求授權;拒絕時保留內容 | `fs.js`、`editor.js` | `acquireCorpusDirectory` | 寫入流程 |
+| 6.1, 6.2 | 首次選檔時請求授權並沿用;拒絕時保留內容 | `fs.js`、`editor.js` | `pickCorpusFile` | 選檔流程 |
 | 6.3 | 不支援的瀏覽器要明講 | `fs.js`、`editor.js` | `isSupported` | — |
-| 6.4 | 未授權前仍可繪盤與填寫 | `editor.js` | 狀態機 | — |
-| 7.1, 7.2, 7.3 | 成功訊息、清空欄位保留路徑、失敗保留內容 | `editor.js` | 狀態機 | 寫入流程末段 |
+| 6.4 | 未選檔前仍可繪盤與填寫 | `editor.js` | 狀態機 | — |
+| 7.1, 7.2, 7.3 | 成功訊息、清空欄位保留選定檔、失敗保留內容 | `editor.js` | 狀態機 | 寫入流程末段 |
 | 7.4, 7.5, 7.6 | 不改不刪、不提供編修操作 | `corpus-file.js`、`web/editor/index.html` | 文字層追加;無編修 DOM | — |
 | 8.1, 8.2 | 左盤右表單、盤面外觀一致 | `editor.css`、`board.js`(重用) | — | — |
 | 8.3 | 繁體中文與難度例外 | 全前端模組 | `DIFFICULTY_LABELS` | — |
 | 8.4 | 指出是哪一項未通過 | `check.js`、`editor.js` | `CheckIssue` 清單 | — |
+| 8.5, 8.6 | FEN 排在題號局名之後;桌面尺寸不需捲動 | `web/editor/index.html`、`editor.css` | DOM 順序 | — |
 | 9.1, 9.2, 9.3 | 控制字元、非法字元、超長 FEN 一律拒絕且不送往引擎 | `service/models.py` | `FEN_PATTERN` 欄位驗證器 | 攔在路由函式之前 |
 | 9.4 | 沿用既有著法格式驗證的錯誤類別 | `service/models.py` | `INVALID_MOVE_FORMAT` | — |
 | 9.5 | 此檢查不判定局面合法性 | `service/models.py`、`service/editor.py` | 字元集把關與引擎判定分屬兩層 | — |
@@ -269,7 +285,9 @@ sequenceDiagram
 | Field | Detail |
 |-------|--------|
 | Intent | 把表單當下的值翻成一份「哪裡還不對」的清單,不碰 DOM、不發請求 |
-| Requirements | 2.4, 2.6, 3.6, 3.7, 4.1, 4.2, 4.6, 5.1, 5.2, 5.3, 8.4 |
+| Requirements | 2.4, 2.6, 4.1, 4.2, 4.6, 8.4 |
+
+> **修訂:`checkTargetPath()` 與 `suggestDescription()` 連同其測試一併刪除。** 前者的對象(手打的路徑字串)已不存在(5.2、5.3 移除);後者的產物(描述)已不存在(3.6–3.8 移除)。**不留無呼叫端的函式** —— 一份沒有人用的純函式仍要被維護、被閱讀、在改 schema 時被誤以為是權威。
 
 **Responsibilities & Constraints**
 
@@ -288,7 +306,7 @@ sequenceDiagram
 ```typescript
 /** 一項未通過的檢查。`field` 對應表單欄位名,`null` 表示不屬於任一欄位。 */
 interface CheckIssue {
-  field: 'id' | 'title' | 'description' | 'difficulty' | 'tags' | 'fen' | 'target' | null;
+  field: 'id' | 'title' | 'difficulty' | 'tags' | 'fen' | null;
   message: string;
 }
 
@@ -296,11 +314,9 @@ interface CheckIssue {
 interface FormValues {
   id: string;
   title: string;
-  description: string;
   difficulty: string;
   tags: string;
   fen: string;
-  target: string;
 }
 
 interface CheckModule {
@@ -308,14 +324,10 @@ interface CheckModule {
   checkForm(values: FormValues): CheckIssue[];
   /** FEN 的結構檢查:列數、每列格數、走子方欄位。 */
   checkFenStructure(fen: string): CheckIssue | null;
-  /** 目標路徑:須在題庫目錄內、須位於書目資料夾內、須為 .json。 */
-  checkTargetPath(target: string): CheckIssue | null;
   /** 把標籤輸入切成陣列,去除空白與空項。 */
   parseTags(raw: string): string[];
   /** 由 FEN 的走子方欄位取得起手方顯示字樣;無法判定時回 null。 */
   sideFromFen(fen: string): '紅先' | '黑先' | null;
-  /** 描述的建議值,例如「適情雅趣 第二五局 患在几席」。 */
-  suggestDescription(source: string, id: number, title: string): string;
 }
 ```
 
@@ -325,8 +337,6 @@ interface CheckModule {
 
 **Implementation Notes**
 
-- Integration:`checkTargetPath` 的「書目資料夾內」判準為路徑至少兩段(資料夾 + 檔名),與 `service/positions.py` 的 `_source_of_path()` 同一條規則。**該規則的權威在後端**,此處是為了在送出前就給回饋
-- Validation:`suggestDescription` 的局號採逐字中文數字(`25` → 「二五」),與既有題目的寫法一致,非「二十五」
 - Risks:路徑檢查若與後端判準漂移,後果是使用者被前端擋下但後端本可接受 —— 方向安全(偏保守),不會讓壞資料通過
 
 #### corpus-file.js
@@ -334,7 +344,9 @@ interface CheckModule {
 | Field | Detail |
 |-------|--------|
 | Intent | 決定「一題在題庫檔中長什麼樣」,以及如何把它接到既有檔案文字之後 |
-| Requirements | 5.4, 5.5, 5.6, 5.7, 5.8, 5.9, 7.4 |
+| Requirements | 5.5, 5.6, 5.7, 5.8, 5.9, 7.4 |
+
+> **修訂:`SCHEMA_FIELDS` 去掉 `description`(3.9);`appendPosition` 的 `null` 分支失去呼叫端(5.4 移出範圍)。** 該分支**保留**而不刪除:它是本模組對外契約的一部分、由測試釘住、且是純函式沒有維護成本,而 5.4 只是移出本輪範圍不是被否決 —— 日後補上「另存新檔」時它就是現成的。`check.js` 那兩個函式的處置刻意相反,差別在**它們有沒有可能回來**。
 
 **Responsibilities & Constraints**
 
@@ -356,7 +368,6 @@ interface CheckModule {
 interface PositionEntry {
   id: number;
   title: string;
-  description: string;
   fen: string;
   difficulty: number;
   tags: string[];
@@ -399,52 +410,59 @@ interface CorpusFileModule {
 | Field | Detail |
 |-------|--------|
 | Intent | File System Access API 的**唯一**接觸點,使其餘模組可在無此 API 的環境下被測試 |
-| Requirements | 6.1, 6.2, 6.3 |
+| Requirements | 5.1, 5.10, 5.11, 6.1, 6.2, 6.3 |
+
+> **修訂:由目錄控制代碼改為檔案控制代碼(requirements R5 的修訂)。** 原本授權整個題庫目錄,再由組裝層以相對路徑定位目標檔。改成直接選定那一個 `.json` 之後,本模組少掉一整層路徑解析,而**打錯路徑寫到別的檔**這個失敗模式在構造上不再存在。授權範圍也從整個題庫目錄縮到單一檔案,符合最小權限。
 
 **Responsibilities & Constraints**
 
-- 集中平台 API 的呼叫;`editor.js` 不直接觸碰 `showDirectoryPicker` 或控制代碼
-- 目錄控制代碼**只存在模組層變數中**,不進 IndexedDB —— 平台的寫入權限本就隨分頁關閉而失效,持久化救不回權限(見 `research.md` Decision 4)
-- 授權請求必須在使用者手勢的呼叫堆疊內發生
+- 集中平台 API 的呼叫;`editor.js` 不直接觸碰 `showOpenFilePicker` 或控制代碼
+- 檔案控制代碼**只存在模組層變數中**,不進 IndexedDB —— 平台的寫入權限本就隨分頁關閉而失效,持久化救不回權限(見 `research.md` Decision 4)
+- 選檔與授權請求必須在使用者手勢的呼叫堆疊內發生
+- **不做路徑判斷,也做不到**:`FileSystemFileHandle` 只帶得出 `name`(檔名),不帶所在位置。「這個檔在不在題庫裡」因此不是本層回答得了的問題 —— 保護來自維護者在系統對話框裡親眼看見自己選了什麼,以及 5.6 的「不是題目陣列就不寫」
 
 **Dependencies**
 
-- External:File System Access API — 目錄選取與檔案讀寫(P0)
+- External:File System Access API — 檔案選取與讀寫(P0)
 
-**Contracts**: Service [x] / API [ ] / Event [ ] / Batch [ ] / State [ ]
+**Contracts**: Service [x] / API [ ] / Event [ ] / Batch [ ] / State [x]
 
 ##### Service Interface
 
 ```typescript
-/** 平台不支援本機目錄選取時拋出。 */
+/** 平台不支援本機檔案選取時拋出。 */
 declare class UnsupportedBrowserError extends Error {}
-/** 使用者拒絕授權或取消目錄選擇時拋出。 */
+/** 使用者拒絕授權或取消檔案選擇時拋出。 */
 declare class PermissionDeniedError extends Error {}
 
 interface FsModule {
-  /** 目前瀏覽器是否提供本機目錄選取。 */
+  /** 目前瀏覽器是否提供本機檔案選取。 */
   isSupported(): boolean;
   /**
-   * 取得題庫目錄的控制代碼。已取得者直接回傳,不重複詢問。
-   * 必須自使用者手勢觸發。
+   * 開啟系統檔案選擇框選定目標題目檔,並要到寫入授權。
+   * 必須自使用者手勢觸發。每次呼叫都重新詢問 —— 它同時是 5.11 的「更換目標題目檔」。
    */
-  acquireCorpusDirectory(): Promise<FileSystemDirectoryHandle>;
-  /** 讀取相對路徑的檔案全文;檔案不存在時回傳 null。 */
-  readTextAt(dir: FileSystemDirectoryHandle, relativePath: string): Promise<string | null>;
-  /** 寫入相對路徑的檔案,必要時建立中間資料夾以外的目標檔。 */
-  writeTextAt(dir: FileSystemDirectoryHandle, relativePath: string, text: string): Promise<void>;
+  pickCorpusFile(): Promise<FileSystemFileHandle>;
+  /** 目前選定的檔案;尚未選定時為 null。同一分頁內沿用,不重複詢問(6.1)。 */
+  selectedFile(): FileSystemFileHandle | null;
+  /** 讀取選定檔案的全文。 */
+  readText(handle: FileSystemFileHandle): Promise<string>;
+  /** 整檔覆寫。 */
+  writeText(handle: FileSystemFileHandle, text: string): Promise<void>;
 }
 ```
 
-- **Preconditions**:`acquireCorpusDirectory` 只能於使用者手勢的處理常式內呼叫
-- **Postconditions**:`writeTextAt` 回傳時內容已落盤(串流已 `close()`)
-- **Invariants**:同一分頁內只詢問一次目錄;`readTextAt` 對不存在的檔案回傳 `null` 而非拋出
+- **Preconditions**:`pickCorpusFile` 只能於使用者手勢的處理常式內呼叫
+- **Postconditions**:`writeText` 回傳時內容已落盤(串流已 `close()`);`pickCorpusFile` 兌現後 `selectedFile()` 即回傳同一個控制代碼
+- **Invariants**:`selectedFile()` 不開任何對話框,因此任何時候都呼叫得起;本模組不解析、也不宣稱知道檔案的所在位置
 
 **Implementation Notes**
 
-- Integration:`writeTextAt` 對既有檔案採**整檔覆寫**,內容為 `appendPosition` 的輸出。既有題目的不變性由該輸出保證,不由寫入方式保證
+- Integration:`writeText` 採**整檔覆寫**,內容為 `appendPosition` 的輸出。既有題目的不變性由該輸出保證,不由寫入方式保證
+- Integration:`showOpenFilePicker` 帶 `id`(讓瀏覽器記住上次的資料夾)與 `.json` 的型別過濾,並限定單選。**不用 `showSaveFilePicker`** —— 它對既有檔案會問「是否取代」,而本工具的常態是追加
 - Validation:`isSupported` 於頁面載入時即評估,不支援時 6.3 的訊息立刻呈現而非等到按下寫入
 - Risks:讀檔與寫檔之間目標檔若被外部改動(編輯器、git 操作),追加會覆蓋該次改動。以「按下寫入時才重讀」把視窗壓到最小;不建鎖機制 —— 單人本機工具,代價不成比例
+- Risks:選檔之後檔案被刪除或改名時,`getFile()` 拋出平台錯誤。它沒有專屬型別,歸 7.3 的一般寫入失敗處理
 
 ### 前端 / 組裝層
 
@@ -453,11 +471,11 @@ interface FsModule {
 | Field | Detail |
 |-------|--------|
 | Intent | 事件接線、頁面狀態、DOM 更新。唯一知道 DOM 存在的模組 |
-| Requirements | 2.1–2.6, 3.1–3.3, 3.6–3.8, 4.3–4.5, 6.4, 7.1–7.3, 8.4 |
+| Requirements | 2.1–2.6, 3.1–3.3, 4.3–4.5, 5.1, 5.10, 5.11, 6.4, 7.1–7.3, 8.4 |
 
 **Responsibilities & Constraints**
 
-- 持有頁面狀態:目錄控制代碼是否已取得、**本分頁已成功寫入的題號集合**、當前的檢查清單
+- 持有頁面狀態:**本分頁已成功寫入的題號集合**、當前的檢查清單、上一次嘗試的結果。**選定的檔案不在其中** —— 它是 `fs.js` 的模組層狀態,本層只經 `selectedFile()` 讀,不另存一份
 - 不實作任何檢查規則、不實作序列化、不直接呼叫平台 API —— 三者各由專屬模組承擔
 - 難度選項自 `DIFFICULTY_LABELS` 產生,不在此另寫一份說法
 
@@ -472,7 +490,7 @@ interface FsModule {
 ##### State Management
 
 - **狀態模型**:
-  - `directory: FileSystemDirectoryHandle | null` — 分頁存續期間有效
+  - 選定的檔案**不在本層狀態內**:`fs.js` 的 `selectedFile()` 是唯一真相來源,重複記一份遲早分家
   - `writtenIds: Set<number>` — **只在寫入成功後加入**,失敗的嘗試不佔用題號(4.4)
   - `issues: CheckIssue[]` — 當前未通過的檢查,驅動 8.4 的呈現與寫入按鈕的停用
 - **持久化**:無。收題頁不寫 localStorage,也不持久化控制代碼
@@ -480,7 +498,8 @@ interface FsModule {
 
 **Implementation Notes**
 
-- Integration:寫入序列為「取索引 → 撞號 → 送驗證 → 取授權 → 重讀目標檔 → 追加 → 寫回 → 記下題號並清空欄位」。前三步在授權之前完成,不合格的題目不讓使用者先跳一次目錄選擇框
+- Integration:寫入序列為「取索引 → 撞號 → 送驗證 → 重讀目標檔 → 追加 → 寫回 → 記下題號並清空欄位」。**選檔不在序列內** —— 它由自己的按鈕觸發(5.1、5.11),因此天然落在使用者手勢的呼叫堆疊內。舊設計把授權排在驗證之後,而驗證是一次網路往返;實測手勢有效期僅約 5 秒,一次引擎池滿就會讓對話框開不起來(見 `tasks.md` 對 5.3 的筆記)。**這條修訂把那個缺口關掉了**
+- Integration:序列開始時以 `selectedFile()` 確認已選檔,未選則不寫入並說明(5.10)
 - Validation:FEN 輸入的每一次變動都重跑 `checkFenStructure` 並重繪;結構不合法時清掉盤面而非留著上一個(2.4)
 - Risks:`GET /api/catalog` 在服務重啟期間可能失敗。此時寫入不成立,落在 7.3 的一般失敗處理 —— 這是移除原 4.10 之後刻意接受的歸屬,**不另立分支**
 
@@ -606,6 +625,28 @@ class CandidatePositionRequest(BaseModel):
 - **`_WebFiles` 不變**:收題頁是普通靜態內容,不需要任何遮蔽
 - 既有的四個端點、題庫索引、引擎池與前端掛載**行為不變**(1.3)
 
+### 後端 / 題目 schema 的描述改為選填(3.10)
+
+| Field | Detail |
+|-------|--------|
+| Intent | 讓 `description` 成為選填,使收題頁寫出的五欄位題目能被服務接受 |
+| Requirements | 3.10 |
+
+> **這是本輪唯一跨出 corpus-editor 邊界的改動。** schema 的定義權屬 `structure.md` 與 position-corpus(見 Boundary Commitments 的 Out of Boundary)。本 spec **不取得**定義權,只在其 tasks 中執行這項已由 requirements 3.10 記下的變更,並同步更新 `structure.md` —— 那份文件才是日後的依據。
+
+**Responsibilities & Constraints**
+
+- `service/positions.py`:必填欄位清單移除 `description`;缺此欄位時**不再是錯誤**
+- `service/types.py`:`Position.description` 改為可空,預設為空字串
+- `service/main.py`:`CatalogEntry.description` 同步改為可空 —— 索引端點的回應形狀因此可能少一個欄位的內容
+- `structure.md`:schema 表格中 `description` 標為選填,並記下理由
+- **既有題目一律帶著描述,不需要任何資料遷移**;`PositionRepository.load()` 對它們的判定完全不變
+
+**Implementation Notes**
+
+- Validation:回歸網是「既有題庫的每一題仍載得進去」加上「一份**不帶** `description` 的題目也載得進去」。兩者缺一不可 —— 只驗後者的話,一個把 `description` 從允許欄位裡一併刪掉的實作也會通過,而那會讓既有題目全數被判為含未知欄位
+- Risks:前端 `list.js` 與 `app.js` 都**不渲染** `description`(見 requirements 3 的修訂說明),所以少了它畫面上不會有任何變化。這一點必須實測而不是推論 —— 它是「改 schema 不影響產品」這個判斷的全部依據
+
 ## Data Models
 
 ### 候選題目的資料契約
@@ -616,12 +657,13 @@ class CandidatePositionRequest(BaseModel):
 |---|---|---|---|
 | `id` | `int` | 表單題號 | 題庫檔、撞號檢查 |
 | `title` | `str` | 表單局名 | 題庫檔 |
-| `description` | `str` | 表單描述(可含換行) | 題庫檔 |
 | `fen` | `str` | 表單 FEN | 題庫檔、引擎可載入性 |
 | `difficulty` | `int` | 難度三選一(1/2/3) | 題庫檔 |
 | `tags` | `list[str]` | 標籤輸入切分後 | 題庫檔 |
 
-**不在契約內**:`max_dtm`(由 corpus-verification 回填)、`source`(由資料夾表達)、`side_to_move`(由 FEN 表達)。前端不產生這三者,後端驗證會因未知欄位而拒絕(既有 `_check_fields()` 的行為)。
+**不在契約內**:`description`(整欄移除,3.9)、`max_dtm`(由 corpus-verification 回填)、`source`(由資料夾表達)、`side_to_move`(由 FEN 表達)。前端不產生這四者,後端驗證會因未知欄位而拒絕(既有 `_check_fields()` 的行為)。
+
+> **修訂:六欄降為五欄。** `description` 移除之後 schema 必須讓它成為**選填**(3.10),否則收題頁寫出的每一題都會被 `PositionRepository.load()` 判為缺少必填欄位 —— 服務啟動不起來。這是本輪唯一跨出 corpus-editor 邊界的改動,見下方「題目 schema 的描述改為選填」。
 
 ### 題目檔的文字結構
 
@@ -629,7 +671,7 @@ class CandidatePositionRequest(BaseModel):
 
 | 形態 | 判定 | 輸出 |
 |---|---|---|
-| 不存在 | `readTextAt` 回 `null` | 只含一個元素的陣列 |
+| 不存在 | ~~`readTextAt` 回 `null`~~ **(無呼叫端)** | 只含一個元素的陣列 |
 | 空陣列 | 解析後長度為 0 | 插入單一元素,**不補逗號** |
 | 非空陣列 | 解析後長度大於 0 | 為前一個元素補逗號後插入 |
 | 非陣列 | 解析失敗或非陣列 | 拋出 `CorpusFileError`,不寫入(5.6) |
@@ -643,7 +685,7 @@ class CandidatePositionRequest(BaseModel):
 | 類別 | 例子 | 呈現 | 表單內容 |
 |---|---|---|---|
 | 可自行修正 | 必填未填、題號撞號、FEN 不合法、路徑不在書目資料夾內 | 定位到欄位(8.4) | 保留 |
-| 環境限制 | 瀏覽器不支援、拒絕目錄授權 | 頁面層級訊息 | 保留(6.2) |
+| 環境限制 | 瀏覽器不支援、拒絕檔案授權或取消選擇、尚未選定目標檔 | 頁面層級訊息 | 保留(6.2、5.10) |
 | 服務或檔案失敗 | 服務不可用、逾時、目標檔非陣列、寫入失敗 | 頁面層級訊息 | 保留(7.3) |
 
 **三類一律保留表單內容** —— 只有寫入成功才清空(7.2)。這條規則沒有例外,因為任何一次清空都可能讓維護者重抄一次 FEN。
@@ -678,11 +720,10 @@ class CandidatePositionRequest(BaseModel):
 ### 純函式測試(Playwright `page.evaluate()`)
 
 1. `serializePosition()` 對**既有題庫檔中的每一題**重新序列化後與原檔片段逐字相同 —— 排版漂移的回歸網
-2. `appendPosition()` 的三種形態:不存在、空陣列、非空陣列;非陣列輸入拋 `CorpusFileError`
+2. `appendPosition()` 的三種形態:不存在、空陣列、非空陣列;非陣列輸入拋 `CorpusFileError`。**「不存在」那一種已無呼叫端**(5.4 移出範圍),測試保留 —— 它釘住的是模組契約,而該分支日後補上「另存新檔」時就是現成的
 3. `appendPosition()` 的輸出以 `existing` 為前綴直到收尾的 `]`(5.7 的構造性保證)
 4. `checkForm()` 對各種缺漏回傳定位到正確欄位的清單,順序與表單一致
-5. `checkTargetPath()` 擋下題庫根目錄的檔案與跳出題庫目錄的路徑(5.2、5.3)
-6. `suggestDescription()` 的局號為逐字中文數字,與既有題目寫法一致
+5. ~~`checkTargetPath()`~~、~~`suggestDescription()`~~ **(連同函式一併刪除)** —— 5.2、5.3 與 3.6–3.8 已移除
 
 ### E2E / UI Tests(Playwright)
 
@@ -692,10 +733,12 @@ class CandidatePositionRequest(BaseModel):
 4. 題號與既有題目撞號時擋下並指出重複的題號(4.3)
 5. 同一分頁連續寫入兩題且第二題與第一題撞號時擋下 —— 索引尚未更新亦然(4.4)
 6. 驗證端點回 503 時不寫入且訊息為「確認未能完成」(4.9)
-7. 寫入成功後題目欄位清空、目標檔案路徑保留(7.2);寫入失敗後全部內容保留(7.3)
+7. 寫入成功後題目欄位清空、**選定的檔案保留**(7.2);寫入失敗後全部內容保留(7.3)
+9. 未選定目標題目檔時不寫入並說明(5.10);更換檔案後寫入落到新的檔(5.11)
+10. **schema 改選填的回歸網**:既有題庫的每一題仍載得進去,且一份不帶 `description` 的題目也載得進去(3.10)
 8. 列表頁與對局頁的 DOM 中不存在指向 `/editor/` 的連結(1.2)
 
-> 檔案系統操作以注入的 `fs.js` 替身驗證,不在測試中真的觸發系統目錄選擇框 —— 那個對話框無法由 Playwright 操作。`fs.js` 本身的正確性由 `isSupported()` 的分支測試與人工驗收覆蓋,這是刻意接受的覆蓋缺口。
+> 檔案系統操作以注入的 `fs.js` 替身驗證,不在測試中真的觸發系統檔案選擇框 —— 那個對話框無法由 Playwright 操作。`fs.js` 本身的正確性由 `isSupported()` 的分支測試與人工驗收覆蓋,這是刻意接受的覆蓋缺口。
 
 ## Security Considerations
 
@@ -706,4 +749,4 @@ class CandidatePositionRequest(BaseModel):
 - **引擎資源的消耗低於既有的公開端點。** `POST /api/black-move` 已公開且執行真正的 `go nodes` 搜尋,成本高一個量級。針對驗證端點設限而放著更貴的端點不管,防不到任何實際的濫用者。整體的速率限制屬 service-deploy-ops,不在本 spec。
 - **真正新增的攻擊面是輸入注入,對策是字元把關。** 這是專案中第一條使用者文字到達引擎輸入的路徑,而引擎協定行導向、`_position_command()` 是裸的字串插值。把關以白名單字元集加長度上限進行,攔在路由函式之前(9.1–9.4)。**開關解不了這個問題** —— 它只限制誰打得到,不讓輸入變安全,而本機開發時它照樣是開的。
 - **把關的層級刻意止於「不能跳出這一行指令」。** 不做 FEN 文法驗證:局面合法性由引擎判定是 `tech.md` 的不可動搖約束,在此重做一份只會製造第二個真相來源與誤擋(9.5)。
-- **路徑穿越**:目標路徑的範圍限制(5.3)由前端 `checkTargetPath()` 與平台本身共同承擔 —— File System Access API 的控制代碼**只能在使用者選定的目錄樹內解析路徑**,跳不出去。前端檢查是為了給出清楚訊息,不是唯一防線。
+- **路徑穿越:構造上不存在。** 本工具不再處理任何路徑字串(5.2、5.3 已移除)—— 它拿到的是使用者在系統對話框裡親手選定的**單一檔案控制代碼**,而控制代碼不接受路徑、也解析不出目錄。可寫的範圍因此恰好是那一個檔案,比舊設計的「整個題庫目錄」更窄。誤選一個題庫以外的檔案由 5.6 擋下(它不是題目陣列),而維護者在對話框裡看得見自己選了什麼。
