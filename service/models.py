@@ -1,6 +1,6 @@
 """HTTP 層的請求與回應模型,以及著法格式驗證(5.2)。
 
-依賴方向為 `types / errors -> config -> positions / engine -> game -> models -> main`,
+依賴方向為 `types / errors -> config -> positions / engine -> game / editor -> models -> main`,
 本模組位於 `main` 之左:可向左匯入領域型別與錯誤型別,**不得** import `main.py`。
 領域型別一律由 `types.py` 匯入,**絕不在此重新定義** —— 兩份同名列舉的成員永遠不
 相等,`is` 比較與 `isinstance` 會靜默失效。本模組只做邊界轉換:把領域物件攤平成

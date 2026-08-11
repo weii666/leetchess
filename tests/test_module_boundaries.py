@@ -1,6 +1,6 @@
 """依賴方向與循環匯入的測試(對應 design 的 File Structure Plan)。
 
-依賴方向:types / errors  ->  config  ->  positions / engine  ->  game  ->  models  ->  main
+依賴方向:types / errors  ->  config  ->  positions / engine  ->  game / editor  ->  models  ->  main
 `types.py` 與 `errors.py` 位於最左端,不得 import 任何其他 service 模組。
 """
 
@@ -29,6 +29,19 @@ POSITIONS_ALLOWED_SERVICE_MODULES = ENGINE_ALLOWED_SERVICE_MODULES
 
 #: `models.py` 位於右端第二層:除了 `main` 以外皆可向左依賴。
 MODELS_FORBIDDEN_SERVICE_MODULES = {"service.main"}
+
+#: 中間層的兩個服務。**同層,而且不得互相匯入**(corpus-editor 的 design 明文)。
+#:
+#: 兩者各自對著引擎池與題庫做自己的事:`game.py` 管一局棋的進行,`editor.py` 管一份
+#: 候選題目合不合格。任一方向的匯入都會把「對局」與「收題」綁在一起,而收題頁是
+#: 維護者的工具、隨時可能整個拿掉 —— 拿掉時不該牽動任何一行對局的程式碼。
+PEER_SERVICES = ["game", "editor"]
+
+#: 中間層可以向左依賴的範圍:題庫、引擎與更左邊的一切。
+PEER_ALLOWED_SERVICE_MODULES = POSITIONS_ALLOWED_SERVICE_MODULES | {
+    "service.positions",
+    "service.engine",
+}
 
 
 def _imported_module_names(source_path: pathlib.Path) -> set[str]:
@@ -111,6 +124,32 @@ def test_models_does_not_import_the_application_module() -> None:
         root = ".".join(name.split(".")[:2])
         assert root not in MODELS_FORBIDDEN_SERVICE_MODULES, (
             f"models.py 不得 import {name}"
+        )
+
+
+@pytest.mark.parametrize("module", PEER_SERVICES)
+def test_the_peer_services_do_not_import_each_other(module: str) -> None:
+    """`game.py` 與 `editor.py` 同層,**任一方向的匯入都不允許**。
+
+    corpus-editor 的 design 對 `service/editor.py` 明文寫下這條(「與 `game.py` 同層,
+    兩者不得互相匯入」),但在此之前沒有任何測試守著它 —— 兩邊都要借引擎、都要讀
+    題庫,一句「這個工具函式那邊已經有了」就會把它們接起來。
+
+    接起來的代價不對稱:收題頁是維護者的工具,隨時可能整個拿掉,而拿掉時不該牽動
+    任何一行對局的程式碼。反過來,對局是產品本身,它更不該為了收題而改。
+    """
+    path = SERVICE_DIR / f"{module}.py"
+    assert path.is_file(), f"{path} 必須存在"
+
+    peers = {f"service.{name}" for name in PEER_SERVICES if name != module}
+    for name in _imported_module_names(path):
+        assert not name.startswith("."), f"{module}.py 不得使用相對匯入 {name}"
+        if not name.startswith("service"):
+            continue
+        root = ".".join(name.split(".")[:2])
+        assert root not in peers, f"{module}.py 不得 import 同層的 {name}"
+        assert root in PEER_ALLOWED_SERVICE_MODULES, (
+            f"{module}.py 不得 import {name} —— 中間層只能向左依賴"
         )
 
 

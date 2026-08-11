@@ -1,6 +1,6 @@
 """領域型別。
 
-依賴方向為 `types / errors -> config -> positions / engine -> game -> models -> main`,
+依賴方向為 `types / errors -> config -> positions / engine -> game / editor -> models -> main`,
 本模組位於最左端,**不得 import 任何其他 service 模組**。
 
 領域型別集中於此是刻意的:`Position`(題庫)與 `GameState`(對局)都需要 `Side`,

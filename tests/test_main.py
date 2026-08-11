@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import ast
 import concurrent.futures
 import json
 import os
@@ -582,6 +583,39 @@ def test_shutdown_leaves_no_engine_subprocess_behind(
 
 
 # --- 併發閘門的位置 -----------------------------------------------------
+
+
+def test_every_route_is_a_sync_def_so_it_lands_in_the_threadpool() -> None:
+    """路由一律是同步 `def`,**一個 `async def` 都不能有**。
+
+    這整段「併發閘門的位置」的推理都建立在一件事上:FastAPI 對同步 `def` 路由會自動
+    丟進 threadpool(engine-service 的 design),因此路由裡那些**阻塞**的引擎往返
+    ——`readline()` 等引擎回話 —— 不會佔住事件迴圈。
+
+    把任何一個路由改成 `async def`,它就直接在事件迴圈上跑,而那一行阻塞的讀取會把
+    **整個服務**凍住:同時間所有其他請求,包括不碰引擎的題庫索引,全都停下來等。
+    上面那兩條 threadpool 容量的測試在那時仍然全綠 —— 它們量的是 limiter 的數字,
+    而一個 `async def` 路由根本不會去碰那個 limiter。
+
+    這是本檔唯一以原始碼判定的測試。理由是它問的東西在執行期看不出來:一個
+    `async def` 路由在功能上完全正常,只有在併發之下才會顯現,而那時候看到的是
+    「服務偶爾整個卡住」——最難從症狀回推到原因的一種故障。
+    """
+    main_py = pathlib.Path(__file__).resolve().parent.parent / "service" / "main.py"
+    assert main_py.is_file(), f"{main_py} 必須存在"
+    tree = ast.parse(main_py.read_text(encoding="utf-8"), str(main_py))
+
+    decorated_async = [
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef)
+        and any(isinstance(decorator, ast.Call) for decorator in node.decorator_list)
+    ]
+
+    assert decorated_async == [], (
+        f"這些路由被寫成了 async def:{decorated_async}。"
+        "同步 def 才會被丟進 threadpool,async def 會讓阻塞的引擎往返凍住事件迴圈"
+    )
 
 
 @pytest.mark.parametrize("pool_size", [1, 4, 16, 64, 256])

@@ -1,6 +1,6 @@
 """錯誤模型:錯誤類別列舉、服務例外型別、對 HTTP 狀態的映射。
 
-依賴方向為 `types / errors -> config -> positions / engine -> game -> models -> main`,
+依賴方向為 `types / errors -> config -> positions / engine -> game / editor -> models -> main`,
 本模組位於最左端,**不得 import 任何其他 service 模組**。
 
 `ErrorCode` 的字串值是對外契約(5.1):前端據此決定 UI 行為,重構時不得變動。

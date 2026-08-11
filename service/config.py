@@ -1,6 +1,6 @@
 """服務設定:池容量、各項逾時與總時間預算、搜尋節點數、題庫路徑。
 
-依賴方向為 `types / errors -> config -> positions / engine -> game -> models -> main`,
+依賴方向為 `types / errors -> config -> positions / engine -> game / editor -> models -> main`,
 本模組只能向左依賴 `types.py` 與 `errors.py`,**不得** import 更右邊的模組。
 
 ## 時間預算

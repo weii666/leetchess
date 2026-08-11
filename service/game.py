@@ -1,6 +1,6 @@
 """GameService:對局推進的判定 —— 輪方推導、終局認定、黑方應手與三態信號。
 
-依賴方向為 `types / errors -> config -> positions / engine -> game -> models -> main`,
+依賴方向為 `types / errors -> config -> positions / engine -> game / editor -> models -> main`,
 本模組只能向左依賴 `types`、`errors`、`config`、`positions` 與 `engine`,**不得**
 import `models.py` 或 `main.py`。領域型別一律由 `types.py` 匯入,**絕不在此重新
 定義** —— 兩份同名型別會讓 `isinstance` 與日後 `models.py` 的 Pydantic 轉換靜默失效。

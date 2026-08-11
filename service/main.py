@@ -1,7 +1,7 @@
 """FastAPI 應用的組裝:五個端點、前端靜態檔的掛載、啟動與關閉掛鉤、`ServiceError`
 的錯誤映射。
 
-依賴方向為 `types / errors -> config -> positions / engine -> game -> models -> main`,
+依賴方向為 `types / errors -> config -> positions / engine -> game / editor -> models -> main`,
 本模組位於最右端:可向左匯入全部,但**沒有任何模組匯入它**。這使 app 的組裝方式
 與各層的實作互不牽制。
 

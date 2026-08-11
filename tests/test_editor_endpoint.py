@@ -254,6 +254,10 @@ def test_a_fen_with_control_characters_never_reaches_the_engine(
     assert response.status_code == 400, case
     assert response.json()["code"] == "INVALID_MOVE_FORMAT", case
     assert pool.borrows == 0, f"{case}:不合格的 FEN 不得吃掉併發閘門的名額"
+    # 指令記錄非空是下一句斷言的**前提**:引擎池在建構時就與每個引擎握了手,所以
+    # 這裡本來就有東西。少了這一行,一個「指令記錄根本沒接上」的替身會讓下一句
+    # 空洞地通過 —— 它問的是「`quit` 不在裡面」,而空清單裡什麼都不在。
+    assert service.engine_commands(), f"{case}:指令記錄是空的,下一句斷言問不出東西"
     assert not any("quit" in command for command in service.engine_commands()), (
         f"{case}:被擋下的內容不得出現在送往引擎的任何一道指令裡"
     )

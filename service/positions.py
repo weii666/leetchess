@@ -1,6 +1,6 @@
 """題庫索引與依題號取題(需求 6.1、6.2、6.3)。
 
-依賴方向為 `types / errors -> config -> positions / engine -> game -> models -> main`,
+依賴方向為 `types / errors -> config -> positions / engine -> game / editor -> models -> main`,
 本模組只能向左依賴 `types.py`、`errors.py` 與 `config.py`,**不得** import `game.py`
 或更右邊的模組。`Position` 由 `types.py` 匯入,**絕不在此重新定義** —— 兩份同名型別
 會讓 `isinstance` 檢查與日後 `models.py` 的 Pydantic 轉換靜默失效。
