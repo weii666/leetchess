@@ -1,6 +1,7 @@
 /**
- * 收題頁的組裝層:把七個欄位接到盤面、難度選項、描述建議值、淺層檢查與撞號檢查上
- * (tasks 4.2、4.3、5.1;requirements 2.1–2.6、3.2、3.3、3.6、3.7、4.1–4.6、8.3、8.4)。
+ * 收題頁的組裝層:把七個欄位接到盤面、難度選項、描述建議值、淺層檢查、撞號檢查與
+ * 權威驗證上(tasks 4.2、4.3、5.1、5.2;requirements 2.1–2.6、3.2、3.3、3.6、3.7、
+ * 4.1–4.9、8.3、8.4)。
  *
  * 這是收題頁依賴鏈的最右端,也是**唯一知道 DOM 存在的模組**(design 的
  * Components and Interfaces)。`check.js` 是純函式、`corpus-file.js` 是純函式、
@@ -14,10 +15,11 @@
  * 層再存一份狀態,而那份狀態遲早與輸入框裡的字分家 —— 使用者核對的會是一個已經
  * 不在輸入框裡的局面,那比什麼都不畫更危險(收題工具存在的理由就是肉眼核對 FEN)。
  *
- * 因此畫面該長什麼樣幾乎完全是七個欄位當下那些字的函式。模組層的狀態變數只有三個
- * (`suggested`、`writtenIds`、`collidedId`),它們記的都**不是畫面**,而是三件無法
- * 由當下的值看出來的事:描述欄裡那句話是誰打的、本分頁已經成功寫入過哪些題號、
- * 上一次寫入嘗試指認了哪個題號撞號。三者一律只經 `render()` 反映到畫面上。
+ * 因此畫面該長什麼樣幾乎完全是七個欄位當下那些字的函式。模組層的狀態變數只有五個
+ * (`suggested`、`writtenIds`、`collidedId`、`candidateVerdict`、`attemptNote`),
+ * 它們記的都**不是畫面**,而是幾件無法由當下的值看出來的事:描述欄裡那句話是誰打的、
+ * 本分頁已經成功寫入過哪些題號、上一次寫入嘗試指認了哪個題號撞號、權威驗證對那一份
+ * 候選題目說了什麼、以及那一次嘗試有沒有走完。五者一律只經 `render()` 反映到畫面上。
  * (tasks 5.3 會再帶進目錄控制代碼,屆時同樣只驅動這一條路徑。)
  *
  * ## 描述建議值:每一次都算,但只在沒有人動過它時才寫回去
@@ -59,17 +61,70 @@
  * 錯誤訊息,而 requirement 2.5 要的是清空輸入即呈現空盤面、不報錯。兩者在本檔分成
  * 兩條路(見 `readFenView`),這是 tasks.md 對 3.1 的筆記點名的地方。
  *
- * ## 寫入是一條序列,本檔目前只走到第二步
+ * ## 寫入是一條序列,本檔目前只走到第三步
  *
  * 寫入一題的完整次序是(design 的 System Flows):**取題庫索引 → 撞號 → 送權威驗證
  * → 取目錄授權 → 重讀目標檔 → 文字層追加 → 寫回 → 記下題號並清空欄位**。
  * tasks 5.1 實作前兩步,5.2 接上權威驗證,5.3 接上授權與寫檔,5.4 接上成敗的呈現。
  * 因此 `#write` 的 click 處理**刻意寫成一條會被往下接的序列**(`runWriteSequence`),
- * 而不是一個自成一體的動作:5.2 要加的東西接在撞號通過的那一行之後,不必回頭改
+ * 而不是一個自成一體的動作:5.3 要加的東西接在驗證通過的那一行之後,不必回頭改
  * 這裡的形狀。
  *
  * 淺層檢查未通過時 `#write` 仍然是停用的(4.1),所以序列跑得起來就代表七個欄位
  * 都已填妥 —— 撞號檢查不必再驗一次題號的寫法。
+ *
+ * ## 淺層檢查不是放行判準,權威在服務端
+ *
+ * `check.js` 只回答「填了沒、形狀對不對」。**這一題進不進得了題庫由
+ * `POST /api/editor/validate` 判定**(4.7):它走的是 `service/positions.py` 的同一份
+ * schema 規則,再加上向引擎確認這個 FEN 載不載得進去。本檔因此在撞號通過之後必然
+ * 送出一次驗證,而不是「淺層檢查過了就寫下去」—— 那等於讓一份前端看得順眼、服務
+ * 端啟動時卻載不起來的題目進版本庫,而那正是本工具存在的理由。
+ *
+ * ## 「這一題不合格」與「確認未能完成」是兩條路,而且不能互相折疊
+ *
+ * 驗證端點**恆以 200 回答判定**:不合格時回 `valid: false` 與 `issues`(`main.py` 的
+ * 「未通過是『結果』,不是錯誤」)。真正的服務失敗 —— 池滿 503、逾時 504、未預期
+ * 500、連線斷掉、逾時無回應 —— 走的是既有的 `{code, message}` 形狀,那時服務**根本
+ * 沒有判定可言**。
+ *
+ * 兩者對維護者的意義完全相反,所以本檔分成兩條呈現路徑:
+ *
+ * - **不合格**:未通過項目與淺層檢查的 `CheckIssue` 同形,**寫進同一組欄位訊息槽**
+ *   (8.4)。呈現層因此分不出、也不必分出一項是前端檢出的還是服務端判定的 —— 維護者
+ *   要做的事一模一樣:去改那一格。
+ * - **確認未能完成**(4.9):寫入操作旁那一行說明,而且**不指向任何欄位**。它講的是
+ *   「這次確認沒有跑完」,不是「你哪裡填錯了」。
+ *
+ * 兩個方向的誤讀各是一種災難:把服務失敗讀成通過,一份沒驗過的題目會直接寫進題庫;
+ * 讀成不合格,則是誣賴一份可能完全沒問題的題目,還讓維護者回頭去改一個本來就對的
+ * FEN。因此**判定只從一個認得出來的 200 主體讀出**(`isVerdict`),認不得的形狀一律
+ * 落到「確認未能完成」那一邊。
+ *
+ * ## 失敗的類別沿用 `api.js`,但請求是自己發的
+ *
+ * 類別碼用 `api.js` 的 `ApiErrorCode`(design 的 Error Categories 明載不新增分類):
+ * 這個端點回的就是那七種後端契約碼之一,而 `TIMEOUT` / `NETWORK` / `UNKNOWN` 三種
+ * client 自判的情況在這裡同樣成立。**但發請求的那段程式碼不共用** —— `api.js` 的
+ * `request()` 未 export,對外只有 `loadPosition` 與 `requestBlackMove` 兩個位址寫死的
+ * 操作,構造上到不了這個端點(design 的 Dependencies 已載明這件事)。`catalog.js` 對
+ * `/api/catalog` 遇到的是同一件事,它的解法是自己寫一次帶逾時上界的 fetch,本檔沿用
+ * 同一個形狀:**沿用的是類別的那一份列舉,重複的只有十來行傳輸細節**。
+ *
+ * 與 `catalog.js` 不同的是本檔**沿用它的錯誤類別而不是另立一套**:索引端點不借引擎,
+ * 契約裡那七種類別對它沒有意義;驗證端點會借引擎,`SERVICE_BUSY` 與 `ENGINE_TIMEOUT`
+ * 是它真的會回的東西。
+ *
+ * ## 判定是對「那一份候選題目」說的
+ *
+ * 判定無法由當下的輸入值算出來(要問過服務端才知道),但「這份判定還成不成立」可以:
+ * 候選題目的內容一改,上一次那句話講的就是另一份東西了。`candidateVerdict` 因此連同
+ * **送出去的那一份候選題目**一起記下來,只在當下組得出的候選題目與它逐欄相同時才顯示
+ * (與 `collisionIssues()` 對題號做的事是同一條規則)。
+ *
+ * 這條規則還有一個附帶的好處:判定顯示得出來時,七項淺層檢查必然全過(不然那一次
+ * 嘗試根本按不下去),所以欄位訊息槽裡不可能同時有淺層與服務端兩句話 —— 兩者搶同一格
+ * 的情況構造上不存在。
  *
  * ## 撞號檢查看的是一個聯集,而且每一次嘗試都重新取索引
  *
@@ -98,11 +153,18 @@
  * 回來才按得下去,那是一個沒有理由的手續。
  */
 
+import { ApiError, ApiErrorCode, DEFAULT_TIMEOUT_MS } from '../api.js';
 import { renderBoard } from '../board.js';
 import { CatalogError, loadCatalog } from '../catalog.js';
 import { DIFFICULTY_LABELS } from '../difficulty.js';
 import { parseFen } from '../fen.js';
-import { checkForm, checkFenStructure, sideFromFen, suggestDescription } from './check.js';
+import {
+  checkForm,
+  checkFenStructure,
+  parseTags,
+  sideFromFen,
+  suggestDescription,
+} from './check.js';
 
 /**
  * 空盤面的 FEN(requirement 2.5)。
@@ -167,6 +229,84 @@ const WRITE_NOTE_FALLBACK = '無法寫入,仍有項目未通過。';
 const NAME_SEPARATOR = '、';
 
 /**
+ * 權威驗證端點(design 的 API Contract)。
+ *
+ * 這是本檔唯一寫得出位址的後端端點:索引走 `catalog.js`(它是 `/api/catalog` 既有的
+ * 唯一 client),需要引擎的對局端點在這一頁連字串都不存在。
+ */
+const VALIDATE_PATH = '/api/editor/validate';
+
+/**
+ * 候選題目**由人工編輯**的六個 schema 欄位,順序即寫進題目檔的順序
+ * (與 `corpus-file.js` 的 `SCHEMA_FIELDS` 同一份約定)。
+ *
+ * 取這個名字是為了讓「送出去的是哪六個欄位」在程式碼裡看得見。三個**不在**裡面的
+ * 欄位各有理由:`max_dtm` 由驗證工具回填、`source` 由所在資料夾表達、`side_to_move`
+ * 由 FEN 表達(design 的「候選題目的資料契約」)。後端對未知欄位是直接拒絕的,多送
+ * 一個就會讓一份完全沒問題的題目被判為不合格。目標檔案路徑同樣不在裡面 —— 它是
+ * 「寫到哪個檔」,不是題目的內容。
+ */
+const CANDIDATE_FIELDS = Object.freeze([
+  'id',
+  'title',
+  'description',
+  'fen',
+  'difficulty',
+  'tags',
+]);
+
+/**
+ * 後端契約承認的七種類別碼(`service/errors.py` 的 `ErrorCode`)。
+ *
+ * `api.js` 有一份同樣的集合但未 export,所以在這裡組第二份 —— **組的是同一份列舉的
+ * 成員,不是另抄一串字面字串**:`ApiErrorCode` 改了名,這裡會跟著壞掉而不是靜默分家。
+ * 這也是 design 的 Error Categories 說的「不新增分類」:本檔一個新的類別都沒有造。
+ */
+const BACKEND_CODES = new Set([
+  ApiErrorCode.INVALID_MOVE_FORMAT,
+  ApiErrorCode.POSITION_NOT_FOUND,
+  ApiErrorCode.ILLEGAL_MOVE_SEQUENCE,
+  ApiErrorCode.WRONG_SIDE_TO_MOVE,
+  ApiErrorCode.SERVICE_BUSY,
+  ApiErrorCode.ENGINE_TIMEOUT,
+  ApiErrorCode.INTERNAL,
+]);
+
+/**
+ * 確認未能完成時那一行(requirement 4.9)。
+ *
+ * **服務不可用、逾時、連線失敗共用同一句話**,不依類別碼分成好幾種說法:對維護者
+ * 而言六種失敗是同一件事 —— 這次確認沒有跑完,所以什麼都沒有寫出去。要他去理解
+ * 503 與 504 的差別,那是服務的內部狀態,不是他要處理的事。
+ *
+ * 句子裡因此**不帶任何後端原文**:對外的契約只有類別碼(`api.js` 的模組說明),
+ * 原文帶著內部路徑與引擎輸出,對維護者沒有用處。
+ */
+const UNFINISHED_NOTE = '確認未能完成,尚未寫入。請稍後再按一次寫入。';
+
+/**
+ * FEN 連送都送不出去時那一句(`INVALID_MOVE_FORMAT`)。
+ *
+ * 字元把關攔在路由函式之前(`service/models.py`),回的是既有的 400。它**不是**
+ * 「確認未能完成」:那句話講的是過一會兒重試就好,而這一種再按幾次都一樣,維護者
+ * 該做的是重貼一次 FEN。歸在 FEN 那一欄旁邊,與其餘「可自行修正」的失敗同一類
+ * (design 的 Error Strategy)。
+ *
+ * 這串字**由本檔自己寫**,不取回應裡的 `message`:那是後端原文,而它會把被擋下的
+ * 內容原樣帶回來 —— 一個控制字元在畫面上原樣顯示等於在另一個介面上重演同一個問題。
+ */
+const UNSENDABLE_FEN_MESSAGE =
+  'FEN 送不出去:它含有不能送往引擎的字元,或長度超出上限。請重新貼一次完整的 FEN。';
+
+/**
+ * 判定為不合格、卻一項可顯示的未通過項目都沒有時的退路。
+ *
+ * 契約上不會發生(`valid` 由 `issues` 導出),但沉默的後果太不對稱:畫面上什麼都不
+ * 說,看起來就與通過一模一樣,而這一次其實是**不通過**。寧可講一句沒有定位的話。
+ */
+const UNSPECIFIED_VERDICT_MESSAGE = '這一題未通過權威驗證,但服務端沒有指出是哪一項。';
+
+/**
  * 撞號的說法(requirements 4.3、4.4)。**題號本身一定要出現在句子裡** —— 兩條
  * acceptance criteria 要的都是「指出重複的題號」,一句「這個題號已被使用」對著一個
  * 可能剛被改過的輸入框說話,維護者無從確認講的是不是他眼前那一個。
@@ -223,8 +363,8 @@ const elements = {
   // 起手方(2.6)。它在 HTML 裡就排在 FEN 那一欄底下 —— **不能擺進 `#board`**,
   // `renderBoard()` 以 `replaceChildren` 畫盤,擺在那裡的話第一次繪盤就會被換掉。
   sideToMove: document.getElementById('side-to-move'),
-  // 寫入操作與它的停用說明(4.1、8.4)。click 跑的是寫入序列,本輪走到撞號檢查
-  // 為止(見檔首)。
+  // 寫入操作與它的停用說明(4.1、8.4)。click 跑的是寫入序列,本輪走到權威驗證
+  // 為止(見檔首)。`writeNote` 同時承接上一次嘗試的頁面層級說法(4.9)。
   write: document.getElementById('write'),
   writeNote: document.getElementById('write-note'),
 };
@@ -232,7 +372,7 @@ const elements = {
 /**
  * 描述欄裡那句話,若它是本檔放進去的建議值。
  *
- * **本檔唯一的模組層狀態**,而且它記的不是畫面而是來源:描述欄當下的值等於它時,
+ * 五個模組層狀態變數之一(見檔首),而且它記的不是畫面而是來源:描述欄當下的值等於它時,
  * 那一欄仍屬自動狀態、可以隨題號局名更新;不等於時,那是維護者自己的內容,3.7 要求
  * 以它為準,本檔不再碰。空字串(初始值)同樣算自動狀態 —— 那正是 3.6 的觸發條件。
  *
@@ -260,10 +400,38 @@ const writtenIds = new Set();
  *
  * 記的是**那一個題號**而不是「現在有沒有撞號」:撞號無法由當下的輸入值算出來
  * (它要問過索引才知道),但「這句指認還成不成立」可以 —— 題號欄裡的字換掉了,
- * 那句話講的就是別人了。`collisionMessage()` 因此以「當下的題號是否仍是它」當
+ * 那句話講的就是別人了。`collisionIssues()` 因此以「當下的題號是否仍是它」當
  * 顯示的條件,畫面便不會掛著一句已經與輸入框對不上的紅字。
  */
 let collidedId = null;
+
+/**
+ * 上一次送出權威驗證的那一份候選題目與它得到的未通過項目;沒有或已不適用時為 `null`
+ * (requirements 4.7、4.8)。
+ *
+ * `candidate` 是**送出去的那一份候選題目的序列化文字**,`issues` 是那一次的未通過
+ * 項目(空陣列不會被記下來 —— 通過在本輪不生任何呈現)。
+ *
+ * 記下候選題目本身的理由與 `collidedId` 記下題號完全相同:判定算不出來,但「這份
+ * 判定還講不講得通」算得出來 —— 當下組得出的候選題目與它逐字相同時才成立。比的是
+ * **候選題目**而不是七個輸入框的字面:把標籤的分隔符由頓號改成空白不會改變送出去的
+ * 那份陣列,一句成立的判定不該因此消失。
+ *
+ * 目標檔案路徑不在候選題目裡,所以改它不會撤下判定 —— 那是對的:判定講的是這一題
+ * 的內容,與它要寫到哪個檔無關。
+ */
+let candidateVerdict = null;
+
+/**
+ * 上一次寫入嘗試的頁面層級說法(requirement 4.9 的「確認未能完成」);沒有話說時
+ * 為空字串。
+ *
+ * 與 `candidateVerdict` 分成兩個變數而不是一個帶標籤的物件,因為兩者連**成立的條件**
+ * 都不同:判定是對某一份候選題目說的,內容一改就撤下;而「這次確認沒跑完」講的是
+ * 那一次嘗試,不是任何一個欄位的內容 —— 維護者改了 FEN 也不會讓它變成假的。它因此
+ * 一路留到**下一次嘗試**才被換掉。
+ */
+let attemptNote = '';
 
 /**
  * 某一欄的當下輸入值。
@@ -495,13 +663,57 @@ function applySuggestion(origin) {
  * 指認消失。空的、或不是數字的題號一律不會與任何指認相等 —— `Number('')` 是 `0`,
  * 而題號恆為正整數。
  *
- * @returns {string} 沒有指認、或指認已不適用時為空字串。
+ * 回的是一份 `CheckIssue` 清單而不是一句話,與 `verdictIssues()` 同形:兩者都是
+ * 「自淺層清單之外傳進來、但定位得到欄位」的項目,呈現層一視同仁(見 `renderMessages`)。
+ *
+ * @returns {import('./check.js').CheckIssue[]} 沒有指認、或指認已不適用時為空陣列。
  */
-function collisionMessage() {
+function collisionIssues() {
   if (collidedId === null || Number(valueOf('id').trim()) !== collidedId) {
-    return '';
+    return [];
   }
-  return collisionText(collidedId);
+  return [{ field: 'id', message: collisionText(collidedId) }];
+}
+
+/**
+ * 權威驗證對**當下這一份候選題目**說的未通過項目(requirement 4.8)。
+ *
+ * 判定只在候選題目與送出去的那一份逐字相同時才成立(見 `candidateVerdict`)。內容
+ * 一改就回空陣列 —— 留著的話,維護者改完 FEN 之後仍看得到紅字,而畫面上再也沒有
+ * 東西告訴他那句話講的是上一份內容。
+ *
+ * @returns {import('./check.js').CheckIssue[]}
+ */
+function verdictIssues() {
+  if (
+    candidateVerdict === null ||
+    candidateVerdict.candidate !== candidateKey(buildCandidate())
+  ) {
+    return [];
+  }
+  return candidateVerdict.issues;
+}
+
+/**
+ * 寫入操作旁那一行當下該說的話,**淺層檢查以外的部分**(requirements 4.8、4.9)。
+ *
+ * 兩個來源,而且不可能同時有話說 —— 一次嘗試要麼拿到判定、要麼確認未能完成:
+ *
+ * - **確認未能完成**(4.9):不指向任何欄位,因為它講的不是欄位的內容。
+ * - **歸不到欄位的未通過項目**:`field` 為空的那些(候選題目多了一個 schema 以外的
+ *   欄位,或後端的欄位歸屬退化成空值)。它們在七個訊息槽裡沒有位置,若不落在這裡就
+ *   會靜靜消失 —— 而那一項未通過仍然擋著寫入,畫面上卻找不到任何原因。
+ *
+ * @returns {string} 沒有話說時為空字串。
+ */
+function attemptMessage() {
+  if (attemptNote !== '') {
+    return attemptNote;
+  }
+  return verdictIssues()
+    .filter((issue) => issue.field === null)
+    .map((issue) => issue.message)
+    .join(NAME_SEPARATOR);
 }
 
 /**
@@ -539,21 +751,31 @@ function collisionMessage() {
  * `aria-invalid` 與看得見的那一句由同一次判斷寫入:訊息槽是給眼睛的,這一個是給
  * 螢幕閱讀器的,兩者說的必須是同一件事 —— 包括對空欄位一起沉默。
  *
- * ## 撞號的指認也落在這裡
+ * ## 撞號的指認與服務端的判定也落在這裡,而且與淺層的那些長得一樣
  *
- * 它與 FEN 那一欄一樣是自淺層清單之外傳進來的,理由卻不同:FEN 是為了與盤面同源,
- * 撞號則是因為它**算不出來** —— 要問過題庫索引才知道(4.3、4.4)。兩者都寫進同一組
- * 訊息槽,使用者不必分辨一句話是哪一層檢查產生的。
+ * 兩者都是自淺層清單之外傳進來的(`extra`),理由與 FEN 那一欄不同:FEN 是為了與
+ * 盤面同源,這兩者則是因為它們**算不出來** —— 撞號要問過題庫索引(4.3、4.4)、
+ * 不合格要問過權威驗證(4.8)。三者都寫進同一組訊息槽,使用者不必分辨一句話是哪一層
+ * 檢查產生的;design 的 Error Categories 明載服務端的 `issues` 與 `CheckIssue` 同形,
+ * **呈現層不必分辨來源**。
  *
- * 撞號的指認**只在題號那一欄沒有淺層問題時才可能出現**:指認以數值比對成立
- * (見 `collisionMessage`),而題號空著或不是正整數時比不出相等。因此這裡直接覆寫
- * 不會蓋掉「請填入題號」那一類的說法 —— 兩者不可能同時有話說。
+ * `extra` 的項目**覆寫**同一欄的淺層說法,而這不會蓋掉任何東西:兩者不可能同時
+ * 有話說。撞號的指認以題號的數值比對成立(見 `collisionIssues`),題號空著或不是
+ * 正整數時比不出相等;判定則只在候選題目與送出去的那一份相同時成立,而那一份能送
+ * 出去就代表七項淺層檢查全過。**空欄位不說話**那條規則同樣不套用在 `extra` 上,
+ * 理由相同 —— 走到這裡的欄位都已經填了東西。
  *
- * @param {import('./check.js').CheckIssue[]} issues
+ * 一欄仍是至多一句:`extra` 內先到的那一項優先,與淺層清單的規則一致。
+ *
+ * `field` 為空的項目在這裡**沒有位置,也不該有** —— 那些由 `attemptMessage()` 承接,
+ * 寫在寫入操作旁邊。歸不到欄位的說法硬塞進某一格,等於指著一個沒問題的欄位。
+ *
+ * @param {import('./check.js').CheckIssue[]} issues 淺層檢查的清單。
  * @param {string} fenMessage FEN 欄位的當下訊息(2.4、2.5)。
- * @param {string} idMessage 題號欄的撞號指認(4.3、4.4);沒有時為空字串。
+ * @param {import('./check.js').CheckIssue[]} extra 撞號指認與權威驗證的未通過項目
+ *   (4.3、4.4、4.8)。
  */
-function renderMessages(issues, fenMessage, idMessage) {
+function renderMessages(issues, fenMessage, extra) {
   const texts = new Map(FIELD_NAMES.map((name) => [name, '']));
   for (const issue of issues) {
     if (issue.field === null || valueOf(issue.field).trim() === '') {
@@ -564,8 +786,17 @@ function renderMessages(issues, fenMessage, idMessage) {
     }
   }
   texts.set('fen', fenMessage);
-  if (idMessage !== '') {
-    texts.set('id', idMessage);
+
+  const claimed = new Set();
+  for (const issue of extra) {
+    // 認不得的欄位名(例如 `max_dtm` —— 它是題目 schema 的欄位,卻沒有表單格子)
+    // 在 `readVerdictIssues()` 就折成了空值,因此這裡跟著略過即可,那一項已由
+    // `attemptMessage()` 收下。這一道判斷是第二層保險,不是唯一的一道。
+    if (issue.field === null || !texts.has(issue.field) || claimed.has(issue.field)) {
+      continue;
+    }
+    texts.set(issue.field, issue.message);
+    claimed.add(issue.field);
   }
 
   for (const [name, text] of texts) {
@@ -600,13 +831,23 @@ function renderMessages(issues, fenMessage, idMessage) {
  * 還沒填的欄位在這裡點得到名 —— 兩處一起沉默的話,一個空欄位就會停用寫入卻完全不
  * 出現在畫面上,8.4 隨即不成立。這一行因此涵蓋清單裡的每一項。
  *
- * @param {import('./check.js').CheckIssue[]} issues
+ * ## 這一行也是上一次嘗試的頁面層級說法所在(4.9)
+ *
+ * 「確認未能完成」與這裡的點名講的是同一件事的兩種原因 —— **為什麼沒有寫出去** ——
+ * 所以共用同一行,而不是在旁邊再長一塊訊息區:同一個問題有兩個地方可看,使用者就
+ * 得每次都看兩個地方。
+ *
+ * 淺層檢查有話說時它優先:那時寫入是停用的,連按都按不下去,而上一次嘗試的結果講的
+ * 是一個此刻已經送不出去的表單。兩者不會疊在一起,先講當下這一份。
+ *
+ * @param {import('./check.js').CheckIssue[]} issues 淺層檢查的清單。
+ * @param {string} note 上一次嘗試的頁面層級說法(4.9);沒有時為空字串。
  */
-function renderWriteAction(issues) {
+function renderWriteAction(issues, note) {
   elements.write.disabled = issues.length > 0;
 
   const names = issues.map((issue) => labelOf(issue.field)).filter((name) => name !== '');
-  let text = '';
+  let text = note;
   if (issues.length > 0) {
     text = names.length > 0
       ? WRITE_NOTE_PREFIX + names.join(NAME_SEPARATOR)
@@ -633,8 +874,8 @@ function render(origin) {
   applySuggestion(origin);
 
   const issues = checkForm(readValues());
-  renderMessages(issues, view.message, collisionMessage());
-  renderWriteAction(issues);
+  renderMessages(issues, view.message, [...collisionIssues(), ...verdictIssues()]);
+  renderWriteAction(issues, attemptMessage());
 }
 
 /**
@@ -660,7 +901,203 @@ export function recordWrittenId(id) {
 }
 
 /**
- * 寫入序列的前兩步:取題庫索引、撞號檢查(requirements 4.3、4.4、4.5)。
+ * 由當下的欄位組出候選題目 —— **送去驗證的與之後要寫出去的是同一份**
+ * (design 的「候選題目的資料契約」)。
+ *
+ * 三件事在這裡發生,而且只在這裡發生:
+ *
+ * - **欄位挑選**:正好六個由人工編輯的 schema 欄位(見 `CANDIDATE_FIELDS`)。
+ * - **型別轉換**:題號與難度是**數字**。輸入框給的是字串,原樣送出會被題目 schema
+ *   判為型別不符 —— 一份完全沒問題的題目因此被擋下,而維護者看不出哪裡錯。標籤是
+ *   切分後的陣列,切法沿用 `check.js` 的 `parseTags`(那一層已經以它判定「至少一個」,
+ *   在這裡另寫一種切法會讓檢查與送出的內容分家)。
+ * - **去空白**:貼上時前後多一個空白是常態。正規化只有這一處,而且發生在**送驗證
+ *   之前** —— 服務端驗過的內容必須與寫進題目檔的那一份逐字相同(`service/models.py`
+ *   明載它不做任何正規化),兩邊各去一次空白就是兩份可能不同的內容。
+ *
+ * 題號與難度不必再驗一次寫法:`#write` 只有在 `checkForm()` 沒話說時才按得下去(4.1)。
+ *
+ * @returns {{id: number, title: string, description: string, fen: string,
+ *            difficulty: number, tags: string[]}}
+ */
+function buildCandidate() {
+  const values = readValues();
+  return {
+    id: Number(values.id.trim()),
+    title: values.title.trim(),
+    description: values.description.trim(),
+    fen: values.fen.trim(),
+    difficulty: Number(values.difficulty),
+    tags: parseTags(values.tags),
+  };
+}
+
+/**
+ * 一份候選題目的識別字串,用來判斷上一次的判定還講不講得通(見 `candidateVerdict`)。
+ *
+ * 依 `CANDIDATE_FIELDS` 的順序取值再序列化,**不直接 `JSON.stringify` 整個物件**:
+ * 那樣比的會連鍵的順序一起比進去,而順序是建構方式的細節,不是候選題目的內容。
+ *
+ * @param {object} candidate `buildCandidate()` 的產物。
+ * @returns {string}
+ */
+function candidateKey(candidate) {
+  return JSON.stringify(CANDIDATE_FIELDS.map((name) => candidate[name]));
+}
+
+/** 是否為可當作回應主體的 JSON 物件(排除 null 與陣列)。 */
+const isObject = (value) =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * 這份主體是不是一個**判定**(design 的 API Contract)。
+ *
+ * 判定只有一個形狀。認不得就是沒有判定 —— 此時絕不能去讀 `valid`:一份錯誤回應
+ * (`{code, message}`)、一頁 HTML、一份空內容都不帶 `valid`,而 `undefined` 是
+ * falsy,拿它當「不合格」會誣賴一份可能完全沒問題的題目;更糟的是任何帶著別的
+ * `valid` 欄位的回應都會被當成放行(4.9)。
+ *
+ * @param {unknown} payload
+ * @returns {boolean}
+ */
+function isVerdict(payload) {
+  return (
+    isObject(payload) &&
+    typeof payload.valid === 'boolean' &&
+    Array.isArray(payload.issues)
+  );
+}
+
+/**
+ * 由錯誤回應的主體判出類別碼,做法與 `api.js` 的 `classify()` 相同。
+ *
+ * 分類**只看 `code`,不看 HTTP 狀態**:狀態碼是多對一的,而路由層的 404 與端點的
+ * 404 更是完全不同的兩件事。契約外的一切都是 `UNKNOWN`。
+ *
+ * @param {unknown} payload 已解析的回應主體;不是 JSON 時為 `undefined`。
+ * @returns {string} `ApiErrorCode` 之一。
+ */
+function classifyFailure(payload) {
+  if (isObject(payload) && BACKEND_CODES.has(payload.code)) {
+    return payload.code;
+  }
+  return ApiErrorCode.UNKNOWN;
+}
+
+/**
+ * 把回應裡的未通過項目正規化成 `CheckIssue` 的形狀。
+ *
+ * 兩件事:**欄位名折成本頁認得的那七個**(其餘一律成為空值,由 `attemptMessage()`
+ * 承接),以及**丟掉沒有說法的項目** —— 一句空話掛在欄位旁只會讓維護者盯著一個
+ * 看不出所以然的紅框。
+ *
+ * 訊息**原樣顯示**,這與服務失敗那一類刻意相反:判定的說法出自題目 schema,是寫給
+ * 維護者看的(`main.py` 的 `ValidationIssueEntry` 明載可直接顯示);而失敗回應裡的
+ * `message` 是後端內部原文,一個字都不外流。
+ *
+ * @param {object} payload 已確認是判定的回應主體。
+ * @returns {import('./check.js').CheckIssue[]}
+ */
+function readVerdictIssues(payload) {
+  return payload.issues
+    .filter((issue) => isObject(issue) && typeof issue.message === 'string')
+    .filter((issue) => issue.message.trim() !== '')
+    .map((issue) => ({
+      field: elements.controls.has(issue.field) ? issue.field : null,
+      message: issue.message,
+    }));
+}
+
+/**
+ * 送一次權威驗證:`POST /api/editor/validate`(requirement 4.7)。
+ *
+ * 形狀取自 `catalog.js` 的 `fetchIndex()`,理由也相同 —— `api.js` 的 `request()`
+ * 未 export(見檔首)。**逾時上界取 `api.js` 的那一個**而不是 `catalog.js` 的:
+ * 這個端點會借引擎,後端自己的總時間預算就是那個常數在遷就的東西;索引端點不借
+ * 引擎,兩者的上界只是碰巧同值。
+ *
+ * @param {object} candidate 候選題目。
+ * @returns {Promise<object>} 判定的回應主體 `{valid, issues}`。
+ * @throws {ApiError} 服務失敗、逾時、連線失敗,或回應形狀認不得時。呈現層只拿得到
+ *   一個碼 —— 後端與瀏覽器的原文到此為止。
+ */
+async function requestValidation(candidate) {
+  const controller = new AbortController();
+  // fetch 被 abort 時只會拋出一個 AbortError,分不出是誰下的令;自己記一筆,
+  // 才能把「逾時」與「連線失敗」分成兩種失敗。
+  let timedOut = false;
+  const deadline = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, DEFAULT_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(VALIDATE_PATH, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ position: candidate }),
+    });
+
+    // 先取文字再自己 parse:`response.json()` 對空內容或 HTML 錯誤頁會拋錯,
+    // 而那與連線斷掉是完全不同的情況,不能混進同一個 catch。
+    const text = await response.text();
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = undefined; // 不是 JSON —— 形狀無法辨識
+    }
+
+    if (!response.ok) {
+      throw new ApiError(classifyFailure(payload));
+    }
+    if (!isVerdict(payload)) {
+      throw new ApiError(ApiErrorCode.UNKNOWN);
+    }
+    return payload;
+  } catch (error) {
+    // 上面自己丟的分類結果原樣往上;其餘一律是連線層面的失敗 —— 瀏覽器的
+    // 原始訊息到此為止,不往外帶。
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(timedOut ? ApiErrorCode.TIMEOUT : ApiErrorCode.NETWORK);
+  } finally {
+    // 逾時要涵蓋讀取主體,所以計時器直到這裡(成功或失敗)才解除。
+    clearTimeout(deadline);
+  }
+}
+
+/**
+ * 驗證沒有得到判定時,把那個類別碼翻成畫面上的說法(requirements 4.8、4.9)。
+ *
+ * 十種類別碼分成兩條路,而分界不是「哪一種錯」而是**確認到底有沒有跑**:
+ *
+ * - `INVALID_MOVE_FORMAT`:字元把關攔在路由函式之前,確認確實沒跑,但原因在這串
+ *   FEN 身上,而且再按幾次都一樣。歸到 FEN 那一欄(見 `UNSENDABLE_FEN_MESSAGE`)。
+ * - **其餘全部**:服務不可用、逾時、連線失敗、認不得的形狀 —— 一律「確認未能完成」
+ *   (4.9)。不依碼分成好幾種說法,維護者的下一步都是同一個。
+ *
+ * 兩條路都**不執行寫入**,而且都不得被讀成通過。
+ *
+ * @param {string} code `ApiErrorCode` 之一。
+ * @param {string} key 這一次送出的候選題目識別字串。
+ */
+function applyFailure(code, key) {
+  if (code === ApiErrorCode.INVALID_MOVE_FORMAT) {
+    candidateVerdict = {
+      candidate: key,
+      issues: [{ field: 'fen', message: UNSENDABLE_FEN_MESSAGE }],
+    };
+    return;
+  }
+  attemptNote = UNFINISHED_NOTE;
+}
+
+/**
+ * 寫入序列的前三步:取題庫索引、撞號檢查、送權威驗證
+ * (requirements 4.3、4.4、4.5、4.7、4.8、4.9)。
  *
  * **每一次嘗試都重新取一次索引**,不是載入時取一次就沿用(research 的 Decision 5):
  * 服務會在題目檔變動時重啟,索引因此自己會跟上,重新取一次可讓已經進了索引的題號
@@ -673,10 +1110,26 @@ export function recordWrittenId(id) {
  * 兩邊皆無時把指認清成 `null`(4.5)—— 撞號檢查通過是一個**結果**,它會把上一次
  * 的指認撤下,而不是「什麼都不做」。
  *
- * **序列到此為止。** 5.2 的權威驗證接在下面那一行註解的位置,再往下是 5.3 的目錄
- * 授權與寫檔、5.4 的成敗呈現。
+ * ## 撞號擋下的嘗試不送驗證
+ *
+ * 次序是設計的一部分(design 的 System Flows):**撞號在驗證之前**。一個題號已經被
+ * 用掉的候選題目寫不出去,借一次引擎去確認它的 FEN 只是從對局那邊拿走一格池容量 ——
+ * 而引擎池是服務唯一的併發閘門。
+ *
+ * ## 上一次嘗試的結果在這裡就撤下
+ *
+ * 一次新的嘗試取代上一次的,所以序列一開始就把判定與說法清掉並重畫一次:畫面因此
+ * 不可能同時掛著兩次嘗試的話,也不會在 `loadCatalog()` 拋出、序列停住的那條路上留著
+ * 一句已經被撤下的舊話(狀態與畫面分家)。取不到索引時該說什麼屬 5.4。
+ *
+ * **序列到此為止。** 5.3 的目錄授權與寫檔接在下面那一行註解的位置,再往下是 5.4 的
+ * 成敗呈現。驗證通過在本輪因此不生任何呈現 —— 那正是「還沒有偷跑」的樣子。
  */
 async function runWriteSequence() {
+  candidateVerdict = null;
+  attemptNote = '';
+  render(null);
+
   const id = Number(valueOf('id').trim());
   const { positions } = await loadCatalog();
   const existingIds = new Set(positions.map((position) => Number(position.id)));
@@ -687,7 +1140,40 @@ async function runWriteSequence() {
     return;
   }
 
-  // 撞號通過(4.5)。tasks 5.2 的權威驗證自此接續,而後是 5.3 的授權與寫檔。
+  // 撞號通過(4.5)—— 送權威驗證(4.7)。
+  const candidate = buildCandidate();
+  const key = candidateKey(candidate);
+  let payload;
+  try {
+    payload = await requestValidation(candidate);
+  } catch (error) {
+    // 預期內的停止只有 `ApiError` 這一種;其餘原樣往上,那些是缺陷而不是失敗
+    // (理由見 `attemptWrite`)。
+    if (!(error instanceof ApiError)) {
+      throw error;
+    }
+    applyFailure(error.code, key);
+    render(null);
+    return;
+  }
+
+  const issues = readVerdictIssues(payload);
+  // **兩者矛盾時取嚴的那一邊。** `valid` 由 `issues` 導出,契約上不可能不一致;
+  // 真的不一致時放行的代價是壞資料進題庫,擋下的代價只是維護者再按一次。
+  if (payload.valid && issues.length === 0) {
+    // 驗證通過(4.7)。tasks 5.3 的目錄授權與寫檔自此接續,而後是 5.4 的成敗呈現。
+    return;
+  }
+
+  // 未通過(4.8):不執行寫入,未通過項目定位到欄位。一項可顯示的都沒有時仍要出聲 ——
+  // 沉默看起來與通過一模一樣,而這一次是不通過。
+  candidateVerdict = {
+    candidate: key,
+    issues: issues.length > 0
+      ? issues
+      : [{ field: null, message: UNSPECIFIED_VERDICT_MESSAGE }],
+  };
+  render(null);
 }
 
 /**
@@ -703,6 +1189,10 @@ async function runWriteSequence() {
  *
  * 此刻該對使用者說什麼屬 tasks 5.4 的一般失敗呈現,所以這裡刻意不寫任何說法 ——
  * 兩處各寫一句只會讓同一件事有兩種講法。
+ *
+ * **權威驗證的失敗不會走到這裡**:它在序列內部就翻成了畫面上的說法(`applyFailure`),
+ * 因為 4.9 明確要求告知確認未能完成,而索引取不到那一條的說法歸屬還沒定案(design 的
+ * Risks 把它併進 7.3)。兩者的差別不是誰比較嚴重,而是**要求寫在哪一條 requirement**。
  *
  * 其餘的例外原樣往上:那些不是預期內的停止而是缺陷,吞掉會讓它們永遠沒有人發現。
  */
@@ -729,7 +1219,7 @@ for (const [name, control] of elements.controls) {
   control.addEventListener('input', () => render(name));
 }
 
-// 寫入序列(5.1 走到撞號檢查為止)。處理器本身刻意是同步的,只把那個 promise 丟出去
+// 寫入序列(5.2 走到權威驗證為止)。處理器本身刻意是同步的,只把那個 promise 丟出去
 // ——`addEventListener` 不會等 async 處理器,回傳一個 promise 給它只會讓「誰來處理
 // 拒絕」變得含混。真正的例外處理集中在 `attemptWrite()` 一處。
 //

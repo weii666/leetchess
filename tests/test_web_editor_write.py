@@ -1,9 +1,21 @@
-"""收題頁按下寫入之後的撞號檢查(tasks 5.1;requirements 4.3、4.4、4.5)。
+"""收題頁按下寫入之後的撞號檢查與權威驗證(tasks 5.1、5.2;requirements 4.3–4.5、
+4.7–4.9)。
 
 寫入一題是一條有次序的序列(design 的 System Flows):**取索引 → 撞號 → 送權威
 驗證 → 取目錄授權 → 重讀目標檔 → 文字層追加 → 寫回 → 記下題號並清空欄位**。
-本檔涵蓋的是**前兩步**,tasks 5.2–5.4 會沿用同一套夾具往下接 —— 因此夾具與輔助
+本檔涵蓋的是**前三步**,tasks 5.3–5.4 會沿用同一套夾具往下接 —— 因此夾具與輔助
 函式都寫成「一次寫入嘗試」的形狀,而不是「一次撞號檢查」的形狀。
+
+## 判定與「確認未能完成」是兩件事,而畫面必須分得出來
+
+權威驗證端點**恆以 200 回答判定**:候選題目不合格時回 `valid: false` 與 `issues`
+(`service/main.py` 的模組說明)。真正的服務失敗 —— 池滿 503、逾時 504、未預期 500、
+連線斷掉 —— 走的是既有的 `{code, message}` 形狀,那時服務**根本沒有判定可言**。
+
+兩者的處置完全相反,所以本檔的 5.2 測試分成兩組:一組問「不合格時那句話有沒有定位
+到欄位」,另一組問「確認未能完成時畫面說的是不是那件事,而且沒有偷偷放行」。把 503
+讀成 `valid: true` 會讓一份沒驗過的題目寫進題庫,讀成 `valid: false` 則是誣賴一份可能
+完全沒問題的題目(requirement 4.9)。
 
 ## 撞號的判準是一個聯集,而聯集的兩半各有一個時間窗
 
@@ -55,8 +67,11 @@ WEB_DIR = PROJECT_ROOT / "web"
 #: 一個不會真的解析出去的網域 —— 所有請求都被 `page.route()` 攔下。
 ORIGIN = "https://web-editor-write.test"
 
-#: 題庫索引端點。這是本輪唯一會被打到的後端位址(5.2 才會加上驗證端點)。
+#: 題庫索引端點。
 CATALOG_PATH = "/api/catalog"
+
+#: 權威驗證端點(design 的 API Contract)。撞號通過的嘗試必然走到這裡(5.2)。
+VALIDATE_PATH = "/api/editor/validate"
 
 #: 桌面尺寸。窄畫面的折行屬版面(4.1)。
 DESKTOP = (1280, 800)
@@ -92,6 +107,29 @@ VALID_FORM = {
 #: 表單裡那個題號的數值形式。撞號的訊息要**指出重複的題號**(4.3、4.4),
 #: 因此各測試斷言的是「這個數字出現在訊息裡」,而不是某一句寫死的說法。
 FORM_ID = 26
+
+#: `VALID_FORM` 送往驗證端點時該有的候選題目(design 的「候選題目的資料契約」)。
+#:
+#: **正好六個由人工編輯的 schema 欄位**,型別即題目檔裡的型別:`id` 與 `difficulty`
+#: 是數字而不是輸入框裡那串字,`tags` 是切分後的陣列。`max_dtm`(由驗證工具回填)、
+#: `source`(由資料夾表達)、`side_to_move`(由 fen 表達)三者都不在候選題目裡 ——
+#: 後端對未知欄位是直接拒絕的,多送一個就會讓一份好題目被判為不合格。
+#:
+#: 目標檔案路徑同樣不在裡面:它是**寫到哪個檔**,不是題目的欄位。
+EXPECTED_CANDIDATE = {
+    "id": FORM_ID,
+    "title": "患在几席",
+    "description": "自己打的描述,不該被任何建議值蓋掉",
+    "fen": PUZZLE_FEN,
+    "difficulty": 2,
+    "tags": ["解殺還殺", "鐵門栓", "悶宮"],
+}
+
+#: 「確認未能完成」那句話的關鍵字(requirement 4.9)。
+#:
+#: 斷言的是這四個字而不是一整句寫死的說法:4.9 要維護者知道的是**這次確認沒有跑完**,
+#: 措辭怎麼寫是實作的自由。
+UNFINISHED_KEYWORD = "確認未能完成"
 
 #: 讓寫入序列的後續 microtask 與重畫跑完的窗口(毫秒)。
 #:
@@ -138,6 +176,54 @@ class Catalog:
         }
 
 
+# --- 驗證端點替身 -------------------------------------------------------
+
+
+#: 服務失敗回應裡的訊息原文。**它不得出現在畫面上任何一處** —— `api.js` 的契約只有
+#: 類別碼,後端與瀏覽器的原文一個字都不外流(requirement 7.5 對這個端點同樣成立)。
+BACKEND_DETAIL = "engine pool exhausted at 2026-08-10T00:00:00 in /srv/service/pool.py"
+
+
+@dataclass
+class Validator:
+    """本檔控制得動的權威驗證端點 —— `POST /api/editor/validate` 的替身。
+
+    **預設回一份合格的判定**,5.1 既有的那些測試因此照樣走得完整條序列:撞號通過
+    之後真的會送一次驗證,而那一次不該改變它們原本斷言的任何一件事。
+
+    `status` 與 `payload` 一起換掉就成了服務失敗(既有的 `{code, message}` 形狀);
+    `failing` 為真時整個請求被砍掉 —— 那是連線斷掉,與服務回話說自己忙不過來是兩種
+    不同的失敗,而 4.9 要求兩者收斂成同一個結論。
+
+    `bodies` 記下每一次送出的請求主體:候選題目**帶了哪些欄位、型別是什麼**只有在
+    這裡看得到,而那正是 design 的「候選題目的資料契約」要釘住的東西。
+    """
+
+    status: int = 200
+    payload: object = None
+    failing: bool = False
+    requests: int = 0
+    bodies: list = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.payload is None:
+            self.payload = {"valid": True, "issues": []}
+
+    def rejects(self, issues: list[dict]) -> None:
+        """讓端點回一份**不合格**的判定(4.8)。狀態碼仍是 200 —— 那是判定不是錯誤。"""
+        self.status = 200
+        self.payload = {"valid": False, "issues": issues}
+
+    def fails_with(self, status: int, code: str) -> None:
+        """讓端點回一次**真正的服務失敗**(4.9):既有的 `{code, message}` 形狀。"""
+        self.status = status
+        self.payload = {"code": code, "message": BACKEND_DETAIL}
+
+    def candidates(self) -> list:
+        """每一次送出的候選題目本身(請求主體的 `position`)。"""
+        return [body.get("position") for body in self.bodies]
+
+
 # --- 夾具與操作 ---------------------------------------------------------
 
 
@@ -148,10 +234,16 @@ def catalog() -> Catalog:
 
 
 @pytest.fixture
-def editor_page(browser_page, catalog: Catalog) -> Iterator:
-    """以 http 來源開啟**真實的**收題頁,並把索引端點接到 `catalog`。
+def validator() -> Validator:
+    """本次測試的驗證端點行為。預設判定為合格。"""
+    return Validator()
 
-    索引與靜態檔共用同一個處理器而不是註冊兩條 `page.route()`:多條規則的
+
+@pytest.fixture
+def editor_page(browser_page, catalog: Catalog, validator: Validator) -> Iterator:
+    """以 http 來源開啟**真實的**收題頁,並把兩個後端端點接到本檔的替身。
+
+    索引、驗證與靜態檔共用同一個處理器而不是註冊三條 `page.route()`:多條規則的
     優先順序是框架的細節,寫成一個顯式的分派就不必記它。
     """
 
@@ -167,6 +259,22 @@ def editor_page(browser_page, catalog: Catalog) -> Iterator:
                 status=200,
                 content_type="application/json",
                 body=json.dumps(catalog.payload()),
+            )
+            return
+
+        if path == VALIDATE_PATH:
+            validator.requests += 1
+            # 主體先記下來再看要不要失敗:連線被砍掉的那一次同樣送出過候選題目,
+            # 而「送了什麼」與「回了什麼」是兩件事。
+            raw = route.request.post_data
+            validator.bodies.append(json.loads(raw) if raw else None)
+            if validator.failing:
+                route.abort("failed")
+                return
+            route.fulfill(
+                status=validator.status,
+                content_type="application/json",
+                body=json.dumps(validator.payload),
             )
             return
 
@@ -271,6 +379,11 @@ def record_written_id(page, position_id: int) -> None:
     )
 
 
+def page_text(page) -> str:
+    """整頁看得見的文字。用來斷言某些字**沒有**出現在畫面上任何一處。"""
+    return page.evaluate("() => document.body.innerText")
+
+
 def wait_for_catalog(page, catalog: Catalog, expected: int) -> None:
     """等到索引端點被打滿 `expected` 次。"""
     deadline = time.monotonic() + CATALOG_TIMEOUT_S
@@ -281,15 +394,32 @@ def wait_for_catalog(page, catalog: Catalog, expected: int) -> None:
     )
 
 
-def attempt_write(page, catalog: Catalog) -> None:
-    """按一次寫入,等到這一次嘗試的索引請求送達並讓後續處理跑完。
+def wait_for_validation(page, validator: Validator, expected: int) -> None:
+    """等到驗證端點被打滿 `expected` 次。"""
+    deadline = time.monotonic() + CATALOG_TIMEOUT_S
+    while validator.requests < expected and time.monotonic() < deadline:
+        page.wait_for_timeout(20)
+    assert validator.requests == expected, (
+        f"驗證端點被取用的次數是 {validator.requests},預期 {expected}"
+    )
+
+
+def attempt_write(page, catalog: Catalog, validator: Validator | None = None) -> None:
+    """按一次寫入,等到這一次嘗試該送的請求都送達並讓後續處理跑完。
 
     等待本身就是一項斷言:**每一次嘗試都必須重新取一次索引**(research 的
     Decision 5)。載入時取一次然後沿用的實作會停在這裡。
+
+    給了 `validator` 就一併等權威驗證送達 —— 撞號通過的嘗試必然走到那一步(5.2),
+    而不給的那些呼叫處問的是**撞號**,那時序列可能根本走不到驗證(撞號擋下、或索引
+    取不到)。等一個不會發生的請求會讓那些測試變成等到逾時才失敗。
     """
-    expected = catalog.requests + 1
+    expected_catalog = catalog.requests + 1
+    expected_validations = None if validator is None else validator.requests + 1
     page.click(WRITE_BUTTON)
-    wait_for_catalog(page, catalog, expected)
+    wait_for_catalog(page, catalog, expected_catalog)
+    if expected_validations is not None:
+        wait_for_validation(page, validator, expected_validations)
     page.wait_for_timeout(SETTLE_MS)
 
 
@@ -534,24 +664,358 @@ def test_a_failed_index_fetch_is_not_read_as_no_collision(
     assert message(editor_page, "id") == "", "一次索引失敗之後這一頁就不動了"
 
 
-# --- 本任務的邊界:序列停在撞號檢查之後 --------------------------------
+# --- 撞號通過即送權威驗證(4.7)----------------------------------------
 
 
-def test_the_write_sequence_stops_after_the_collision_check(
-    editor_page, catalog: Catalog
+def test_a_passing_collision_check_sends_the_candidate_for_validation(
+    editor_page, catalog: Catalog, validator: Validator
 ) -> None:
-    """5.1 只實作序列的前兩步:取索引與撞號。
+    """4.7:維護者要求寫入時,先確認這個 FEN 是引擎載得進去的局面。
 
-    權威驗證(5.2)、目錄授權與寫檔(5.3)、成敗呈現(5.4)都還不存在,因此一次
-    通過的嘗試對後端**只有索引那一個請求**。這一條釘住的是「這裡還沒有偷跑」,
-    5.2 起會由那些任務改寫。
+    「先確認」是一句關於**次序**的話:確認在寫入之前,而確認本身在收題頁做不到 ——
+    引擎只在服務端。因此撞號通過之後必然有這一次請求,少了它,寫入就是在沒有確認
+    的情況下進行的。
+    """
+    catalog.ids = [1, 2, 3]
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    assert validator.requests == 1, "撞號通過之後沒有送出權威驗證"
+
+
+def test_the_candidate_carries_exactly_the_six_schema_fields(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """送出的候選題目與 design 的「候選題目的資料契約」逐欄相同。
+
+    這一條要釘的不只是「有沒有送」,而是**送了什麼**:
+
+    - `id` 與 `difficulty` 是數字。輸入框給的是字串,原樣送出會被題目 schema 判為
+      型別不符 —— 一份完全沒問題的題目因此被擋下,而維護者看不出哪裡錯。
+    - `tags` 是切分後的陣列,不是那一行原始輸入。
+    - **正好六個欄位**。`max_dtm`、`source`、`side_to_move` 都不是候選題目的欄位,
+      後端對未知欄位是直接拒絕的;目標檔案路徑則是「寫到哪個檔」,不是題目的內容。
+    """
+    catalog.ids = []
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    assert validator.bodies == [{"position": EXPECTED_CANDIDATE}]
+    sent = validator.candidates()[0]
+    assert isinstance(sent["id"], int) and not isinstance(sent["id"], bool)
+    assert isinstance(sent["difficulty"], int)
+    assert isinstance(sent["tags"], list)
+
+
+def test_the_candidate_is_normalised_before_it_is_confirmed(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """送去確認的就是之後要寫出去的那一份 —— 前後空白在**送出之前**去掉。
+
+    貼上時前後多一個空白或 tab 是常態(自檔案或網頁複製)。服務端明載它不做任何
+    正規化(`service/models.py`:驗過的內容必須與使用者要寫出去的那一份逐字相同),
+    所以正規化只能有一處。放在送出之後就是兩份可能不同的內容:確認的是一串,寫進
+    題目檔的是另一串,而那正是本工具要杜絕的事。
+    """
+    catalog.ids = []
+    fill_valid_form(
+        editor_page,
+        title=f"  {VALID_FORM['title']}  ",
+        fen=f"  {PUZZLE_FEN} ",
+    )
+
+    attempt_write(editor_page, catalog, validator)
+
+    assert validator.candidates() == [EXPECTED_CANDIDATE]
+
+
+def test_a_collision_never_reaches_the_validation_endpoint(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """次序是設計的一部分:撞號擋下的嘗試**不送驗證**(design 的 System Flows)。
+
+    一個題號已經被用掉的候選題目根本寫不出去,借一次引擎去確認它的 FEN 只是從
+    對局那邊拿走一格池容量 —— 而引擎池是本服務唯一的併發閘門。
+    """
+    catalog.ids = [FORM_ID]
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog)
+
+    assert str(FORM_ID) in message(editor_page, "id")
+    assert validator.requests == 0, "撞號已經擋下這一次嘗試,不該再去借引擎"
+
+
+# --- 驗證未通過(4.8)--------------------------------------------------
+
+
+def test_a_failed_verdict_is_shown_beside_the_field_it_names(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """4.8:引擎載不進這個 FEN 時不寫入,並**定位到那一欄**。
+
+    走的是淺層檢查那一組同樣的訊息槽(`[data-message-for]`):design 的 Error
+    Categories 明載服務端的 `issues` 與前端的 `CheckIssue` 同形,**呈現層不分辨
+    來源**。維護者要做的事在兩種情況下完全一樣 —— 去改那一格。
+
+    訊息原樣顯示。這與服務失敗那一類刻意相反:判定的說法出自題目 schema,是寫給
+    維護者看的;而失敗回應裡的 `message` 是後端的內部原文,一個字都不外流。
+    """
+    said = "引擎載不進這個 fen,它不是一個引擎認得的局面。"
+    validator.rejects([{"field": "fen", "message": said}])
+    catalog.ids = []
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    assert message(editor_page, "fen") == said, "未通過的項目沒有落在 FEN 那一欄"
+    marked = editor_page.get_attribute(control("fen"), "aria-invalid")
+    assert marked == "true", "看得見的那一句與無障礙標記說的必須是同一件事"
+
+
+def test_a_failed_verdict_keeps_everything_the_maintainer_typed(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """4.8:不合格是「可自行修正」那一類 —— 保留表單內容、寫入操作仍按得下去。
+
+    停用寫入是錯的:維護者改完 FEN 之後要能再送一次,而驗證每一次按下都重跑。
+    """
+    validator.rejects([{"field": "fen", "message": "引擎載不進這個 fen"}])
+    catalog.ids = []
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    for name in FORM_FIELDS:
+        assert value_of(editor_page, name) == VALID_FORM[name], (
+            f"驗證未通過之後 {name} 的內容變了"
+        )
+    assert write_is_enabled(editor_page), "驗證未通過不該讓寫入變成按不下去"
+
+
+def test_a_failed_verdict_does_not_reserve_the_id(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """4.8 的另一半:驗證未通過**不執行寫入**,那個題號因此誰也沒在用。
+
+    序列停在驗證這一步,所以本輪看得見的後果有二:不再有任何請求送出去,而且
+    那個題號沒有進入本分頁的已寫入集合 —— 下一次嘗試必須照樣放行。
+    """
+    paths: list[str] = []
+    editor_page.on("request", lambda request: paths.append(urlsplit(request.url).path))
+
+    validator.rejects([{"field": "fen", "message": "引擎載不進這個 fen"}])
+    catalog.ids = []
+    fill_valid_form(editor_page)
+    attempt_write(editor_page, catalog, validator)
+    assert message(editor_page, "fen") != ""
+
+    api = [path for path in paths if path.startswith("/api/")]
+    assert api == [CATALOG_PATH, VALIDATE_PATH], f"驗證未通過卻繼續往下走:{api}"
+
+    validator.payload = {"valid": True, "issues": []}
+    attempt_write(editor_page, catalog, validator)
+
+    assert message(editor_page, "id") == "", (
+        "未通過的那一次嘗試把題號佔走了 —— 集合只該在寫入成功後才加入"
+    )
+
+
+def test_a_verdict_that_names_two_fields_is_shown_word_for_word(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """同一份候選題目可能只回報**一項**,而那一項的說法涵蓋不只一個欄位。
+
+    題目 schema 遇到第一個問題就停(tasks 的 Implementation Notes 2.3):
+    `缺少必填欄位:id、title` 只歸屬到 `id`。呈現層因此**不得假設逐欄位窮舉** ——
+    訊息原樣顯示,那句話裡的第二個欄位名才是維護者唯一的線索。
+    """
+    said = "候選題目 缺少必填欄位:id、title"
+    validator.rejects([{"field": "id", "message": said}])
+    catalog.ids = []
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    assert message(editor_page, "id") == said, "訊息被改寫或截斷了"
+    assert message(editor_page, "title") == "", (
+        "呈現層自己推論了第二個欄位 —— 那份清單不是逐欄位窮舉的"
+    )
+
+
+def test_a_verdict_issue_without_a_field_still_reaches_the_maintainer(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """`field` 為空的未通過項目不得靜靜消失。
+
+    歸不到欄位有兩種來源:候選題目多了一個 schema 以外的欄位,以及後端的欄位歸屬
+    退化成 `None`(那是對訊息措辭的正則比對,措辭一漂移就退化)。兩種都不是「沒有
+    問題」,而畫面上若只認得七個欄位槽,這一項就會連同「不寫入」這件事一起消失。
+    """
+    said = "候選題目 含有題目 schema 以外的欄位"
+    validator.rejects([{"field": None, "message": said}])
+    catalog.ids = []
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    assert said in note(editor_page), "歸不到欄位的那一項在畫面上消失了"
+
+
+def test_the_verdict_goes_away_when_the_candidate_changes(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """那份判定是針對**那一份候選題目**說的,內容一改就不再成立。
+
+    理由與撞號指認相同:留著的話,維護者改完 FEN 之後仍看得到紅字,而畫面上再也
+    沒有東西告訴他那句話講的是上一份內容。
+    """
+    validator.rejects([{"field": "fen", "message": "引擎載不進這個 fen"}])
+    catalog.ids = []
+    fill_valid_form(editor_page)
+    attempt_write(editor_page, catalog, validator)
+    assert message(editor_page, "fen") != ""
+
+    put(editor_page, "fen", "3ak4/9/9/9/9/9/9/9/9/4K4 w - - 0 1")
+
+    assert message(editor_page, "fen") == "", "改了 FEN 之後上一份判定還掛著"
+
+
+# --- 確認未能完成(4.9)------------------------------------------------
+
+
+#: 六種「確認未能完成」。四種是服務自己回話說它做不到,兩種是話根本沒傳回來。
+#:
+#: 對維護者而言六者是同一件事:**這次確認沒有跑完**,所以沒有寫入。分成六種說法
+#: 只會讓他去理解 503 與 504 的差別,而那是服務的內部狀態,不是他要處理的事。
+UNFINISHED_CASES = [
+    ("引擎池滿", 503, {"code": "SERVICE_BUSY", "message": BACKEND_DETAIL}, False),
+    ("搜尋逾時", 504, {"code": "ENGINE_TIMEOUT", "message": BACKEND_DETAIL}, False),
+    ("未預期失敗", 500, {"code": "INTERNAL", "message": BACKEND_DETAIL}, False),
+    ("路由層 404", 404, {"detail": BACKEND_DETAIL}, False),
+    ("認不得的形狀", 200, {"ok": True, "message": BACKEND_DETAIL}, False),
+    ("連線斷掉", 0, None, True),
+]
+
+
+@pytest.mark.parametrize(
+    ("case", "status", "payload", "failing"),
+    UNFINISHED_CASES,
+    ids=[case for case, _, _, _ in UNFINISHED_CASES],
+)
+def test_a_service_failure_is_reported_as_a_confirmation_that_did_not_finish(
+    editor_page,
+    catalog: Catalog,
+    validator: Validator,
+    case: str,
+    status: int,
+    payload: object,
+    failing: bool,
+) -> None:
+    """4.9:確認因服務不可用、逾時或連線失敗而無法完成時,告知**確認未能完成**。
+
+    「認不得的形狀」那一格是這條分界最要緊的一種:一份 200 但不是判定的回應
+    **絕不能**被讀成通過。判定只有一個形狀(`{valid, issues}`),認不得就是沒有
+    判定 —— 而沒有判定時放行,等於把一份沒驗過的題目寫進題庫。
+
+    後端回應裡的原文一個字都不該出現在畫面上:對外的契約只有類別碼(`api.js` 的
+    模組說明),原文帶著內部路徑與時間戳,對維護者沒有用處。
+    """
+    validator.status = status
+    validator.payload = payload
+    validator.failing = failing
+    catalog.ids = []
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    assert UNFINISHED_KEYWORD in note(editor_page), (
+        f"{case}:畫面沒有說確認未能完成,而是 {note(editor_page)!r}"
+    )
+    assert BACKEND_DETAIL not in page_text(editor_page), f"{case}:後端原文流到了畫面上"
+    for name in FORM_FIELDS:
+        assert value_of(editor_page, name) == VALID_FORM[name], (
+            f"{case}:確認未能完成之後 {name} 的內容變了"
+        )
+
+
+def test_a_service_failure_is_never_read_as_a_passing_verdict(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """4.9 的核心:池滿**不得**被當成驗證通過,也不得被當成這一題不合格。
+
+    前者會讓一份沒驗過的題目直接寫進題庫;後者是誣賴一份可能完全沒問題的題目,還
+    把責任推給維護者 —— 他會回頭去改一個本來就對的 FEN。
+
+    序列因此停在這裡:不再有任何請求,七個欄位一句話都不說,而題號沒有被佔走。
+    """
+    paths: list[str] = []
+    editor_page.on("request", lambda request: paths.append(urlsplit(request.url).path))
+
+    validator.fails_with(503, "SERVICE_BUSY")
+    catalog.ids = []
+    fill_valid_form(editor_page)
+    attempt_write(editor_page, catalog, validator)
+
+    api = [path for path in paths if path.startswith("/api/")]
+    assert api == [CATALOG_PATH, VALIDATE_PATH], f"確認未能完成卻繼續往下走:{api}"
+    for name in FORM_FIELDS:
+        assert message(editor_page, name) == "", (
+            f"忙碌的服務被說成 {name} 這一欄的問題:{message(editor_page, name)!r}"
+        )
+
+    validator.status = 200
+    validator.payload = {"valid": True, "issues": []}
+    attempt_write(editor_page, catalog, validator)
+
+    assert message(editor_page, "id") == "", "確認未能完成的那一次嘗試把題號佔走了"
+    assert note(editor_page) == "", "確認未能完成那句話在下一次嘗試之後還掛著"
+
+
+def test_a_fen_the_service_refuses_to_send_is_not_a_busy_service(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """FEN 的字元把關(400)不是「確認未能完成」——兩者的下一步完全不同。
+
+    字元把關攔在路由函式之前,回的是既有的 `INVALID_MOVE_FORMAT`。它講的是**這串
+    FEN 送不出去**(含控制字元或超長),再按幾次都一樣;說成「確認未能完成」會讓
+    維護者以為過一會兒重試就好,而他該做的是重貼一次 FEN。反過來,一次池滿也不該
+    被說成他的 FEN 有問題。
+    """
+    validator.fails_with(400, "INVALID_MOVE_FORMAT")
+    catalog.ids = []
+    fill_valid_form(editor_page)
+
+    attempt_write(editor_page, catalog, validator)
+
+    assert message(editor_page, "fen") != "", "沒有指出問題出在 FEN 那一欄"
+    assert UNFINISHED_KEYWORD not in note(editor_page), (
+        "送不出去的 FEN 被說成了服務端的問題"
+    )
+    assert BACKEND_DETAIL not in page_text(editor_page)
+
+
+# --- 本任務的邊界:序列停在權威驗證之後 --------------------------------
+
+
+def test_the_write_sequence_stops_after_the_authoritative_validation(
+    editor_page, catalog: Catalog, validator: Validator
+) -> None:
+    """5.2 實作序列的前三步:取索引、撞號、送權威驗證。
+
+    目錄授權與寫檔(5.3)、成敗呈現(5.4)都還不存在,因此一次通過的嘗試對後端
+    只有那兩個請求,而畫面上沒有任何一句話說寫入成功了。這一條釘住的是「這裡還
+    沒有偷跑」,5.3 起會由那些任務改寫。
     """
     paths: list[str] = []
     editor_page.on("request", lambda request: paths.append(urlsplit(request.url).path))
 
     catalog.ids = []
     fill_valid_form(editor_page)
-    attempt_write(editor_page, catalog)
+    attempt_write(editor_page, catalog, validator)
 
     api = [path for path in paths if path.startswith("/api/")]
-    assert api == [CATALOG_PATH], f"撞號檢查之外還打了別的端點:{api}"
+    assert api == [CATALOG_PATH, VALIDATE_PATH], f"驗證之外還打了別的端點:{api}"
+    assert note(editor_page) == "", f"驗證通過還不是寫入成功:{note(editor_page)!r}"
