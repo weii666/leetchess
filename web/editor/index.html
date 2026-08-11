@@ -50,10 +50,17 @@
 
   ## 本檔只有容器,沒有邏輯
 
-  與對局頁同一個形態:這裡擺出的是「有哪些格子」,不是「按下去會怎樣」。繪盤屬
-  tasks 4.2、欄位互動與難度選項屬 4.3、寫入流程屬第 5 組,那幾個任務**都改得到
-  本檔**,但目前一個 `<script>` 都不掛 —— `editor.js` 尚不存在,先寫上去只會讓每
-  次載入都吞一個 404。
+  與對局頁同一個形態:這裡擺出的是「有哪些格子」,不是「按下去會怎樣」。行為一律
+  住在 `./editor.js`(tasks 4.2 起,掛在本檔末端;欄位互動與難度選項屬 4.3、寫入流程
+  屬第 5 組),那幾個任務**都改得到本檔** —— 但改的是**容器**:要新的格子就在這裡
+  宣告出來,由那一支模組去填,而不是由 JS 生一個節點插進來。訊息槽
+  (`[data-message-for]`)與不支援的說明(`#unsupported`)都是這個形態。
+
+  掛的 `<script>` **就是末端那一個**,後續任務接著擴充 `editor.js` 而不是再掛一支:
+  兩支模組各自查 DOM、各自接事件,誰先跑、誰蓋掉誰就會變成一件要記在腦子裡的事。
+
+  沒有 JavaScript 時,本檔仍是一份完整的表單容器:七個欄位照樣打得了字,盤面那一格
+  留著 `.board-placeholder` 的說明。**但盤面要有 JS 才畫得出來**(2.1)。
 
   ## 這個工具只新增,不改也不刪(requirement 7.6)
 
@@ -138,7 +145,8 @@
   兩者都不是漏做。給了輸入框,維護者就填得出一個後端會拒絕的欄位 —— 題目 schema
   的既有檢查對未知欄位是直接拒絕的。
 
-  起手方同理沒有獨立輸入(2.6):它讀自 FEN,由 tasks 4.3 顯示出來。
+  起手方同理沒有獨立輸入(2.6):它讀自 FEN,呈現在 FEN 那一欄底下的 `#side-to-move`
+  (tasks 4.2)。
 -->
 <section id="entry" aria-labelledby="entry-heading">
   <h2 id="entry-heading">題目內容</h2>
@@ -202,7 +210,44 @@
   <div class="field">
     <label for="field-fen">FEN</label>
     <input id="field-fen" data-field="fen" type="text" autocomplete="off" spellcheck="false">
+    <!--
+      這一欄的訊息槽(tasks 4.2;requirements 2.4、8.4)。
+
+      ## 為什麼槽位寫在這裡,而不是由 JS 插進來
+
+      與上面的 `#unsupported` 同一條規矩:**位置固定、預設隱藏**。節點自始就在,顯示
+      與否只是 `editor.js` 依當下的值決定的一個 `hidden`(`editor.css` 的
+      `[hidden] { display: none !important }` 保住這個預設值)。要顯示才插入的話,
+      插入與移除都會推動底下的欄位 —— 使用者每打一個字版面就抖一次,而 FEN 是一邊
+      打一邊檢查的欄位,抖動會非常明顯。
+
+      **與 `#unsupported` 不同的是說法的出處**:那一段是靜態的一句話,所以寫在這裡;
+      這裡的訊息是 `check.js` 依輸入產生的(「須有 10 列,目前有 9 列」之類),因此
+      內容由 `editor.js` 寫入,本檔只負責宣告「槽在哪、預設是什麼狀態」。
+
+      ## 為什麼用 `data-message-for` 而不是 id
+
+      取值就是 `check.js` 的 `CheckIssue.field`,與控制項的 `data-field` 同名 ——
+      requirement 8.4 要把每一項未通過定位到欄位,同名才對得起來。**tasks 4.3 為其餘
+      六欄補上訊息槽時,照這個形狀在各欄的控制項之後再加一個即可**,不必為每一欄各記
+      一個 id,`editor.js` 那一側也不必跟著長出七個查詢。
+
+      排在控制項的正下方、提示的上方:訊息講的是這一格填得對不對,離控制項越遠越像
+      在講別的東西;而提示是常駐的註腳,不該把當下的問題擠下去。
+    -->
+    <p class="field-hint" data-message-for="fen" hidden></p>
     <p class="field-hint">貼上完整的局面字串,盤面會照著重畫。</p>
+    <!--
+      起手方(requirement 2.6)。內容由 `editor.js` 自 FEN 的走子方寫入
+      (`check.js` 的 `sideFromFen`),讀不出來時是一個破折號 —— 不猜一個,題庫容得下
+      黑先的排局,預設成紅先會讓那些題目靜默地標錯。
+
+      **它不能放進 `#board`**:`board.js` 以 `replaceChildren` 畫盤,每畫一次就會把
+      盤面容器裡的東西整份換掉,擺在那裡的起手方會在第一次繪盤時消失。放在 FEN 這一
+      欄裡也更合理 —— 它是那串字的推論結果,而不是另一件要填的事(2.6 明載起手方
+      **不提供獨立輸入**,所以這裡是一個 `<p>` 而不是一個控制項)。
+    -->
+    <p class="field-hint" id="side-to-move"></p>
   </div>
 
   <div class="field">
@@ -216,5 +261,23 @@
     <p class="field-hint">相對於題庫根目錄,例如 適情雅趣~卷一/26.json。</p>
   </div>
 </section>
+
+<!--
+  組裝層(tasks 4.2 起)。位置與形態都與對局頁的 `<script type="module" src="./app.js">`
+  相同,理由也相同:
+
+  - **`type="module"`** —— `editor.js` 以 `import` 取用 `./check.js` 與 `../board.js`,
+    少了它整個檔案在第一行就是語法錯誤,而畫面上看起來只是「什麼都沒發生」。
+    module 本來就是延後執行的,不必再寫 `defer`。
+  - **排在 DOM 之後** —— 本檔的容器與欄位在它執行時都已經在,`editor.js` 因此不需要
+    等任何事件就查得到 `[data-field="fen"]` 與 `#board`。
+  - **`./` 而不是 `../`** —— 它是本目錄自己的檔案(檔首那段路徑約定)。
+
+  這一頁在沒有 JavaScript 時仍是一份完整的表單容器:盤面那一格留著 `.board-placeholder`
+  的說明,七個欄位照樣打得了字。**收題頁自此需要 JS 才畫得出盤面**,而以 `file://`
+  直接開啟本檔是畫不出來的 —— 瀏覽器不允許自 `file://` 匯入 ES module,要看實際行為
+  請經由服務開啟 `/editor/`。
+-->
+<script type="module" src="./editor.js"></script>
 </body>
 </html>
