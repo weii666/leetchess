@@ -67,14 +67,20 @@ __all__ = ["PositionRepository", "validate_position"]
 REQUIRED_FIELDS = (
     "id",
     "title",
-    "description",
     "fen",
     "difficulty",
     "tags",
 )
 
-#: 由題目驗證工具回填、可為空的欄位。
-OPTIONAL_FIELDS = ("max_dtm",)
+#: 允許出現但**非必填**的欄位。
+#:
+#: - `max_dtm` 由題目驗證工具回填,現階段可為空。
+#: - `description` 自 corpus-editor 的修訂起改為選填(該 spec 的 requirement 3.10):
+#:   產品的兩個畫面都不渲染它(`web/list.js` 刻意不取用、`web/app.js` 已移除
+#:   `#puzzle-description`),而它的內容就是「出處 + 局號 + 局名」的串接,與 `title`
+#:   重複。**它仍在 `KNOWN_FIELDS` 內** —— 既有題目一律帶著描述,把它自允許清單一併
+#:   刪掉會讓那些題目全數被判為含未知欄位。
+OPTIONAL_FIELDS = ("max_dtm", "description")
 
 KNOWN_FIELDS = frozenset(REQUIRED_FIELDS + OPTIONAL_FIELDS)
 
@@ -272,7 +278,7 @@ def _read_position(where: str, raw: Any) -> Position:
     return Position(
         id=_read_int(where, raw, "id"),
         title=_read_str(where, raw, "title"),
-        description=_read_str(where, raw, "description"),
+        description=_read_optional_str(where, raw, "description"),
         fen=fen,
         side_to_move=_side_from_fen(where, fen),
         difficulty=_read_int(where, raw, "difficulty"),
@@ -343,6 +349,17 @@ def _read_str(where: str, raw: dict[str, Any], field: str) -> str:
     if not isinstance(value, str):
         raise _type_error(where, field, "字串", value)
     return value
+
+
+def _read_optional_str(where: str, raw: dict[str, Any], field: str) -> str:
+    """選填的字串欄位:缺席時回空字串,**有值時型別照驗**。
+
+    「缺席」與「值不是字串」是兩件事:前者是允許的(欄位選填),後者仍是一份壞掉的
+    題目檔。少了這道分辨,`"description": 123` 會被靜靜讀成空字串。
+    """
+    if field not in raw:
+        return ""
+    return _read_str(where, raw, field)
 
 
 def _read_tags(where: str, raw: dict[str, Any]) -> list[str]:

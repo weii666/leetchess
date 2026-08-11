@@ -177,7 +177,7 @@
 >
 > 本組**刪除的程式碼多於新增的**。每一項都要連同其測試一起處理 —— 留著一份沒有呼叫端的函式與它的測試,下一個人會以為那是現行行為。
 
-- [ ] 7.1 題目 schema 的描述改為選填
+- [x] 7.1 題目 schema 的描述改為選填
   - `structure.md` 的 schema 表格把 `description` 標為選填並記下理由;**定義權在這份文件**,程式碼跟著它走
   - 自 `service/positions.py` 的必填欄位清單移除 `description`;`service/types.py` 的 `Position.description` 與 `service/main.py` 的 `CatalogEntry.description` 改為可空
   - `description` **仍是允許的欄位** —— 只是不再必填。把它自允許清單一併刪掉會讓既有題目全數被判為含未知欄位

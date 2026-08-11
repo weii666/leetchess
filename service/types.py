@@ -99,6 +99,11 @@ class Position:
       (`positions.py` 的 `_side_from_fen`)。起手方在 FEN 裡本來就寫著,再開一個
       欄位等於同一件事有兩個出處,遲早互相矛盾。
     - `max_dtm` 由驗證工具日後回填,現階段可為空,不得視為必填。
+    - `description` **選填**(corpus-editor 的 requirement 3.10):產品的兩個畫面都
+      不渲染它,而它的內容就是「出處 + 局號 + 局名」的串接,與 `title` 重複。
+      **選填的是題目 JSON,不是本型別**:`positions.py` 對缺席的描述補上空字串,所以
+      這裡不給預設值也不寫成 `str | None` —— 呼叫端因此不必為它多一個分支,而
+      dataclass 的欄位順序也不必為了一個預設值重排。
     """
 
     id: int

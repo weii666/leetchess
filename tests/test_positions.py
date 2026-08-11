@@ -439,6 +439,53 @@ def test_an_unfilled_max_dtm_is_none(
 # 自己寫的資料、不是使用者輸入,逐欄位窮舉只是把 `REQUIRED_FIELDS` 的清單抄第二遍。
 # 真正要守住的是「壞掉的題目會在啟動時被擋下,且訊息指得出是哪個檔案哪裡壞了」,
 # 每種壞法一個代表就足以釘住這件事。
+def test_a_position_without_a_description_still_loads(tmp_path: pathlib.Path) -> None:
+    """`description` 是**選填**的(corpus-editor 的 requirement 3.10)。
+
+    收題頁自該輪修訂起不再寫出描述:產品的兩個畫面都不渲染它(`web/list.js` 刻意
+    不取用、`web/app.js` 的 `#puzzle-description` 已移除),而它的內容就是
+    「出處 + 局號 + 局名」的串接,與 `title` 重複。
+
+    缺席時讀成**空字串**而不是 `None` —— `Position.description` 維持 `str`,呼叫端
+    因此不必為它多一個分支。
+    """
+    _write_position(tmp_path, "適情雅趣", 1, description=OMIT)
+
+    assert _loaded(tmp_path).get(1).description == ""
+
+
+def test_a_description_that_is_not_a_string_is_still_rejected(
+    tmp_path: pathlib.Path,
+) -> None:
+    """選填指的是**可以缺席**,不是「有值也不驗」。
+
+    少了這道分辨,`"description": 123` 會被靜靜讀成空字串 —— 一份壞掉的題目檔就這樣
+    載進來了,而題目 JSON 是專案自己寫的資料,靜默容錯在這裡沒有任何好處。
+    """
+    _write_position(tmp_path, "適情雅趣", 1, description=123)
+
+    with pytest.raises(ValueError) as info:
+        PositionRepository(tmp_path).load()
+    assert "description" in str(info.value)
+
+
+def test_every_existing_position_in_the_real_corpus_still_loads() -> None:
+    """真實題庫的每一題仍載得進去 —— 描述改選填的回歸網。
+
+    與上面那條**缺一不可**:只驗「不帶描述也載得進去」的話,一個把 `description`
+    自 `KNOWN_FIELDS` 一併刪掉的實作也會通過,而既有題目全部帶著描述,那樣會讓它們
+    全數被判為含未知欄位 —— 服務啟動不起來。
+    """
+    repository = PositionRepository(DEFAULT_POSITIONS_DIR)
+    repository.load()
+
+    positions = repository.all()
+    assert positions, "真實題庫是空的,這條問不出東西"
+    assert all(position.description for position in positions), (
+        "真實題庫的題目本來就都帶著描述,這條的前提不成立了"
+    )
+
+
 BROKEN_POSITIONS = [
     ("缺必填欄位", {"fen": OMIT}, "fen"),
     ("欄位型別不符", {"id": "1"}, "id"),

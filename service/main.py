@@ -230,7 +230,14 @@ class CatalogEntry(BaseModel):
 
     id: int = Field(description="題號,全域唯一,跨書連續。列表與對局以它交接。")
     title: str = Field(description="局名,列表顯示用,單行精簡。")
-    description: str = Field(description="完整描述,涵蓋書名、局號、局名。")
+    description: str = Field(
+        default="",
+        description=(
+            "完整描述,涵蓋書名、局號、局名。**選填**(corpus-editor 的 requirement "
+            "3.10):題目 schema 自該輪修訂起不再必填,缺席時為空字串。列表頁刻意"
+            "不取用它,保留在索引裡是因為移除會改變既有的回應形狀。"
+        ),
+    )
     difficulty: int = Field(description="難度分級,列表的篩選條件之一。")
     tags: list[str] = Field(description="題目標籤,可多個,列表的篩選條件之一。")
     source: str = Field(
