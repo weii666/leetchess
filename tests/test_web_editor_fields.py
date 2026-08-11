@@ -57,6 +57,19 @@ CONTENT_TYPES = {
 #: 表單欄位的順序,即 `check.js` 的 `checkForm()` 回傳清單的順序。
 FORM_FIELDS = ["id", "title", "description", "difficulty", "tags", "fen", "target"]
 
+#: 各欄在畫面上的名稱。寫入操作旁的點名照著這些字念(8.4),維護者要靠它們回頭找到
+#: 是哪一格。**期望值寫在這裡,不回頭讀受測頁面的 `<label>`** —— 拿受測物自己的字
+#: 當期望值,兩邊一起改壞也不會轉紅。
+FIELD_LABELS = {
+    "id": "題號",
+    "title": "局名",
+    "description": "描述",
+    "difficulty": "難度",
+    "tags": "標籤",
+    "fen": "FEN",
+    "target": "目標檔案路徑",
+}
+
 #: 寫入操作(4.1「不執行寫入」要有東西可停用)與它旁邊那句說明(8.4)。
 #: **本任務只做到「停用」** —— 真正的寫入屬第 5 組。
 WRITE_BUTTON = "#write"
@@ -157,6 +170,11 @@ def value_of(page, name: str) -> str:
     return page.input_value(control(name))
 
 
+def label_of(name: str) -> str:
+    """某一欄在畫面上的名稱(見 `FIELD_LABELS`)。"""
+    return FIELD_LABELS[name]
+
+
 def message(page, name: str) -> str:
     """某一欄當下說的話;沒有話說(`hidden`)時為空字串,槽位不存在時為 `None`。"""
     return page.evaluate(
@@ -237,16 +255,30 @@ def test_the_difficulty_starts_unchosen(editor_page) -> None:
 
     `check.js` 的 `checkForm()` 以空字串判定「還沒選」;產生選項時若插到最前面,
     維護者不做選擇也會寫進一個難度。
+
+    還沒選是**還沒填**而不是填錯,因此難度那一格旁邊不掛訊息 —— 這一項未通過由
+    寫入操作旁的點名表達(見 `test_an_untouched_page_says_nothing_beside_any_field`)。
     """
     assert value_of(editor_page, "difficulty") == ""
-    assert message(editor_page, "difficulty"), "還沒選難度,畫面卻沒有指出這一項"
+    assert message(editor_page, "difficulty") == "", "還沒選難度不是填錯,不該掛訊息"
+    assert "難度" in note(editor_page), f"點名漏了還沒選的難度:{note(editor_page)!r}"
 
 
 def test_the_difficulty_field_accepts_no_value_outside_the_three_levels(
     editor_page,
 ) -> None:
-    """3.2:不接受自由輸入的數值 —— 三個分級以外的值連選都選不到。"""
-    with pytest.raises(Exception):
+    """3.2:不接受自由輸入的數值 —— 三個分級以外的值連選都選不到。
+
+    兩道防線擋掉「因為別的原因而通過」:先確認那個控制項真的找得到(選擇器打錯的話
+    這一行就紅,而不是讓它去撐滿逾時再算成功),再接 Playwright 自己的錯誤型別而不是
+    `Exception`。playwright 在函式內才匯入,理由與 `tests/conftest_web.py` 相同 ——
+    不讓不需要瀏覽器的測試付這個代價。
+    """
+    from playwright.sync_api import Error as PlaywrightError
+
+    assert editor_page.locator(control("difficulty")).count() == 1, "難度控制項不存在"
+
+    with pytest.raises(PlaywrightError):
         editor_page.select_option(control("difficulty"), "4", timeout=1000)
 
     assert value_of(editor_page, "difficulty") == ""
@@ -421,27 +453,92 @@ def test_a_complete_form_says_nothing_and_enables_writing(editor_page) -> None:
     assert write_is_enabled(editor_page), "七項全過,寫入操作卻仍停用"
 
 
-@pytest.mark.parametrize("missing", ["id", "title", "description", "tags", "target"])
-def test_a_missing_required_field_is_pointed_at_and_stops_writing(
+@pytest.mark.parametrize("missing", FORM_FIELDS)
+def test_a_missing_required_field_is_named_in_the_note_and_stops_writing(
     editor_page, missing: str
 ) -> None:
-    """4.1、8.4:必填未填時停用寫入,**並且在畫面上指出是哪一項**。
+    """4.1、8.4:必填未填時停用寫入,並指出是哪一項 —— 指在**寫入操作旁**。
 
-    逐欄參數化而不是只測一欄:只把訊息接到其中一兩欄的實作,單一案例照樣會綠。
-    難度與 FEN 各有自己的一條(見下方),因為它們的「空」不是用 `fill('')` 表達的。
+    空著的欄位自己不出聲(見 `test_an_untouched_page_says_nothing_beside_any_field`
+    的說明),這一條因此同時釘住兩件事:那一格安靜,而那一項未通過並沒有消失。
+    兩者少了任何一件,4.1 或 8.4 就有一個不成立。
+
+    逐欄參數化涵蓋全部七欄(含難度與 FEN):只把點名接到其中一兩欄的實作,單一案例
+    照樣會綠。難度的「空」是選回第一個選項,`put()` 已經吸收掉這個差別。
     """
     fill_valid_form(editor_page, **{missing: ""})
 
-    assert message(editor_page, missing), f"{missing} 未填,畫面卻沒有指出這一項"
+    assert message(editor_page, missing) == "", (
+        f"{missing} 只是還沒填,那一格不該掛訊息"
+    )
     assert not write_is_enabled(editor_page), f"{missing} 未填,寫入操作卻仍可用"
-    assert note(editor_page), "停用了寫入卻沒說為什麼"
+    assert label_of(missing) in note(editor_page), (
+        f"點名漏了尚未填妥的 {missing}:{note(editor_page)!r}"
+    )
 
 
-def test_an_unchosen_difficulty_is_pointed_at_and_stops_writing(editor_page) -> None:
-    """4.1、8.4:難度沒選同樣是一項未通過。"""
-    fill_valid_form(editor_page, difficulty="")
+def test_an_untouched_page_says_nothing_beside_any_field(editor_page) -> None:
+    """4.1、8.4:剛開頁時七個欄位一句話都不說,但七項全數列在寫入操作旁。
 
-    assert message(editor_page, "difficulty"), "難度沒選,畫面卻沒有指出這一項"
+    這是本輪定案的規則:**還沒填不是填錯**。一開頁就在每一格旁邊掛一句紅字,等於在
+    維護者還沒開始之前先說了七次錯,而之後真正的錯字反而混在裡面看不出來。表單還沒
+    填完是一件事,整份講一次就夠。
+
+    「沒有變成看不見」由後半段保證:寫入停用,而且每一項都點得出名字。
+    """
+    for name in FORM_FIELDS:
+        assert value_of(editor_page, name) == "", f"{name} 一開頁就有值,前提不成立"
+        assert message(editor_page, name) == "", f"{name} 還沒填就掛著訊息"
+
+    text = note(editor_page)
+    for name in FORM_FIELDS:
+        assert label_of(name) in text, f"點名漏了 {name}:{text!r}"
+    assert not write_is_enabled(editor_page), "七欄全空,寫入操作卻可用"
+
+
+#: 填了、但填錯的七種輸入。**這些必須留在欄位旁** —— 維護者已經寫了東西而那個東西
+#: 不對,訊息離那一格越遠越難對照(8.4)。描述與難度不在此列:兩者的淺層檢查只有
+#: 「有沒有填」,不存在「填錯」的形態。
+WRONGLY_FILLED = [
+    pytest.param("id", "26.5", id="id-not-an-integer"),
+    pytest.param("id", "0", id="id-not-positive"),
+    pytest.param("tags", "、,  ", id="tags-only-separators"),
+    pytest.param("fen", "9/9/9 w - - 0 1", id="fen-three-rows"),
+    pytest.param("target", "26.json", id="target-outside-a-book-folder"),
+    pytest.param("target", "/適情雅趣~卷一/26.json", id="target-absolute"),
+]
+
+
+@pytest.mark.parametrize(("name", "value"), WRONGLY_FILLED)
+def test_a_wrongly_filled_field_is_pointed_at_its_own_field(
+    editor_page, name: str, value: str
+) -> None:
+    """4.2、4.6、8.4:填了而填錯的欄位,訊息就掛在那一格旁邊。
+
+    這是上一組的另一半:空著時安靜、填錯時出聲。兩者若共用同一條路,不是七欄一起
+    吵、就是七欄一起啞 —— 而後者會讓「題號必須是正整數」這種真正需要當場看到的
+    訊息只剩下寫入鈕旁的一個名字,維護者得自己回頭猜那一格是哪裡不對。
+    """
+    fill_valid_form(editor_page, **{name: value})
+
+    assert message(editor_page, name), f"{name} 填錯了,那一格卻沒有說是哪裡不對"
+    assert not write_is_enabled(editor_page)
+    assert label_of(name) in note(editor_page)
+
+
+def test_a_field_that_is_emptied_again_goes_quiet(editor_page) -> None:
+    """填錯之後又清空,那一格要跟著安靜下來 —— 但那一項未通過仍在點名裡。
+
+    這一條問的是規則的**判準是當下的值**,而不是「這一欄曾經出過錯」:記著歷史的
+    實作會讓一個已經清空的欄位一直掛著上一次的紅字。
+    """
+    fill_valid_form(editor_page, id="26.5")
+    assert message(editor_page, "id"), "前提不成立:填錯時那一格本來就該出聲"
+
+    put(editor_page, "id", "")
+
+    assert message(editor_page, "id") == "", "清空之後那一格還掛著上一次的訊息"
+    assert label_of("id") in note(editor_page), "清空之後那一項未通過從畫面上消失了"
     assert not write_is_enabled(editor_page)
 
 
@@ -463,6 +560,7 @@ def test_no_tags_at_all_is_pointed_at_the_tags_field(editor_page) -> None:
     """4.6:標籤一個也沒填時停用寫入,並指出標籤至少需要一個。
 
     只打分隔符號同樣是一個都沒有 —— 這是 `parseTags` 的行為,呈現層照著它走。
+    **這一欄不是空的**,所以訊息掛在欄位旁:維護者打的那幾個符號看起來像有填。
     """
     fill_valid_form(editor_page, tags="、,  ")
 
@@ -470,20 +568,31 @@ def test_no_tags_at_all_is_pointed_at_the_tags_field(editor_page) -> None:
     assert not write_is_enabled(editor_page)
 
 
-def test_an_empty_fen_stops_writing_and_is_named_beside_the_control(editor_page) -> None:
-    """4.1 + 2.5 的交界:FEN 欄位空著時**不在那一欄掛訊息**,但仍要指出這一項。
+def test_an_empty_fen_stops_writing_and_is_named_in_the_note(editor_page) -> None:
+    """4.1 + 2.5 的交界:FEN 欄位空著時那一欄不掛訊息,但仍要指出這一項。
 
-    2.5 已定案:清空 FEN 呈現的是空盤面而不是錯誤,那一欄的訊息槽因此必須是空的
-    (`tests/test_web_editor_board.py` 釘住)。可是 4.1 說必填未填要停用寫入、8.4
-    說要指出是哪一項 —— 兩者只能在寫入操作旁邊那句說明裡交會。
-
-    少了這一條,「FEN 沒填」就會變成整份表單裡唯一一個停用了寫入卻不說原因的項目。
+    FEN 對這條規則特別敏感,所以單獨留一條:requirement 2.5 明載清空 FEN 呈現的是
+    **空盤面而不是錯誤**(`tests/test_web_editor_board.py` 反向釘住那一欄必須是空的)。
+    其餘六欄如今照同一條規則走,但只有這一欄的安靜是被另一則需求直接要求的 ——
+    哪天有人把「空欄位也要出聲」改回來,這一條會與 2.5 一起紅。
     """
     fill_valid_form(editor_page, fen="")
 
     assert message(editor_page, "fen") == "", "空的 FEN 欄位掛著錯誤訊息,與 2.5 相牴觸"
     assert not write_is_enabled(editor_page), "FEN 沒填,寫入操作卻仍可用"
     assert "FEN" in note(editor_page), f"停用說明沒有點名 FEN:{note(editor_page)!r}"
+
+
+def test_a_broken_fen_is_pointed_at_its_own_field(editor_page) -> None:
+    """2.4 + 8.4:貼了一串展不開的 FEN 時,訊息就在那一欄旁邊。
+
+    與上一條成對:同一個欄位、兩種輸入、兩種呈現。少了這一條,一個「FEN 那一格
+    永遠不出聲」的實作會全綠,而 FEN 抄錯正是這個工具存在的理由。
+    """
+    fill_valid_form(editor_page, fen="9/9/9 w - - 0 1")
+
+    assert message(editor_page, "fen"), "FEN 展不開,那一格卻沒有說是哪裡不對"
+    assert not write_is_enabled(editor_page)
 
 
 def test_the_note_names_every_outstanding_item(editor_page) -> None:
@@ -496,13 +605,14 @@ def test_the_note_names_every_outstanding_item(editor_page) -> None:
 
 
 def test_a_fixed_message_disappears_again(editor_page) -> None:
-    """未通過不是會黏住的狀態:改好了,訊息要跟著收起來、寫入要回來。"""
-    fill_valid_form(editor_page, id="")
+    """未通過不是會黏住的狀態:改好了,訊息與點名都要跟著收起來、寫入要回來。"""
+    fill_valid_form(editor_page, id="26.5")
     assert message(editor_page, "id")
 
     put(editor_page, "id", VALID_FORM["id"])
 
     assert message(editor_page, "id") == "", "改好之後訊息還掛在畫面上"
+    assert note(editor_page) == "", "改好之後點名還掛在畫面上"
     assert write_is_enabled(editor_page)
 
 
@@ -559,7 +669,11 @@ def test_a_failed_check_is_told_apart_from_a_hint_without_colour_alone(
     標籤那一欄同時有兩者:一句常駐提示(「可填多個…」)與一個未通過的訊息。兩者
     若只差在顏色,對色覺障礙者等於沒有差別 —— 專案對難度說法用英文的理由就是這條
     (`structure.md`),同一個標準在此成立。
+
+    先把標籤填成**填了而填錯**的樣子:空著的欄位如今是安靜的,量不到那一句話。
     """
+    put(editor_page, "tags", "、,  ")
+
     styles = editor_page.evaluate(
         """() => {
           const read = (element) => {
@@ -586,7 +700,7 @@ def test_a_failed_check_is_told_apart_from_a_hint_without_colour_alone(
     )
 
     assert styles is not None, "標籤那一欄沒有同時擺出未通過訊息與常駐提示"
-    assert styles["issue"]["visible"], "標籤還沒填,未通過的訊息卻沒有顯示"
+    assert styles["issue"]["visible"], "標籤填錯了,未通過的訊息卻沒有顯示"
     assert styles["hint"]["visible"], "常駐提示不見了"
 
     non_colour = [
@@ -600,12 +714,13 @@ def test_a_failed_check_is_told_apart_from_a_hint_without_colour_alone(
 
 
 def test_aria_marks_the_controls_that_did_not_pass(editor_page) -> None:
-    """8.4 的無障礙面:未通過的控制項帶 `aria-invalid`,通過的不帶。
+    """8.4 的無障礙面:填錯的控制項帶 `aria-invalid`,填對的與還沒填的都不帶。
 
     訊息槽是看得見的那一半;螢幕閱讀器讀的是這一半。兩者由同一次呈現寫入,不會
-    各說各話。
+    各說各話 —— 包括「還沒填的欄位不出聲」這條規則:對著一個空欄位宣告 invalid,
+    在螢幕閱讀器上與畫面上是同一種噪音。
     """
-    fill_valid_form(editor_page, id="")
+    fill_valid_form(editor_page, id="26.5", tags="")
 
     marked = editor_page.evaluate(
         """() => Object.fromEntries(
@@ -615,8 +730,9 @@ def test_aria_marks_the_controls_that_did_not_pass(editor_page) -> None:
         )"""
     )
 
-    assert marked["id"] == "true", f"未通過的欄位沒有標記:{marked}"
+    assert marked["id"] == "true", f"填錯的欄位沒有標記:{marked}"
     assert marked["title"] is None, f"已填妥的欄位被標成未通過:{marked}"
+    assert marked["tags"] is None, f"還沒填的欄位被標成未通過:{marked}"
 
 
 # --- 本任務的邊界:只停用,不寫入 ---------------------------------------
