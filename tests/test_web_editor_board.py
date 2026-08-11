@@ -112,6 +112,12 @@ UNPARSEABLE_FENS = [
 
 #: `editor.js` 可以匯入的模組(design 的 Components and Interfaces → `editor.js`)。
 #: 只列出設計指派給它的依賴 —— 多出來的任何一個都表示組裝層開始自己長規則。
+#:
+#: `../catalog.js` 對應的是 design 那一列的「Outbound:`GET /api/catalog`(既有端點,
+#: 取既有題號)」。design 寫的是**端點**,而那個端點在前端早就有一個唯一的 client
+#: (`web/catalog.js`,列表頁用的那一支,帶逾時上界且不讓後端原文外流)。撞號檢查
+#: (tasks 5.1)因此匯入它,而不是在組裝層再寫一份 fetch —— 後者正是本條要擋的
+#: 「組裝層自己長規則」。
 ALLOWED_IMPORTS = {
     "./check.js",
     "./corpus-file.js",
@@ -120,6 +126,7 @@ ALLOWED_IMPORTS = {
     "../fen.js",
     "../difficulty.js",
     "../api.js",
+    "../catalog.js",
 }
 
 

@@ -229,7 +229,7 @@ sequenceDiagram
 | 3.4, 3.5 | 不提供 `max_dtm` 與出處輸入 | `web/editor/index.html` | DOM 契約 | — |
 | 3.6, 3.7 | 描述建議值,可自由改寫 | `check.js` | `suggestDescription` | — |
 | 4.1, 4.2, 4.6 | 必填、題號正整數、標籤至少一個 | `check.js` | `checkForm` | 淺層檢查 |
-| 4.3, 4.4, 4.5 | 撞號檢查含本分頁已寫入者 | `editor.js` | `GET /api/catalog` + 分頁內集合 | 寫入流程 |
+| 4.3, 4.4, 4.5 | 撞號檢查含本分頁已寫入者 | `editor.js` | `catalog.js` 的 `loadCatalog` + 分頁內集合 | 寫入流程 |
 | 4.7, 4.8, 4.9 | 權威驗證與引擎可載入性;確認失敗即不寫入 | `service/editor.py` | `POST /api/editor/validate` | 寫入流程 |
 | 4.10 | 不判斷紅先必勝 | `service/editor.py` | 驗證僅涵蓋 schema 與可載入性 | — |
 | 5.1, 5.2, 5.3 | 路徑輸入與範圍限制 | `check.js` | `checkTargetPath` | — |
@@ -464,7 +464,8 @@ interface FsModule {
 **Dependencies**
 
 - Outbound:`check.js`、`corpus-file.js`、`fs.js`(P0);`board.js`、`fen.js`(P0);`difficulty.js`(P1);`api.js` 的 `ApiErrorCode`(P1)
-- Outbound:`GET /api/catalog`(既有端點,取既有題號)、`POST /api/editor/validate`(P0)
+- Outbound:`web/catalog.js` 的 `loadCatalog` / `CatalogError` — 取既有題號(P1)。**這是 `GET /api/catalog` 既有的唯一 client**(列表頁在用),已帶逾時上界與錯誤正規化;`api.js` 的 `request()` 未 export、對外只有 `loadPosition` 與 `requestBlackMove`,構造上到不了這個端點,故兩者不是二選一
+- Outbound:`POST /api/editor/validate`(P0)
 
 **Contracts**: Service [ ] / API [ ] / Event [ ] / Batch [ ] / State [x]
 

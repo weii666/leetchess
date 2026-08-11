@@ -1,6 +1,6 @@
 /**
- * 收題頁的組裝層:把七個欄位接到盤面、難度選項、描述建議值與淺層檢查上
- * (tasks 4.2、4.3;requirements 2.1–2.6、3.2、3.3、3.6、3.7、4.1、4.2、4.6、8.3、8.4)。
+ * 收題頁的組裝層:把七個欄位接到盤面、難度選項、描述建議值、淺層檢查與撞號檢查上
+ * (tasks 4.2、4.3、5.1;requirements 2.1–2.6、3.2、3.3、3.6、3.7、4.1–4.6、8.3、8.4)。
  *
  * 這是收題頁依賴鏈的最右端,也是**唯一知道 DOM 存在的模組**(design 的
  * Components and Interfaces)。`check.js` 是純函式、`corpus-file.js` 是純函式、
@@ -14,10 +14,11 @@
  * 層再存一份狀態,而那份狀態遲早與輸入框裡的字分家 —— 使用者核對的會是一個已經
  * 不在輸入框裡的局面,那比什麼都不畫更危險(收題工具存在的理由就是肉眼核對 FEN)。
  *
- * 因此畫面該長什麼樣幾乎完全是七個欄位當下那些字的函式。**模組層只有一個狀態變數**
- * (`suggested`,見下一段),它記的不是畫面而是「描述欄裡那句話是誰打的」——
- * 那件事無法由當下的值看出來。(tasks 5.x 會帶進其餘的狀態 —— 目錄控制代碼、本分頁
- * 已寫入的題號 —— 屆時它們同樣只驅動這一條路徑。)
+ * 因此畫面該長什麼樣幾乎完全是七個欄位當下那些字的函式。模組層的狀態變數只有三個
+ * (`suggested`、`writtenIds`、`collidedId`),它們記的都**不是畫面**,而是三件無法
+ * 由當下的值看出來的事:描述欄裡那句話是誰打的、本分頁已經成功寫入過哪些題號、
+ * 上一次寫入嘗試指認了哪個題號撞號。三者一律只經 `render()` 反映到畫面上。
+ * (tasks 5.3 會再帶進目錄控制代碼,屆時同樣只驅動這一條路徑。)
  *
  * ## 描述建議值:每一次都算,但只在沒有人動過它時才寫回去
  *
@@ -58,14 +59,47 @@
  * 錯誤訊息,而 requirement 2.5 要的是清空輸入即呈現空盤面、不報錯。兩者在本檔分成
  * 兩條路(見 `readFenView`),這是 tasks.md 對 3.1 的筆記點名的地方。
  *
- * ## 本檔目前不含的部分
+ * ## 寫入是一條序列,本檔目前只走到第二步
  *
- * 撞號、權威驗證、目錄授權與寫檔屬第 5 組。`#write` 因此**還沒有任何 click 處理**:
- * 本輪只做到「未通過時停用它」(4.1)。它們都會接在同一個 `render()` 上,不必回頭
- * 改動這裡的形狀。
+ * 寫入一題的完整次序是(design 的 System Flows):**取題庫索引 → 撞號 → 送權威驗證
+ * → 取目錄授權 → 重讀目標檔 → 文字層追加 → 寫回 → 記下題號並清空欄位**。
+ * tasks 5.1 實作前兩步,5.2 接上權威驗證,5.3 接上授權與寫檔,5.4 接上成敗的呈現。
+ * 因此 `#write` 的 click 處理**刻意寫成一條會被往下接的序列**(`runWriteSequence`),
+ * 而不是一個自成一體的動作:5.2 要加的東西接在撞號通過的那一行之後,不必回頭改
+ * 這裡的形狀。
+ *
+ * 淺層檢查未通過時 `#write` 仍然是停用的(4.1),所以序列跑得起來就代表七個欄位
+ * 都已填妥 —— 撞號檢查不必再驗一次題號的寫法。
+ *
+ * ## 撞號檢查看的是一個聯集,而且每一次嘗試都重新取索引
+ *
+ * 判準是「題號在不在 `GET /api/catalog` 的既有題號 ∪ 本分頁已成功寫入的題號裡」
+ * (research 的 Decision 5)。兩半各補一個時間窗:索引是**服務啟動時的快照**,而
+ * 開發啟動腳本要等題目檔變動觸發重啟才會換上新的一份,所以剛寫進去的一題會有一段
+ * 「檔案裡有、索引裡沒有」的空窗(4.4);反過來,已經進了索引的題號會因為**每一次
+ * 嘗試都重新取一次索引**而自然歸位,不必由本分頁的集合永遠背著。
+ *
+ * 本分頁的集合**只在寫入成功後才加入**(`recordWrittenId`),失敗的嘗試不佔用題號。
+ * 這一輪還沒有「寫入成功」這件事(那是 5.3),所以本檔內沒有任何一處呼叫它 ——
+ * 規則屬 5.1,發生的時機屬 5.3,兩者刻意分開。
+ *
+ * 索引取不到(服務重啟中、連線斷掉、逾時)時**序列就停在那裡**,而且絕不折成
+ * 「一份空索引」繼續走:那會讓最容易撞號的那一刻(剛寫完一題、服務正在重啟)
+ * 變成最放行的一刻。此時該對使用者說什麼屬 5.4 的一般失敗處理(design 的 Risks)。
+ *
+ * ## 撞號的說法定位在題號那一欄,而且不停用寫入
+ *
+ * design 的 Error Handling 把撞號歸在「可自行修正」那一類 —— 定位到欄位(8.4)、
+ * 保留表單內容。它因此**不進 `checkForm()` 的清單**:那份清單的每一項都是「這樣寫
+ * 下去服務端會拒絕」而且由當下的值算得出來,撞號則是一次嘗試的結果。
+ *
+ * 停用寫入也是錯的:撞號檢查在每一次按下時重跑,擋不掉的寫入不存在,而停用會讓
+ * 維護者無法對同一個題號再試一次(索引可能剛好正在重啟)—— 他得先把題號改掉再改
+ * 回來才按得下去,那是一個沒有理由的手續。
  */
 
 import { renderBoard } from '../board.js';
+import { CatalogError, loadCatalog } from '../catalog.js';
 import { DIFFICULTY_LABELS } from '../difficulty.js';
 import { parseFen } from '../fen.js';
 import { checkForm, checkFenStructure, sideFromFen, suggestDescription } from './check.js';
@@ -133,6 +167,20 @@ const WRITE_NOTE_FALLBACK = '無法寫入,仍有項目未通過。';
 const NAME_SEPARATOR = '、';
 
 /**
+ * 撞號的說法(requirements 4.3、4.4)。**題號本身一定要出現在句子裡** —— 兩條
+ * acceptance criteria 要的都是「指出重複的題號」,一句「這個題號已被使用」對著一個
+ * 可能剛被改過的輸入框說話,維護者無從確認講的是不是他眼前那一個。
+ *
+ * **既有題目與本分頁已寫入者共用同一句話**,不分成兩種說法:兩者對維護者而言的
+ * 下一步完全相同(換一個題號),而分開只會逼他去理解「索引」與「本次寫入」的差別
+ * ——那是本工具的內部機制,不是他要處理的事。
+ *
+ * @param {number} id 重複的題號。
+ * @returns {string}
+ */
+const collisionText = (id) => `題號 ${id} 已被使用,請改用其他題號`;
+
+/**
  * 取表單控制項。
  *
  * 一律以 `data-field` 查詢而不是 id(tasks 4.1 的 DOM 契約):`data-field` 的取值
@@ -175,7 +223,8 @@ const elements = {
   // 起手方(2.6)。它在 HTML 裡就排在 FEN 那一欄底下 —— **不能擺進 `#board`**,
   // `renderBoard()` 以 `replaceChildren` 畫盤,擺在那裡的話第一次繪盤就會被換掉。
   sideToMove: document.getElementById('side-to-move'),
-  // 寫入操作與它的停用說明(4.1、8.4)。本輪只停用它,不接 click(見檔首)。
+  // 寫入操作與它的停用說明(4.1、8.4)。click 跑的是寫入序列,本輪走到撞號檢查
+  // 為止(見檔首)。
   write: document.getElementById('write'),
   writeNote: document.getElementById('write-note'),
 };
@@ -191,6 +240,30 @@ const elements = {
  * 對那一欄做的事與「它還是建議值」完全相同。
  */
 let suggested = '';
+
+/**
+ * 本分頁**已成功寫入**的題號(requirement 4.4;design 的 State Management)。
+ *
+ * 它補的是題庫索引的一段空窗:索引是服務啟動時的快照,剛寫進去的一題要等服務因
+ * 檔案變動而重啟才會出現在裡面。那段期間 `GET /api/catalog` 查無此人,只有這個集合
+ * 擋得住第二次用到同一個題號。
+ *
+ * **只在寫入成功後才加入**(見 `recordWrittenId`),失敗的嘗試不佔用題號 —— 否則
+ * 一次驗證未過就會讓一個誰也沒在用的題號自此不能再用,而維護者看不出原因。
+ *
+ * 不持久化(design 的 State Management):重整分頁即清空,而那時索引多半已經跟上。
+ */
+const writtenIds = new Set();
+
+/**
+ * 上一次寫入嘗試指認為撞號的題號;沒有指認時為 `null`。
+ *
+ * 記的是**那一個題號**而不是「現在有沒有撞號」:撞號無法由當下的輸入值算出來
+ * (它要問過索引才知道),但「這句指認還成不成立」可以 —— 題號欄裡的字換掉了,
+ * 那句話講的就是別人了。`collisionMessage()` 因此以「當下的題號是否仍是它」當
+ * 顯示的條件,畫面便不會掛著一句已經與輸入框對不上的紅字。
+ */
+let collidedId = null;
 
 /**
  * 某一欄的當下輸入值。
@@ -412,7 +485,27 @@ function applySuggestion(origin) {
 }
 
 /**
- * 把未通過的項目寫到各欄位旁(requirements 4.1、4.2、4.6、8.4)。
+ * 題號那一欄當下該說的撞號指認(requirements 4.3、4.4)。
+ *
+ * 指認**只在題號欄裡仍是同一個號碼時成立**:維護者改成別的題號之後,那句話講的
+ * 就是別人了,留著會讓一個沒撞號的題號看起來撞了號 —— 而畫面上再也沒有東西告訴他
+ * 那句話已經過期。改回同一個號碼時它會再出現,那是對的:上一次問到的結果就是它。
+ *
+ * 比的是**數值**而不是字面:`'026'` 與 `26` 是同一個題號,寫法不同不該讓一句成立的
+ * 指認消失。空的、或不是數字的題號一律不會與任何指認相等 —— `Number('')` 是 `0`,
+ * 而題號恆為正整數。
+ *
+ * @returns {string} 沒有指認、或指認已不適用時為空字串。
+ */
+function collisionMessage() {
+  if (collidedId === null || Number(valueOf('id').trim()) !== collidedId) {
+    return '';
+  }
+  return collisionText(collidedId);
+}
+
+/**
+ * 把未通過的項目寫到各欄位旁(requirements 4.1、4.2、4.3、4.4、4.6、8.4)。
  *
  * 一欄至多一句:`checkForm()` 對同一欄位就只回一項,這裡取先到的那一項,順序即
  * 表單欄位順序。通過的欄位一律清成空字串並收起來 —— 未通過不是會黏住的狀態。
@@ -446,10 +539,21 @@ function applySuggestion(origin) {
  * `aria-invalid` 與看得見的那一句由同一次判斷寫入:訊息槽是給眼睛的,這一個是給
  * 螢幕閱讀器的,兩者說的必須是同一件事 —— 包括對空欄位一起沉默。
  *
+ * ## 撞號的指認也落在這裡
+ *
+ * 它與 FEN 那一欄一樣是自淺層清單之外傳進來的,理由卻不同:FEN 是為了與盤面同源,
+ * 撞號則是因為它**算不出來** —— 要問過題庫索引才知道(4.3、4.4)。兩者都寫進同一組
+ * 訊息槽,使用者不必分辨一句話是哪一層檢查產生的。
+ *
+ * 撞號的指認**只在題號那一欄沒有淺層問題時才可能出現**:指認以數值比對成立
+ * (見 `collisionMessage`),而題號空著或不是正整數時比不出相等。因此這裡直接覆寫
+ * 不會蓋掉「請填入題號」那一類的說法 —— 兩者不可能同時有話說。
+ *
  * @param {import('./check.js').CheckIssue[]} issues
  * @param {string} fenMessage FEN 欄位的當下訊息(2.4、2.5)。
+ * @param {string} idMessage 題號欄的撞號指認(4.3、4.4);沒有時為空字串。
  */
-function renderMessages(issues, fenMessage) {
+function renderMessages(issues, fenMessage, idMessage) {
   const texts = new Map(FIELD_NAMES.map((name) => [name, '']));
   for (const issue of issues) {
     if (issue.field === null || valueOf(issue.field).trim() === '') {
@@ -460,6 +564,9 @@ function renderMessages(issues, fenMessage) {
     }
   }
   texts.set('fen', fenMessage);
+  if (idMessage !== '') {
+    texts.set('id', idMessage);
+  }
 
   for (const [name, text] of texts) {
     const slot = elements.messages.get(name);
@@ -480,6 +587,10 @@ function renderMessages(issues, fenMessage) {
  *
  * 停用的判準是**整份清單是否為空**,不是某幾項:淺層檢查的每一項都是「這樣寫下去
  * 服務端會拒絕」,沒有哪一項可以放行。
+ *
+ * **只看淺層檢查,撞號不在內**(4.3、4.4):這一行說的是「這張表單還不能送」,而
+ * 撞號是送出去之後問到的結果 —— 它每一次按下都重問一次,把按鈕停用只會讓維護者
+ * 沒辦法對同一個題號再試一次(檔首已載明理由)。撞號的說法定位在題號那一欄。
  *
  * 光是停用不夠(8.4 明載「而不只是停用寫入操作」):被停用的按鈕說不出自己為什麼
  * 按不下去,而使用者第一個想知道的就是那個。點名用的是各欄 `<label>` 上的字,與畫面
@@ -522,8 +633,87 @@ function render(origin) {
   applySuggestion(origin);
 
   const issues = checkForm(readValues());
-  renderMessages(issues, view.message);
+  renderMessages(issues, view.message, collisionMessage());
   renderWriteAction(issues);
+}
+
+/**
+ * 記下一個**已成功寫入**的題號(requirement 4.4;design 的 State Management)。
+ *
+ * 這是寫入序列最後一步的一半(另一半是清空欄位,屬 7.2 / tasks 5.4)。**本檔目前
+ * 沒有任何一處呼叫它** —— 「寫入成功」這件事要到 tasks 5.3 把檔案寫回落盤之後才
+ * 存在。規則(只在成功後加入)屬 5.1、時機屬 5.3,兩者刻意分開:把加入的動作提前到
+ * 「按下寫入」或「撞號通過」,失敗的嘗試就會佔走一個誰也沒在用的題號,而維護者
+ * 看不出原因。
+ *
+ * export 出來是因為它是 5.3 的接口,不是內部細節:序列的下一段要在寫回成功之後
+ * 呼叫它,而那一段程式碼與這裡在同一個模組裡 —— 屆時 export 仍然是它被測試佈置
+ * 前置狀態的方式(`tests/test_web_editor_write.py`)。
+ *
+ * 值一律折成數字:索引回來的題號是 JSON 的數字,而表單那一側是字串,集合裡混進
+ * `'26'` 會讓 `has(26)` 找不到它 —— 撞號因此靜默失效,那正是本集合唯一要做的事。
+ *
+ * @param {number|string} id 剛寫入成功的那一題的題號。
+ */
+export function recordWrittenId(id) {
+  writtenIds.add(Number(id));
+}
+
+/**
+ * 寫入序列的前兩步:取題庫索引、撞號檢查(requirements 4.3、4.4、4.5)。
+ *
+ * **每一次嘗試都重新取一次索引**,不是載入時取一次就沿用(research 的 Decision 5):
+ * 服務會在題目檔變動時重啟,索引因此自己會跟上,重新取一次可讓已經進了索引的題號
+ * 自然歸位,不必由本分頁的集合永遠背著。索引取不到時 `loadCatalog()` 拋出,序列就
+ * 停在這一行 —— **絕不 catch 成一份空索引繼續走**(見 `attemptWrite`)。
+ *
+ * 題號直接取自輸入框:`#write` 只有在 `checkForm()` 沒話說時才按得下去(4.1),
+ * 走到這裡就代表它已經是一個正整數的寫法,不必再驗一次。
+ *
+ * 兩邊皆無時把指認清成 `null`(4.5)—— 撞號檢查通過是一個**結果**,它會把上一次
+ * 的指認撤下,而不是「什麼都不做」。
+ *
+ * **序列到此為止。** 5.2 的權威驗證接在下面那一行註解的位置,再往下是 5.3 的目錄
+ * 授權與寫檔、5.4 的成敗呈現。
+ */
+async function runWriteSequence() {
+  const id = Number(valueOf('id').trim());
+  const { positions } = await loadCatalog();
+  const existingIds = new Set(positions.map((position) => Number(position.id)));
+
+  collidedId = existingIds.has(id) || writtenIds.has(id) ? id : null;
+  render(null);
+  if (collidedId !== null) {
+    return;
+  }
+
+  // 撞號通過(4.5)。tasks 5.2 的權威驗證自此接續,而後是 5.3 的授權與寫檔。
+}
+
+/**
+ * 按下寫入時跑一次寫入序列(requirements 4.3、4.4、4.5)。
+ *
+ * 這一層只處理**取不到索引**這一種停止:服務重啟中、連線斷掉或逾時的時候
+ * `loadCatalog()` 拋出 `CatalogError`,而寫入不成立(design 的 Risks 已把它歸在
+ * 7.3 的一般失敗處理,不另立分支)。
+ *
+ * **不得把它折成「沒有撞號」**:那會讓最容易撞號的那一刻 —— 剛寫完一題、服務正在
+ * 重啟、索引因此取不到 —— 變成最放行的一刻。此處因此只是讓序列停下,連上一次的
+ * 撞號指認都不動:撤下指認是「撞號檢查通過」的後果,而這一次根本沒問到答案。
+ *
+ * 此刻該對使用者說什麼屬 tasks 5.4 的一般失敗呈現,所以這裡刻意不寫任何說法 ——
+ * 兩處各寫一句只會讓同一件事有兩種講法。
+ *
+ * 其餘的例外原樣往上:那些不是預期內的停止而是缺陷,吞掉會讓它們永遠沒有人發現。
+ */
+async function attemptWrite() {
+  try {
+    await runWriteSequence();
+  } catch (error) {
+    if (!(error instanceof CatalogError)) {
+      throw error;
+    }
+  }
 }
 
 renderDifficultyOptions();
@@ -538,6 +728,16 @@ renderDifficultyOptions();
 for (const [name, control] of elements.controls) {
   control.addEventListener('input', () => render(name));
 }
+
+// 寫入序列(5.1 走到撞號檢查為止)。處理器本身刻意是同步的,只把那個 promise 丟出去
+// ——`addEventListener` 不會等 async 處理器,回傳一個 promise 給它只會讓「誰來處理
+// 拒絕」變得含混。真正的例外處理集中在 `attemptWrite()` 一處。
+//
+// **停用中的按鈕不會發出 click**,所以這裡不必再判一次淺層檢查有沒有通過:
+// 那個判斷已經在 `renderWriteAction()`,寫兩份就會有兩份要一起改。
+elements.write.addEventListener('click', () => {
+  void attemptWrite();
+});
 
 // 載入時就畫一次:此刻輸入框通常是空的,呈現的即是空盤面(2.5),而七項淺層檢查
 // 皆未通過,寫入停用。同一個輸入值不該因為「使用者有沒有打過字」而呈現兩種樣子 ——

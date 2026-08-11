@@ -735,28 +735,30 @@ def test_aria_marks_the_controls_that_did_not_pass(editor_page) -> None:
     assert marked["tags"] is None, f"還沒填的欄位被標成未通過:{marked}"
 
 
-# --- 本任務的邊界:只停用,不寫入 ---------------------------------------
+# --- 本檔的邊界:寫入序列本身不在這裡驗 ---------------------------------
 
 
-def test_the_write_control_does_nothing_yet(editor_page) -> None:
-    """本任務只做到「有一個可停用的寫入操作」,**寫入本身屬第 5 組**。
+def test_the_write_control_never_touches_what_was_typed(editor_page) -> None:
+    """按下寫入不得動到已填的內容 —— **只有寫入成功才清空**(7.2)。
 
-    按下去不得發出任何請求、不得動到已填的內容。5.1 起會把撞號檢查、權威驗證與
-    寫檔接上這顆按鈕,屆時本條的斷言由那些任務改寫 —— 在那之前它釘住的是「這裡
-    還沒有偷跑」。
+    tasks 5.1 起這顆按鈕開始跑寫入序列(取題庫索引、撞號檢查),序列本身屬
+    `tests/test_web_editor_write.py`。本條留下的是本檔仍答得出來的那一半:不論按下
+    之後發生什麼,七個欄位裡的字都還在 —— 任何一次清空都可能讓維護者重抄一次 FEN。
+
+    本檔的夾具沒有供索引端點,取索引因此會失敗,而那正是這裡要的:**連寫入序列
+    在第一步就停掉的情況,已填的內容也一個字不少**(design 的 Error Handling)。
+
+    本條原先另外斷言「按下去不發出任何請求」。5.1 把取索引接上之後那句話不再成立
+    (該測試的說明已預告由 5.x 改寫),它要釘的邊界改由
+    `test_the_write_sequence_stops_after_the_collision_check` 以「除了索引端點之外
+    什麼都沒打」的形式接手。
     """
     fill_valid_form(editor_page)
     assert write_is_enabled(editor_page)
 
-    requests: list[str] = []
-    editor_page.on("request", lambda request: requests.append(request.url))
-
     editor_page.click(WRITE_BUTTON)
     editor_page.wait_for_timeout(200)
 
-    assert not [url for url in requests if "/api/" in url], (
-        f"按下寫入就發了請求,那屬第 5 組:{requests}"
-    )
     for name in FORM_FIELDS:
         assert value_of(editor_page, name) == VALID_FORM[name], (
             f"按下寫入之後 {name} 的內容變了"
