@@ -284,3 +284,89 @@ body {
   font-size: var(--text-sm);
   color: var(--text-muted);
 }
+
+/*
+ * 未通過的檢查(requirement 8.4)。
+ *
+ * ## 為什麼不共用 `.field-hint`
+ *
+ * 這兩種句子在畫面上緊鄰而語氣相反:一句是「這一格要怎麼填」,另一句是「這一格
+ * 現在不對」。共用同一套字級與灰字時,一則錯誤讀起來就只是多了一行說明 —— 使用者
+ * 掃過去不會停,而 8.4 要的正是「看得出是哪一項未通過」。
+ *
+ * ## 三個線索,顏色只是其中一個
+ *
+ * 加粗(字重)、左側的實心細條加內縮(幾何)、暖紅字(顏色)。**顏色不得是唯一的
+ * 差別** —— 專案對難度說法用英文的理由就是這一條(`structure.md` 的難度分級表):
+ * 對色覺障礙者而言,只差在顏色等於沒有差別;而在餘光掃視時,字重與那條左緣線比
+ * 色相先被看到。少了前兩者,`tests/test_web_editor_fields.py` 的那一條會轉紅。
+ *
+ * 字級**維持與提示相同**:這不是要它更大聲,而是要它可分辨。
+ *
+ * 這裡不寫 `display` —— 訊息槽平時掛著 `hidden`,顯示與否只由 `editor.js` 決定
+ * (檔首的 `[hidden] { display: none !important }` 是保險,本規則不去挑戰它)。
+ */
+.field-issue {
+  margin: 0;
+  padding-left: 8px;
+  border-left: 3px solid var(--danger-text);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  color: var(--danger-text);
+}
+
+/* --- 寫入操作(4.1 的「不執行寫入」要有東西可停用)--------------------- */
+
+/*
+ * 按鈕與它的停用說明是一組,間距用組內的那一階。
+ *
+ * `align-items: flex-start` 讓按鈕只佔它自己的寬度:表單控制項撐滿欄寬是因為
+ * 「打字的地方越寬越好填」,而一顆按鈕拉成 420px 寬只會讓點擊目標大得沒有道理。
+ */
+#actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--stack-tight);
+}
+
+/*
+ * `font: inherit` 與三個輸入控制項同一個理由:按鈕預設用系統字型,中文會與整頁
+ * 明顯不同體。
+ */
+#write {
+  font: inherit;
+  padding: 8px 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--page-bg);
+  cursor: pointer;
+}
+
+/*
+ * 停用的樣子同樣**不只靠顏色**:實線邊框換成虛線,滑鼠指標也換掉。淡化的色塊在
+ * 灰階下與可用狀態可能只差一階明度,虛線邊框則一眼看得出。
+ */
+#write:disabled {
+  border-style: dashed;
+  background: var(--field-bg);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+#write:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/*
+ * 停用的理由(8.4)。它是整頁唯一一處**匯總**未通過項目的地方,存在的理由有二:
+ * 一是被停用的按鈕本身說不出自己為什麼按不下去;二是 FEN 欄位空著時那一欄刻意
+ * 不掛訊息(2.5),少了這一行就會有一項未通過完全不出現在畫面上。
+ */
+#write-note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--danger-text);
+}

@@ -160,11 +160,24 @@
       正整數的判定在 `check.js`,這裡只負責原樣把字交出去。
     -->
     <input id="field-id" data-field="id" type="text" inputmode="numeric" autocomplete="off">
+    <!--
+      這一欄的訊息槽(tasks 4.3;requirements 4.1、4.2、8.4)。形狀與 FEN 那一個
+      相同(理由寫在那裡):**位置固定、預設隱藏,內容由 `editor.js` 依當下的值寫入**。
+
+      七欄各有一個,不共用一塊錯誤區:8.4 要的是「指出是哪一項未通過」,而一塊
+      集中的錯誤區逼使用者自己在七個欄位之間對照。`data-message-for` 的取值即
+      `check.js` 的 `CheckIssue.field`,與控制項的 `data-field` 同名。
+
+      class 是 `field-issue` 而**不是** `field-hint`:一句「這裡填錯了」與一句常駐
+      的說明不該長得一樣。兩者的視覺差別不只顏色(見 `editor.css`)。
+    -->
+    <p class="field-issue" data-message-for="id" hidden></p>
   </div>
 
   <div class="field">
     <label for="field-title">局名</label>
     <input id="field-title" data-field="title" type="text" autocomplete="off">
+    <p class="field-issue" data-message-for="title" hidden></p>
   </div>
 
   <div class="field">
@@ -172,10 +185,12 @@
     <!--
       **必須是 `<textarea>`**(requirement 3.8):描述允許換行,而 `<input>` 會把貼上
       來的換行靜默吃掉 —— 沒有錯誤、沒有提示,使用者要等到題目檔寫出來才發現少了東西。
-      tasks 4.3 會在這裡填入建議值(`check.js` 的 `suggestDescription`),而建議值是
-      可以自由改寫的,故此處不設 `readonly`。
+      `editor.js` 會在這裡填入建議值(3.6,`check.js` 的 `suggestDescription`),而建議值
+      是可以自由改寫的(3.7),故此處**不設 `readonly` 也不設 `placeholder`** ——
+      建議值是真的填進值裡的字,不是一層灰色的示意:維護者要能直接在它上面改。
     -->
     <textarea id="field-description" data-field="description" rows="3"></textarea>
+    <p class="field-issue" data-message-for="description" hidden></p>
   </div>
 
   <div class="field">
@@ -185,8 +200,13 @@
       不存在的分級」這件事。
 
       **三個分級的說法一個字都不寫在這裡。** 唯一出處是 `web/difficulty.js`,選項由
-      tasks 4.3 自該模組產生 —— 寫死一份就是第二個真相來源,改了模組而忘了這一頁時,
-      兩邊會靜默分家。`tests/test_web_editor_layout.py` 直接掃本檔的文字反向釘住。
+      `editor.js` 自該模組產生(tasks 4.3)—— 寫死一份就是第二個真相來源,改了模組而
+      忘了這一頁時,兩邊會靜默分家。`tests/test_web_editor_layout.py` 與
+      `tests/test_web_editor_fields.py` 都直接掃本檔的文字反向釘住。
+
+      這是本頁**唯一**由 JS 生節點而不在版面裡先宣告的地方,理由正是上一段:節點的
+      內容不能寫在這裡。與訊息槽的差別在於它只在載入時產生一次,不隨輸入變動增減,
+      因此不會有推動版面的問題。
 
       第一個選項的值刻意是空字串,而且必須留在最前面:`check.js` 以空字串判定「還沒
       選」,預設就選中某一級會讓維護者在沒有做過選擇的情況下寫進一個難度。
@@ -194,11 +214,13 @@
     <select id="field-difficulty" data-field="difficulty">
       <option value="">尚未選擇</option>
     </select>
+    <p class="field-issue" data-message-for="difficulty" hidden></p>
   </div>
 
   <div class="field">
     <label for="field-tags">標籤</label>
     <input id="field-tags" data-field="tags" type="text" autocomplete="off">
+    <p class="field-issue" data-message-for="tags" hidden></p>
     <!--
       提示不放進 `<label>` 裡:標籤唸出來應該只有「標籤」兩個字,把分隔符號的說明
       塞進去會讓螢幕閱讀器每次聚焦都唸一長串。分隔符號收得寬的理由見 `check.js`
@@ -234,8 +256,16 @@
 
       排在控制項的正下方、提示的上方:訊息講的是這一格填得對不對,離控制項越遠越像
       在講別的東西;而提示是常駐的註腳,不該把當下的問題擠下去。
+
+      ## 這一欄的訊息**不是** `checkForm()` 的那一項
+
+      其餘六欄的訊息來自 `checkForm()`,這一欄來自 FEN 的當下呈現(`readFenView`)。
+      差別只在一種輸入:**空的 FEN 欄位這裡什麼都不說**,而 `checkForm()` 對它有一項
+      「請填入 FEN」。理由是 requirement 2.5 —— 清空 FEN 呈現的是空盤面而不是錯誤,
+      一個還沒開始填的欄位不該掛著錯誤訊息。那一項未通過並沒有消失:寫入照樣停用,
+      而「是哪一項」由寫入操作旁邊的 `#write-note` 點名(8.4)。
     -->
-    <p class="field-hint" data-message-for="fen" hidden></p>
+    <p class="field-issue" data-message-for="fen" hidden></p>
     <p class="field-hint">貼上完整的局面字串,盤面會照著重畫。</p>
     <!--
       起手方(requirement 2.6)。內容由 `editor.js` 自 FEN 的走子方寫入
@@ -253,12 +283,43 @@
   <div class="field">
     <label for="field-target">目標檔案路徑</label>
     <input id="field-target" data-field="target" type="text" autocomplete="off" spellcheck="false">
+    <p class="field-issue" data-message-for="target" hidden></p>
     <!--
       路徑相對於使用者選定的題庫根目錄,而且**必須落在某一個書目資料夾內** ——
       那個資料夾決定了這一題歸在哪一本書底下,所以這一頁不需要、也不提供對應的
       文字欄位(requirement 3.5)。完整規則與說法都在 `check.js` 的 `checkTargetPath`。
+
+      這一欄還有第二個用途:**描述建議值的書名取自它的第一段**(3.6)。資料夾名帶
+      卷次而描述只寫書名,換算(切掉 `~` 之後)在 `editor.js`,理由見那裡。
     -->
     <p class="field-hint">相對於題庫根目錄,例如 適情雅趣~卷一/26.json。</p>
+  </div>
+
+  <!--
+    寫入操作與它的停用說明(tasks 4.3 只做到「可停用」;requirements 4.1、8.4)。
+
+    ## 這顆按鈕現在什麼都不做
+
+    真正的寫入屬第 5 組(撞號檢查、權威驗證、目錄授權、文字層追加)。**本輪刻意
+    不接任何 click 處理** —— 它存在的理由是 4.1 的「不執行寫入」需要一個看得見的
+    東西可以停用:一個沒有寫入操作的畫面,「停用寫入」是無從呈現、也無從驗證的。
+
+    `type="button"` 是必要的:容器雖然是 `<section>` 而非 `<form>`,但寫死型別才不會
+    在日後有人改用 `<form>` 時變成一顆送出鈕。
+
+    ## 預設就是停用的
+
+    七欄全空的表單本來就過不了淺層檢查,載入當下停用是**正確的初始狀態**而不是
+    保守起見。寫在 HTML 裡也讓沒有 JavaScript 時的樣子是誠實的:那時什麼都寫不了。
+
+    ## 說明排在按鈕之後
+
+    它講的是「為什麼這顆按鈕按不下去」。排在按鈕上方的話,它每次出現與消失都會把
+    按鈕上下推;排在下方則只在頁尾長出一行,按鈕本身不動。
+  -->
+  <div id="actions">
+    <button id="write" type="button" disabled>寫入題目檔</button>
+    <p id="write-note" hidden></p>
   </div>
 </section>
 
