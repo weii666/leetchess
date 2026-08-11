@@ -100,6 +100,30 @@ def test_page_provides_every_container_the_later_tasks_need(
     assert f'id="{element_id}"' in page_client.get(PLAY_PATH).text
 
 
+def test_every_page_shows_the_product_name_in_the_browser_tab() -> None:
+    """三頁的 `<title>` 一律是產品名 —— 分頁上顯示的都是 `LeetChess`。
+
+    分頁標題是使用者在多開時唯一認得出「這是哪個網站」的地方。原本三頁各說各的
+    (列表頁是產品名、對局頁是「象棋排局挑戰」、收題頁是「收題工具」),開三個分頁
+    看起來就像三個不相干的站。頁內的標題各頁仍不同,那是頁面內容的事。
+
+    `LeetChess` 是專有名詞,不譯(steering 的 Naming Conventions),與 `difficulty.js`
+    的難度說法同屬使用者可見文字裡不用繁體中文的例外 —— 因此下面那條簡體字掃描
+    不會與這一條打架。
+    """
+    pages = [
+        PROJECT_ROOT / "web" / "index.html",
+        PLAY_HTML,
+        PROJECT_ROOT / "web" / "editor" / "index.html",
+    ]
+
+    for path in pages:
+        assert path.is_file(), f"{path} 必須存在"
+        assert "<title>LeetChess</title>" in path.read_text(encoding="utf-8"), (
+            f"{path.relative_to(PROJECT_ROOT)} 的分頁標題不是產品名"
+        )
+
+
 def test_page_declares_traditional_chinese(page_client: TestClient) -> None:
     """8.3:頁面自我宣告為繁體中文,瀏覽器的字型選擇才會正確。"""
     assert 'lang="zh-Hant"' in page_client.get(PLAY_PATH).text
