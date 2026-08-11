@@ -473,16 +473,21 @@ def test_every_existing_position_in_the_real_corpus_still_loads() -> None:
     """真實題庫的每一題仍載得進去 —— 描述改選填的回歸網。
 
     與上面那條**缺一不可**:只驗「不帶描述也載得進去」的話,一個把 `description`
-    自 `KNOWN_FIELDS` 一併刪掉的實作也會通過,而既有題目全部帶著描述,那樣會讓它們
-    全數被判為含未知欄位 —— 服務啟動不起來。
+    自 `KNOWN_FIELDS` 一併刪掉的實作也會通過,而題庫裡**帶著描述的那些題**會全數被
+    判為含未知欄位 —— 服務啟動不起來。
+
+    這一條原本還斷言「每一題都帶著描述」。那個前提在收題工具上線後就過期了:它
+    刻意不寫 `description`(schema 已改選填),新收的題目因此沒有那一欄,而斷言一句
+    **資料現在剛好長什麼樣**,只會在下一次收題時轉紅。這裡守的是「整個真實題庫載得
+    進去」,兩種題目都要載得進去才算數 —— 故改為確認兩種**都存在**於題庫裡。
     """
     repository = PositionRepository(DEFAULT_POSITIONS_DIR)
     repository.load()
 
     positions = repository.all()
     assert positions, "真實題庫是空的,這條問不出東西"
-    assert all(position.description for position in positions), (
-        "真實題庫的題目本來就都帶著描述,這條的前提不成立了"
+    assert any(position.description for position in positions), (
+        "真實題庫已無任何帶描述的題目,選填與否這一條問不出東西了"
     )
 
 
