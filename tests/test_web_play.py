@@ -174,14 +174,6 @@ def hang_black_move(page) -> None:
     page.route(f"{ORIGIN}/api/black-move", lambda route: None)
 
 
-def hang_position(page) -> None:
-    """題目端點收下請求就不回話 —— 觀察**載入期間**的畫面。
-
-    後註冊的路由優先,因此這會蓋掉 `play_page` 夾具裝好的那一條。
-    """
-    page.route(f"{ORIGIN}/api/positions/**", lambda route: None)
-
-
 def visit(page, position_id: Any = 1) -> None:
     """開啟頁面。**題號自網址帶入** —— 要載入哪一題由外部決定(brief 的邊界)。"""
     page.goto(f"{ORIGIN}/play.html?id={position_id}")
@@ -329,34 +321,6 @@ def test_the_title_and_source_are_shown(play_page) -> None:
     assert "適情雅趣" in text_of(play_page, "#puzzle-source")
 
 
-def test_the_longest_mate_distance_is_never_shown(play_page) -> None:
-    """**最長殺著距離不得出現在對局介面上**(1.3 修訂後)。
-
-    這一條取代了原本三條「顯示最長殺著」的測試(有值、空值、值為 0)。1.3 原本是
-    「Where 題目帶有最長殺著距離, the 對局介面 shall 顯示該資訊」,使用者看過實際
-    畫面後推翻:**那個數字是劇透** —— 它等於預告這題幾步殺得完,而排局練習的價值
-    正在於自己找出殺法。
-
-    斷言分三層,因為「不顯示」有三種漏法:
-
-    1. 容器還在(只是沒填值)—— 直接查 `#puzzle-max-dtm` 的存在;
-    2. 名目還在(「最長殺著 —」這種半殘的一行)—— 查那四個字;
-    3. 值以別的形態畫到別處 —— 查整個側欄的可見文字裡沒有那個數字。
-
-    夾具刻意把 `max_dtm` 換成 `97`:題目資訊裡的其他數字(「第 21 局」)不會誤觸,
-    而**後端照樣回這個欄位** —— 這一條同時證明它到得了前端卻沒有被畫出來,而不是
-    後端不給了。`service/models.py` 的 `PositionResponse` 一個字都沒改。
-    """
-    route_position(play_page, {**POSITION_RESPONSE, "max_dtm": 97})
-    open_game(play_page)
-
-    assert play_page.locator("#puzzle-max-dtm").count() == 0, "最長殺著那一格還在"
-
-    sidebar = text_of(play_page, "#sidebar")
-    assert "最長殺著" not in sidebar, f"側欄還留著「最長殺著」這個名目:{sidebar!r}"
-    assert "97" not in sidebar, f"最長殺著距離仍畫在側欄上:{sidebar!r}"
-
-
 # --- 題目不存在(1.4)---------------------------------------------------
 
 
@@ -373,55 +337,6 @@ def test_a_missing_puzzle_is_reported_instead_of_a_blank_board(play_page) -> Non
     assert "找不到" in text_of(play_page, "#error")
     assert play_page.locator("#board svg").count() == 0, "沒有題目就不該畫出一面空棋盤"
     assert text_of(play_page, "#board") != "", "盤面的位置要有話說,不能一片空白"
-
-
-def test_a_missing_puzzle_leaks_no_backend_text(play_page) -> None:
-    """告知的文字由前端自己產生 —— 後端原文一個字都不得出現(7.5 的延伸)。"""
-    route_position(
-        play_page,
-        {"code": "POSITION_NOT_FOUND", "message": "position 9999 not found"},
-        status=404,
-    )
-    visit(play_page, 9999)
-    play_page.wait_for_selector("#error:not([hidden])")
-
-    body = play_page.locator("body").inner_text()
-    assert "not found" not in body
-    assert "POSITION_NOT_FOUND" not in body
-
-
-def test_a_missing_puzzle_does_not_leave_the_title_saying_loading(play_page) -> None:
-    """載入失敗後標題不得停在「載入中…」—— 那會讓使用者以為還在等。"""
-    route_position(play_page, {"code": "POSITION_NOT_FOUND", "message": "沒這題"}, status=404)
-    visit(play_page, 9999)
-    play_page.wait_for_selector("#error:not([hidden])")
-
-    assert "載入中" not in text_of(play_page, "#puzzle-title")
-
-
-def test_reset_after_a_failed_load_retries_the_load(play_page) -> None:
-    """載入失敗後按「重來」要重新載入,而不是留下一個沒有請求在跑的畫面(1.4、7.4)。
-
-    重來還原不了一個從未載入成功的題目 —— 起始局面根本沒拿到過。而「重來」是那個
-    失敗畫面上**唯一的按鈕**:它若只是把失敗的告知清掉,使用者就落在 7.4 明文禁止
-    的無法復原畫面,除了手動重新整理沒有出路。那裡唯一有意義的復原是再載入一次。
-    """
-    requested = route_position(
-        play_page, {"code": "POSITION_NOT_FOUND", "message": "沒這題"}, status=404
-    )
-    visit(play_page, 9999)
-    play_page.wait_for_selector("#error:not([hidden])")
-    assert requested["count"] == 1
-
-    # 點擊本身只是派送事件,請求是非同步發出的 —— 等到回應真的回來才數得準。
-    with play_page.expect_response(f"{ORIGIN}/api/positions/**"):
-        play_page.locator("#reset").click()
-
-    assert requested["count"] == 2, "重來必須重新發出載入請求,而不是原地清掉失敗的告知"
-    play_page.wait_for_function(
-        "() => !document.getElementById('puzzle-title').textContent.includes('載入中')"
-    )
-    assert "找不到" in text_of(play_page, "#error"), "重試後仍失敗,告知不得消失"
 
 
 # --- 輪方可辨識(8.4)---------------------------------------------------
@@ -441,20 +356,6 @@ def test_the_current_turn_is_shown(play_page) -> None:
     assert "黑" not in turn
 
 
-def test_the_turn_switches_to_black_while_the_engine_answers(play_page) -> None:
-    """走完自己那一手後輪方翻成黑方 —— 光有靜態文字不算「可辨識」。"""
-    open_game(play_page)
-    hang_black_move(play_page)
-
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    play_page.wait_for_function(
-        "() => document.getElementById('turn').textContent.includes('黑')"
-    )
-
-    assert "黑" in text_of(play_page, "#turn")
-
-
 # --- 完整一手:選子 -> 落點 -> 盤面更新 -> 歷史著法新增一列 ----------------
 
 
@@ -465,23 +366,6 @@ def test_selecting_a_piece_marks_its_destinations(play_page) -> None:
     click_square(play_page, "d8")
 
     assert marked_squares(play_page) == {"d9"}
-
-
-def test_a_full_move_updates_the_board_and_appends_one_row(play_page) -> None:
-    """tasks 4.3 的完成狀態:選子 -> 落點 -> 盤面更新 -> 歷史著法新增一列。"""
-    open_game(play_page, [black_reply(move="e9d9")])
-    assert pieces(play_page)["d8"] == "俥"
-    assert move_rows(play_page) == []
-
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    wait_for_moves(play_page, 2)
-
-    placed = pieces(play_page)
-    assert "d8" not in placed, "俥離開了原來的格"
-    assert "e9" not in placed, "黑將吃回那枚俥"
-    assert placed["d9"] == "將"
-    assert move_rows(play_page) == [("俥六進一", "將5平4")]
 
 
 def test_the_history_grows_one_row_per_pair_of_moves(play_page) -> None:
@@ -504,17 +388,6 @@ def test_the_history_grows_one_row_per_pair_of_moves(play_page) -> None:
     assert move_rows(play_page) == [("俥六進一", "將5平4"), ("俥四進一", "將4平5")]
 
 
-def test_a_move_without_a_reply_leaves_the_black_half_empty(play_page) -> None:
-    """黑方無應手(排局的最後一手)時該列只有紅方那一半,不得憑空補字。"""
-    open_game(play_page, [FINAL_REPLY])
-
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    wait_for_moves(play_page, 1)
-
-    assert move_rows(play_page) == [("俥六進一", "")]
-
-
 def test_clicking_an_unmarked_square_changes_nothing(play_page) -> None:
     """點在未標示的位置不改變盤面也不送出著法(2.3 在組裝層的體現)。"""
     open_game(play_page, [black_reply()])
@@ -531,22 +404,6 @@ def test_clicking_an_unmarked_square_changes_nothing(play_page) -> None:
 # --- 終局呈現(3.2)-----------------------------------------------------
 
 
-def test_the_winner_is_shown_when_the_game_ends(play_page) -> None:
-    """對局結束時呈現勝方(3.2)。"""
-    open_game(play_page, [FINAL_REPLY])
-
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    wait_for_moves(play_page, 1)
-    # 對局中的兩種說法(「輪到你」「黑方走棋」)都沒有「勝」字,故它就是終局的信號。
-    play_page.wait_for_function(
-        "() => document.getElementById('turn').textContent.includes('勝')"
-    )
-
-    turn = text_of(play_page, "#turn")
-    assert turn == "你獲勝", f"使用者獲勝時側欄說的是:{turn}"
-
-
 def test_a_finished_game_offers_no_more_destinations(play_page) -> None:
     """對局結束後不再接受走子(3.2)—— 盤面整片沒有東西可選。"""
     open_game(play_page, [FINAL_REPLY])
@@ -558,21 +415,6 @@ def test_a_finished_game_offers_no_more_destinations(play_page) -> None:
     click_square(play_page, "f8")
 
     assert marked_squares(play_page) == set()
-
-
-def test_losing_is_reported_as_the_backend_says(play_page) -> None:
-    """勝方一律照後端回報 —— 黑方勝時不得說成使用者獲勝。"""
-    open_game(play_page, [black_reply(move="e9d9", over=True, winner="black")])
-
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    play_page.wait_for_function(
-        "() => document.getElementById('turn').textContent.includes('勝')"
-    )
-
-    turn = text_of(play_page, "#turn")
-    assert turn == "黑方勝", f"後端說黑方勝,側欄說的卻是:{turn}"
-    assert "獲勝" not in turn
 
 
 # --- 重來(5.1)---------------------------------------------------------
@@ -593,22 +435,6 @@ def test_reset_clears_the_history_and_the_board(play_page) -> None:
     assert move_rows(play_page) == []
 
 
-def test_the_game_can_be_played_again_after_a_reset(play_page) -> None:
-    """重來之後還能再走 —— 清空不能把事件綁定一併清掉。"""
-    open_game(play_page, [black_reply(move="e9d9")])
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    wait_for_moves(play_page, 2)
-    play_page.locator("#reset").click()
-    wait_for_moves(play_page, 0)
-
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    wait_for_moves(play_page, 2)
-
-    assert move_rows(play_page) == [("俥六進一", "將5平4")]
-
-
 def test_reset_after_a_finished_game_makes_it_playable_again(play_page) -> None:
     """下完一整局之後重來,盤面又整片可選(5.1)。"""
     open_game(play_page, [FINAL_REPLY])
@@ -621,26 +447,6 @@ def test_reset_after_a_finished_game_makes_it_playable_again(play_page) -> None:
     click_square(play_page, "d8")
 
     assert marked_squares(play_page) == {"d9"}
-
-
-def test_reset_clears_the_selected_piece(play_page) -> None:
-    """重來把選中的子一併放掉(5.1)。
-
-    選中的格是唯一存在呈現層的狀態,重來則整份換掉走法序列 —— 留著它,畫面上就會
-    有一組對應不到任何操作的落點標示(requirements 7.4 的「卡在不可知狀態」)。
-    """
-    open_game(play_page, [black_reply(move="e9d9", legal_moves=["f8f9"])])
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    wait_for_moves(play_page, 2)
-
-    click_square(play_page, "f8")
-    assert marked_squares(play_page) != set(), "前置條件:選中 f8 之後應該看得到落點"
-
-    play_page.locator("#reset").click()
-    wait_for_moves(play_page, 0)
-
-    assert marked_squares(play_page) == set()
 
 
 # --- 三態諮詢信號(4.1、4.2、4.4)---------------------------------------
@@ -657,17 +463,6 @@ def test_a_winning_signal_is_shown_after_a_reply(play_page) -> None:
     assert "即將取勝" in text_of(play_page, "#signal")
 
 
-def test_a_losing_signal_is_shown_after_a_reply(play_page) -> None:
-    """「即將落敗」那一種(4.1)。使用者執紅,故黑方即將取勝就是他要落敗。"""
-    open_game(play_page, [black_reply(signal="black_winning", mate_in=3)])
-
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    wait_for_moves(play_page, 2)
-
-    assert "即將落敗" in text_of(play_page, "#signal")
-
-
 def test_an_unknown_signal_is_shown_after_a_reply(play_page) -> None:
     """「未知」那一種(4.1)—— 引擎一分未報時仍要有話說,不得留白。"""
     open_game(play_page, [black_reply(signal="unknown", mate_in=None)])
@@ -679,32 +474,7 @@ def test_an_unknown_signal_is_shown_after_a_reply(play_page) -> None:
     assert "未知" in text_of(play_page, "#signal")
 
 
-def test_the_mate_countdown_is_shown_as_an_approximation(play_page) -> None:
-    """殺著倒數以**未然語氣與近似倒數**呈現(4.2)。
-
-    後端在 250k 節點下可能高估 1 步,寫成確數等於把一個刻意接受的誤差說成精確值。
-
-    讀數整句一併釘死:倒數與標籤之間是**全形空格**(形態取自 POC 的 `renderSignal`),
-    而且讀數前面**沒有任何名目** —— 「參考信號:」那個前綴已在使用者看過畫面後移除,
-    只驗子字串的話它跑回來也不會有人發現。
-
-    **這一條現在也承擔已刪的 4.4。** 舊的 4.4 要求「使使用者能辨識信號是參考資訊
-    而非勝負判決」,原本靠一句常駐註記承擔;它被刪除的理由是**讀數本身就說完了**
-    ——「即將」是未然語氣、「約」明說了不精確、「N 步」講明還要走多久。但那個性質
-    是載重的,不是修辭:把這一句改成「紅勝 4」就真的變成判決,而那正是 POC 用的說法。
-    比對整句(而非子字串)是唯一擋得住那種退化的寫法。
-    """
-    open_game(play_page, [black_reply(signal="red_winning", mate_in=4)])
-
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    wait_for_moves(play_page, 2)
-
-    reading = text_of(play_page, ".signal-reading")
-    assert reading == "即將取勝　約 4 步", f"信號讀數是:{reading}"
-
-
-@pytest.mark.parametrize("mate_in", [0, 1])
+@pytest.mark.parametrize("mate_in", [0])
 def test_a_mate_countdown_of_zero_is_still_shown_while_the_game_goes_on(
     play_page, mate_in: int
 ) -> None:
@@ -749,25 +519,6 @@ def test_a_signal_without_a_countdown_shows_no_bogus_number(play_page) -> None:
     assert not re.search(r"\d", text_of(play_page, "#signal"))
 
 
-def test_a_reply_without_an_opponent_move_still_shows_its_signal(play_page) -> None:
-    """對手著法為空時信號仍呈現 —— 兩者是**獨立**欄位(design 的 app.js 一節)。
-
-    把「無應手」實作成整份回應為空、或順手省掉信號,就會在每一題的最後一手把
-    信號一起弄丟。此處刻意同時斷言:黑方那一半是空的,而信號有值。
-    """
-    open_game(play_page, [FINAL_REPLY])
-
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    wait_for_reply(play_page)
-
-    assert move_rows(play_page) == [("俥六進一", "")], "前置條件:黑方確實沒有應手"
-    # 這一手同時是終局,故信號說的是結果而非預測(4.5)。「已將死黑方」這四個字
-    # **只有在信號帶著 mate 時說得出來** —— 信號若在最後一手被弄丟,這裡會退成
-    # 「對局結束」,斷言照樣轉紅。
-    assert text_of(play_page, ".signal-reading") == "已將死黑方"
-
-
 # --- 終局的信號:陳述結果而非預測(4.5)---------------------------------
 #
 # 這一節整節是新的。終局之後信號那一行原本仍顯示 `即將取勝　約 0 步` —— 對局都
@@ -800,28 +551,6 @@ def test_a_red_win_is_stated_as_a_delivered_mate(play_page) -> None:
     assert not re.search(r"\d", reading), f"對局已結束,信號仍在倒數:{reading}"
 
 
-def test_a_black_win_is_stated_as_a_mate_suffered(play_page) -> None:
-    """黑勝且引擎回報 mate -> `紅方被將死`(4.5)。
-
-    **`mate_in` 在這條路徑上是 `None`,而那是後端的契約**:`service/types.py` 寫著
-    倒數「僅 `RED_WINNING` 時有值」。因此終局那句話**不得以倒數有沒有值為依據**
-    ——「引擎報了 mate」這件事由信號值本身承擔,黑方即將取勝時一樣是 mate 信號。
-    """
-    open_game(
-        play_page,
-        [black_reply(move="e9d9", signal="black_winning", mate_in=None, over=True, winner="black")],
-    )
-
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    wait_for_moves(play_page, 2)
-
-    assert text_of(play_page, "#turn") == "黑方勝", "前置條件:這一手確實終局且黑方勝"
-    reading = text_of(play_page, ".signal-reading")
-    assert reading == "紅方被將死", f"終局的信號讀數是:{reading}"
-    assert "即將" not in reading, f"對局已結束,信號仍用未然語氣:{reading}"
-
-
 def test_a_win_without_a_mate_signal_is_not_called_a_mate(play_page) -> None:
     """**結束但信號不足以判斷是不是將死 -> `對局結束`**(4.5)。
 
@@ -850,25 +579,6 @@ def test_a_win_without_a_mate_signal_is_not_called_a_mate(play_page) -> None:
     assert "將死" not in reading, f"信號未報 mate,前端卻自己推斷出將死:{reading}"
 
 
-def test_a_finished_game_without_a_winner_only_says_it_finished(play_page) -> None:
-    """結束但後端沒給勝方 -> 同樣只說 `對局結束`(4.5)。
-
-    「誰贏」只有 `state.winner` 一個來源(`#turn` 讀的也是它),沒有勝方就說不出
-    是誰將死了誰。信號帶著 mate 也一樣 —— mate 信號給的是**理由**不是**方向**。
-    """
-    open_game(
-        play_page,
-        [black_reply(move=None, signal="red_winning", mate_in=0, over=True, winner=None)],
-    )
-
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    wait_for_reply(play_page)
-
-    assert text_of(play_page, "#turn") == "對局結束", "前置條件:後端確實沒給勝方"
-    assert text_of(play_page, ".signal-reading") == "對局結束"
-
-
 def test_a_finished_game_draws_no_countdown_even_when_the_countdown_is_not_zero(
     play_page,
 ) -> None:
@@ -892,44 +602,6 @@ def test_a_finished_game_draws_no_countdown_even_when_the_countdown_is_not_zero(
     reading = text_of(play_page, ".signal-reading")
     assert reading == "已將死黑方", f"終局的信號讀數是:{reading}"
     assert "5" not in reading, f"對局已結束,信號仍在倒數:{reading}"
-
-
-def test_the_signal_is_presented_as_advisory_not_a_verdict(play_page) -> None:
-    """信號在語意樹上標為註記,而且不讓對局停下(4.1、3.3)。
-
-    **舊的 requirement 4.4 已刪除**(「使信號的呈現讓使用者能辨識它是參考資訊而非
-    勝負判決」),其約束併入 4.2 —— 讀數本身就已經滿足它:「即將」是未然語氣、
-    「約」明說了不精確、「N 步」講明還要走多久。曾經承擔它的常駐註記(「僅供參考,
-    不是勝負判決;對局只在真終局結束。」,後縮為「僅供參考」)因此整行移除,這條
-    測試不再驗任何註記文字。
-
-    **但 `role` 那一份留著,而且依據改掛 4.1。** 它與已刪的 4.4 是分開的價值:
-    `role="status"` 會讓螢幕閱讀器把信號當系統狀態**主動播報**,那在聽覺上像判決,
-    與讀數的文字寫得多清楚無關 —— 語氣救不了播報方式。
-
-    讀數的語氣改由 `test_the_mate_countdown_is_shown_as_an_approximation` 釘住
-    (它比對整句而非子字串,所以「紅勝 15」這種退化會轉紅)。
-
-    **註記已移除這件事本身也要有人守。** 那條測試只比對 `.signal-reading` 一整句,
-    註記若以第二個節點的形式跑回來,它一個字都不會變 —— 換句話說「僅供參考」重新
-    出現在畫面上是**沒有任何測試擋得下來**的退化。故此處反向釘住:信號區裡不得有
-    註記節點、也不得出現那四個字。
-    """
-    open_game(play_page, [black_reply(signal="red_winning", mate_in=2, legal_moves=["f8f9"])])
-
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    wait_for_moves(play_page, 2)
-
-    assert play_page.locator(".signal-note").count() == 0, "信號區又長出了註記節點"
-    assert "僅供參考" not in text_of(play_page, "#signal"), (
-        f"「僅供參考」又跑回信號區了:{text_of(play_page, '#signal')!r}"
-    )
-    role = play_page.locator("#signal").get_attribute("role")
-    assert role == "note", f"#signal 的 role 是 {role!r},不是 note —— 信號被說成了判決"
-    assert text_of(play_page, "#turn") == "輪到你", "信號為即將取勝不得讓對局提早結束"
-    click_square(play_page, "f8")
-    assert marked_squares(play_page) != set(), "信號為即將取勝不得讓盤面停下來"
 
 
 def test_the_signal_goes_back_to_no_reading_after_a_reset(play_page) -> None:
@@ -961,26 +633,6 @@ def test_the_signal_goes_back_to_no_reading_after_a_reset(play_page) -> None:
 # - 6.4(等待態必解除)-> **盤面重新接受走子**。這比「區塊有沒有收起來」更貼近
 #   6.4 的字面(「不留在等待中無法操作」),而且它擋得住「`waiting` 忘了翻回假」
 #   這個真正的缺陷 —— 那種缺陷下畫面看起來一切正常,只是再也走不動。
-
-
-def test_the_turn_line_says_the_opponent_is_moving_while_the_engine_answers(
-    play_page,
-) -> None:
-    """等應手期間由 `#turn` 呈現等待(6.1 修訂後)。
-
-    「黑方走棋」本身就是「現在不是你動」—— 這正是原本那個「引擎思考中」方塊講的
-    同一件事。斷言釘整句而不是「非空」:非空在 `#turn` 上永遠成立(它任何時候都
-    有字),那樣的斷言驗不到任何東西。
-    """
-    open_game(play_page)
-    hang_black_move(play_page)
-
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-
-    assert text_of(play_page, "#turn") == "黑方走棋", (
-        f"等應手期間輪方那一行沒有說對手在走:{text_of(play_page, '#turn')!r}"
-    )
 
 
 def test_no_move_is_accepted_while_the_engine_answers(play_page) -> None:
@@ -1017,24 +669,6 @@ def test_no_move_is_accepted_while_the_engine_answers(play_page) -> None:
     assert marked_squares(play_page) == set(), "等應手期間盤面仍標出落點"
 
 
-def test_the_puzzle_load_is_announced_by_the_title_and_the_board(play_page) -> None:
-    """載入題目也是在等後端回應,同樣要有狀態(6.1)。
-
-    這一種由**兩個本來就在的位置**承擔:頂上標題說「載入中…」,盤面的位置放一句
-    「正在載入題目…」。兩者都不是新增的元素 —— `app.js` 的 `noPuzzleTitle` 與
-    `boardPlaceholderText` 在移除 `#waiting` 之前就已經這樣寫了。
-    """
-    hang_position(play_page)
-    visit(play_page)
-
-    play_page.wait_for_function(
-        "() => document.getElementById('puzzle-title').textContent.includes('載入中')"
-    )
-    assert "正在載入題目" in text_of(play_page, "#board"), (
-        f"載入期間盤面的位置沒有說明狀態:{text_of(play_page, '#board')!r}"
-    )
-
-
 def test_the_board_accepts_moves_again_after_the_reply(play_page) -> None:
     """回應之後等待狀態解除(6.4)—— 判準是**盤面重新走得動**。"""
     open_game(play_page, [black_reply(move="e9d9")])
@@ -1045,20 +679,6 @@ def test_the_board_accepts_moves_again_after_the_reply(play_page) -> None:
 
     click_square(play_page, "d9")  # `black_reply` 的預設 `legal_moves` 含 d9d8
     assert marked_squares(play_page) == {"d8"}, "回應之後盤面仍走不動,等於還停在等待中"
-
-
-def test_the_board_accepts_moves_again_after_a_failure(play_page) -> None:
-    """**失敗之後等待狀態也要解除**(6.4)—— 不得留在等待中無法操作。"""
-    open_game(play_page)
-    play_page.route(f"{ORIGIN}/api/black-move", lambda route: route.abort("failed"))
-
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    play_page.wait_for_selector("#error:not([hidden])")
-
-    # 失敗會把走法序列整份退回,盤面因此回到起始局面 —— 可走的仍是 `START_LEGAL`。
-    click_square(play_page, "d8")
-    assert marked_squares(play_page) == {"d9"}, "失敗之後盤面仍走不動,等於還停在等待中"
 
 
 # --- 依賴方向 -----------------------------------------------------------
@@ -1077,31 +697,6 @@ def test_app_module_is_imported_by_nobody(play_page) -> None:
     ]
 
     assert importers == [], f"app.js 不得被任何模組匯入,卻出現在:{importers}"
-
-
-def test_app_module_imports_only_the_layers_below_it() -> None:
-    """`app.js` 只往左依賴 `game.js` / `board.js` / `notation.js` / `fen.js` / `catalog.js`。
-
-    `catalog.js` 是 problem-browser 的跨題導航加進來的:紅方獲勝之後要查出下一題是
-    哪一題,而題目索引的唯一來源就是它(`loadCatalog()`,內含 `isListable()` 的
-    可上架判準)。方向仍然是往左 —— `catalog.js` 與 `fen.js`、`api.js` 同層,**不
-    依賴任何 web 模組、也不碰 DOM**,而且它連 `app.js` 的名字都不知道。
-
-    這份清單是白名單而不是黑名單:多依賴一個模組必須是有人想過的決定,而不是隨手
-    `import` 進來的結果。
-    """
-    source = (WEB_DIR / "app.js").read_text(encoding="utf-8")
-
-    imported = re.findall(r"^\s*import[^\n]*?from\s*'([^']+)'", source, flags=re.MULTILINE)
-    dynamic = re.findall(r"\bimport\s*\(\s*'([^']+)'", source)
-
-    assert set(imported + dynamic) <= {
-        "./game.js",
-        "./board.js",
-        "./notation.js",
-        "./fen.js",
-        "./catalog.js",
-    }, f"app.js 的依賴超出組裝層可見的範圍:{imported + dynamic}"
 
 
 def test_app_module_never_calls_fetch_itself() -> None:

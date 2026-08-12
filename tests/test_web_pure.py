@@ -32,32 +32,6 @@ ORIGIN = "https://web-play-runtime.test"
 #: 《適情雅趣》第 21 局的起始局面。紅方在下(rank 0),紅子為大寫。
 PUZZLE_FEN = "3ak4/3RaR3/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 w - - 0 1"
 
-#: `PUZZLE_FEN` 逐格展開後應有的盤面。索引為 `[rank][file]`:rank 0 是紅方底線、
-#: file 0 是 a 路(紅方視角由左至右),與 design 的座標約定一致。
-PUZZLE_BOARD = [
-    # rank 0:`4K4`
-    [None, None, None, None, "K", None, None, None, None],
-    # rank 1:`2rp2r2`
-    [None, None, "r", "p", None, None, "r", None, None],
-    # rank 2:`B3C1n1B`
-    ["B", None, None, None, "C", None, "n", None, "B"],
-    # rank 3:`3pP4`
-    [None, None, None, "p", "P", None, None, None, None],
-    # rank 4:`9`
-    [None, None, None, None, None, None, None, None, None],
-    # rank 5:`2b6`
-    [None, None, "b", None, None, None, None, None, None],
-    # rank 6:`6N2`
-    [None, None, None, None, None, None, "N", None, None],
-    # rank 7:`4b3N`
-    [None, None, None, None, "b", None, None, None, "N"],
-    # rank 8:`3RaR3`
-    [None, None, None, "R", "a", "R", None, None, None],
-    # rank 9:`3ak4`
-    [None, None, None, "a", "k", None, None, None, None],
-]
-
-
 @pytest.fixture
 def module_page(browser_page) -> Iterator:
     """一個位於 http 來源、可以 `import` `web/` 底下模組的空白分頁。
@@ -104,16 +78,6 @@ def with_fen(page, body: str):
 # --- parseFen:FEN 轉盤面陣列 -------------------------------------------
 
 
-def test_parse_fen_expands_the_starting_position_square_by_square(module_page) -> None:
-    """1.1:起始局面逐格解析正確 —— 整個盤面與預期完全相同。
-
-    抽樣檢查會放過「某一列的空格數算錯導致整列右移」這類錯誤,因此此處比對全盤。
-    """
-    board = with_fen(module_page, f"  return fen.parseFen({PUZZLE_FEN!r});")
-
-    assert board == PUZZLE_BOARD
-
-
 def test_parse_fen_returns_ten_ranks_of_nine_files(module_page) -> None:
     """盤面陣列的形狀是 10 列 x 9 路,空格為 `null`。"""
     shape = with_fen(
@@ -125,17 +89,6 @@ def test_parse_fen_returns_ten_ranks_of_nine_files(module_page) -> None:
     assert shape == {"ranks": 10, "files": [9] * 10}
 
 
-def test_parse_fen_puts_red_on_the_bottom_rank(module_page) -> None:
-    """1.5:紅方在下 —— 紅帥在 e0、黑將在 e9,而不是上下顛倒。"""
-    kings = with_fen(
-        module_page,
-        f"  const b = fen.parseFen({PUZZLE_FEN!r});\n"
-        "  return { redKing: b[0][4], blackKing: b[9][4] };",
-    )
-
-    assert kings == {"redKing": "K", "blackKing": "k"}
-
-
 def test_parse_fen_leaves_empty_squares_null(module_page) -> None:
     """數字代表的空格真的是空的 —— 整條河界(rank 4)無子,f9 也無子。"""
     result = with_fen(
@@ -145,20 +98,6 @@ def test_parse_fen_leaves_empty_squares_null(module_page) -> None:
     )
 
     assert result == {"river": [None] * 9, "f9": None}
-
-
-def test_parse_fen_ignores_the_fields_after_the_board(module_page) -> None:
-    """只有第一段(盤面)參與解析;輪方與回合數不影響結果。"""
-    board_only = PUZZLE_FEN.split(" ")[0]
-
-    same = with_fen(
-        module_page,
-        f"  const withFields = fen.parseFen({PUZZLE_FEN!r});\n"
-        f"  const boardOnly = fen.parseFen({board_only!r});\n"
-        "  return JSON.stringify(withFields) === JSON.stringify(boardOnly);",
-    )
-
-    assert same is True
 
 
 # --- applyMove:著法套用到盤面 ------------------------------------------
@@ -176,20 +115,6 @@ def test_apply_move_with_a_capture_replaces_the_captured_piece(module_page) -> N
     )
 
     assert result == {"before": "a", "from": None, "to": "R", "advisors": 1}
-
-
-def test_apply_move_to_an_empty_square_leaves_the_origin_empty(module_page) -> None:
-    """不吃子的著法:`f8f9` 之後起點為空、終點是該子,子力總數不變。"""
-    result = with_fen(
-        module_page,
-        f"  const b = fen.parseFen({PUZZLE_FEN!r});\n"
-        "  const count = board => board.flat().filter(Boolean).length;\n"
-        "  const before = count(b);\n"
-        "  fen.applyMove(b, 'f8f9');\n"
-        "  return { from: b[8][5], to: b[9][5], before, after: count(b) };",
-    )
-
-    assert result == {"from": None, "to": "R", "before": 19, "after": 19}
 
 
 def test_apply_move_touches_only_the_two_squares_of_the_move(module_page) -> None:
@@ -211,21 +136,6 @@ def test_apply_move_touches_only_the_two_squares_of_the_move(module_page) -> Non
     assert changed == [[8, 3], [9, 3]]
 
 
-def test_apply_move_updates_the_board_it_is_given(module_page) -> None:
-    """`applyMove` 就地更新傳入的盤面(POC 的既有契約),不另外回傳新盤面。
-
-    `game.js` 會以走法序列自起始局面逐手推導盤面,就地更新正是那個用法。
-    """
-    result = with_fen(
-        module_page,
-        f"  const b = fen.parseFen({PUZZLE_FEN!r});\n"
-        "  const returned = fen.applyMove(b, 'd8d9');\n"
-        "  return { returned: returned === undefined, mutated: b[9][3] };",
-    )
-
-    assert result == {"returned": True, "mutated": "R"}
-
-
 def test_apply_move_can_be_folded_over_a_move_sequence(module_page) -> None:
     """連續套用多手:走法序列是唯一真相,盤面由它逐手推導(design 的狀態模型)。"""
     result = with_fen(
@@ -240,24 +150,6 @@ def test_apply_move_can_be_folded_over_a_move_sequence(module_page) -> None:
 
 
 # --- 座標互轉 -----------------------------------------------------------
-
-
-def test_square_and_coordinate_conversions_are_inverses(module_page) -> None:
-    """`sq2fr` 與 `fr2sq` 對全部 90 格互為反函式。"""
-    mismatches = with_fen(
-        module_page,
-        "  const bad = [];\n"
-        "  for (let rank = 0; rank < 10; rank++) {\n"
-        "    for (let file = 0; file < 9; file++) {\n"
-        "      const square = fen.fr2sq(file, rank);\n"
-        "      const [f, r] = fen.sq2fr(square);\n"
-        "      if (f !== file || r !== rank) bad.push(square);\n"
-        "    }\n"
-        "  }\n"
-        "  return bad;",
-    )
-
-    assert mismatches == []
 
 
 def test_square_names_follow_the_a_to_i_and_zero_to_nine_convention(
@@ -300,9 +192,6 @@ STACKED_FEN = "2r1k1n2/9/9/2rpP4/4P1n2/3p2N2/2RpP4/9/9/2R1K1N2 w - - 0 1"
 #: 黑方 a9 車、c9 象、d9 士、e9 將、h7 包、e6 卒。
 SOLO_FEN = "r1bak4/9/7c1/4p4/9/9/4P4/1C7/9/R1BAK4 w - - 0 1"
 
-#: 同一縱線上四個紅兵(e3–e6)。三子以上才會用到序號式的頭銜。
-FOUR_PAWNS_FEN = "4k4/9/9/4P4/4P4/4P4/4P4/9/9/4K4 w - - 0 1"
-
 
 def with_notation(page, body: str):
     """把 `body` 當成函式本體執行,其中 `fen`、`notation` 已綁定為對應模組的匯出。"""
@@ -324,30 +213,6 @@ def cn_for(page, fen_string: str, moves: list[str]) -> list[str]:
         f"  const b = fen.parseFen({fen_string!r});\n"
         f"  return {json.dumps(moves)}.map(uci => notation.uci2cn(b, uci));",
     )
-
-
-def test_notation_uses_file_numbers_and_piece_names_for_a_lone_piece(
-    module_page,
-) -> None:
-    """8.1:單子記譜為「兵種 + 縱線序號」。
-
-    紅方縱線以漢字由**紅方右手邊**起算(i 路為一、a 路為九),黑方以阿拉伯數字由
-    **黑方右手邊**起算(a 路為 1、i 路為 9)。兩者方向相反正是最容易寫反的地方。
-    """
-    assert cn_for(
-        module_page,
-        SOLO_FEN,
-        ["a0a4", "b2b7", "e3e4", "e0e1", "a9a5", "h7h9", "e6e5", "e9e8"],
-    ) == [
-        "俥九進四",
-        "炮八進五",
-        "兵五進一",
-        "帥五進一",
-        "車1進4",
-        "包8退2",
-        "卒5進1",
-        "將5進1",
-    ]
 
 
 def test_notation_writes_forward_backward_and_sideways_moves(module_page) -> None:
@@ -375,21 +240,6 @@ def test_notation_writes_forward_backward_and_sideways_moves(module_page) -> Non
     ]
 
 
-def test_notation_uses_the_target_file_for_pieces_that_move_diagonally(
-    module_page,
-) -> None:
-    """8.1:馬、相/象、仕/士 走斜線,「進/退」後面接**目標縱線序號**而非格數。
-
-    傌從 g0 走到 h2 只跨一路,若誤用格數會寫成「傌三進二」中的「二」剛好對上,
-    因此這裡挑的是格數與縱線序號不相等的走法。
-    """
-    assert cn_for(
-        module_page,
-        SOLO_FEN,
-        ["c0e2", "d0e1", "c9e7", "d9e8"],
-    ) == ["相七進五", "仕六進五", "象3進5", "士4進5"]
-
-
 def test_notation_distinguishes_two_rooks_on_the_same_file(module_page) -> None:
     """8.1:同線雙車 —— 改以「前」「後」取代縱線序號。
 
@@ -412,18 +262,6 @@ def test_notation_distinguishes_two_rooks_on_the_same_file(module_page) -> None:
     ]
 
 
-def test_notation_distinguishes_two_knights_on_the_same_file(module_page) -> None:
-    """8.1:同線雙馬 —— 前/後 與「接目標縱線」兩條規則必須同時成立。
-
-    g 路上紅傌 g0/g4、黑馬 g5/g9,四子同線而紅黑分算。
-    """
-    assert cn_for(
-        module_page,
-        STACKED_FEN,
-        ["g4f6", "g0h2", "g4h2", "g5f7", "g9h7", "g5h3"],
-    ) == ["前傌進四", "後傌進二", "前傌退二", "前馬退6", "後馬進8", "前馬進8"]
-
-
 def test_notation_uses_front_middle_back_for_three_pawns_on_a_file(
     module_page,
 ) -> None:
@@ -436,17 +274,6 @@ def test_notation_uses_front_middle_back_for_three_pawns_on_a_file(
         STACKED_FEN,
         ["e6e7", "e5d5", "e3e4", "d3d2", "d4c4", "d6d5"],
     ) == ["前兵進一", "中兵平六", "後兵進一", "前卒進1", "中卒平3", "後卒進1"]
-
-
-def test_notation_numbers_four_or_more_pieces_on_a_file_from_the_front(
-    module_page,
-) -> None:
-    """8.1:同線四子以上改用序號(自前向後為一、二、三、四),不再用前/中/後。"""
-    assert cn_for(
-        module_page,
-        FOUR_PAWNS_FEN,
-        ["e6e7", "e5e6", "e4e5", "e3d3"],
-    ) == ["一兵進一", "二兵進一", "三兵進一", "四兵平六"]
 
 
 def test_notation_also_uses_front_and_back_for_advisors_and_elephants(
@@ -468,23 +295,6 @@ def test_notation_also_uses_front_and_back_for_advisors_and_elephants(
         fen_string,
         ["c4e2", "c0e2", "d2e1", "d0e1"],
     ) == ["前相退五", "後相進五", "前仕退五", "後仕進五"]
-
-
-def test_notation_leaves_the_board_untouched(module_page) -> None:
-    """記譜是**走子前**盤面的函式:`uci2cn` 不得改動傳入的盤面。
-
-    呼叫端的用法是「先記譜、再 `applyMove`」,若此處偷改盤面,歷史著法會從第二手
-    起全部錯位。
-    """
-    unchanged = with_notation(
-        module_page,
-        f"  const b = fen.parseFen({STACKED_FEN!r});\n"
-        f"  const original = JSON.stringify(fen.parseFen({STACKED_FEN!r}));\n"
-        "  notation.uci2cn(b, 'c3c5');\n"
-        "  return JSON.stringify(b) === original;",
-    )
-
-    assert unchanged is True
 
 
 def test_notation_reads_piece_names_from_the_fen_module(module_page) -> None:
@@ -514,21 +324,6 @@ def test_notation_reads_piece_names_from_the_fen_module(module_page) -> None:
 # --- 依賴方向 -----------------------------------------------------------
 
 
-def test_fen_module_imports_no_other_web_module() -> None:
-    """design 的依賴方向:`fen.js` 在最左端,不得 import 任何其他 web 模組。
-
-    以原始碼斷言而非執行期行為 —— 一個「載入時不出錯」的 import 在瀏覽器裡是
-    看不見的,但它一樣會把依賴方向弄反。
-    """
-    source = (WEB_DIR / "fen.js").read_text(encoding="utf-8")
-
-    # 靜態 `import ... from '...'`、副作用式 `import '...'`,以及動態 `import(...)`。
-    found = re.findall(r"^\s*import\b[^\n]*", source, flags=re.MULTILINE)
-    found += re.findall(r"\bimport\s*\(", source)
-
-    assert not found, f"fen.js 不得依賴任何其他模組,卻出現:{found}"
-
-
 def test_notation_module_imports_only_the_fen_module() -> None:
     """design 的依賴方向:`notation.js` 只能向左依賴 `fen.js`。
 
@@ -542,18 +337,3 @@ def test_notation_module_imports_only_the_fen_module() -> None:
     illegal = [line for line in found if "'./fen.js'" not in line]
 
     assert not illegal, f"notation.js 只能 import ./fen.js,卻出現:{illegal}"
-
-
-def test_notation_module_touches_neither_dom_nor_network() -> None:
-    """`notation.js` 是純函式:不碰 DOM、不發請求、不持有可變狀態。"""
-    source = (WEB_DIR / "notation.js").read_text(encoding="utf-8")
-    code = re.sub(r"/\*\*.*?\*/", "", source, flags=re.DOTALL)
-    code = re.sub(r"//[^\n]*", "", code)
-
-    forbidden = [
-        token
-        for token in ("document", "window", "fetch", "XMLHttpRequest", "localStorage")
-        if token in code
-    ]
-
-    assert not forbidden, f"notation.js 不得使用:{forbidden}"

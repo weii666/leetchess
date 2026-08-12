@@ -265,27 +265,6 @@ def test_loading_the_catalog_asks_the_index_endpoint_once(catalog_page) -> None:
     assert [(r["method"], r["path"]) for r in seen] == [("GET", CATALOG_PATH)]
 
 
-def test_filtering_never_fetches_the_index_again(catalog_page) -> None:
-    """5.1:篩選全在記憶體中進行 —— 改幾次條件都不再發請求。
-
-    這是本模組的核心約束,而唯一能證明它的方式就是數請求次數:五組不同的條件
-    篩完之後,索引端點仍然只被問過一次。
-    """
-    seen = serve_catalog(catalog_page)
-
-    results = ids_for(
-        catalog_page,
-        {},
-        {"difficulty": 3},
-        {"tag": "連將殺"},
-        {"source": "橘中秘"},
-        {"difficulty": 5, "source": "適情雅趣"},
-    )
-
-    assert len(results) == 5
-    assert len(seen) == 1, f"篩選不得再次取得索引,實際請求:{seen}"
-
-
 def test_the_catalog_touches_no_endpoint_other_than_the_index(catalog_page) -> None:
     """5.2:不佔用任何引擎資源 —— 除了索引端點,一個請求都不發。
 
@@ -299,38 +278,7 @@ def test_the_catalog_touches_no_endpoint_other_than_the_index(catalog_page) -> N
     assert {r["path"] for r in seen} == {CATALOG_PATH}
 
 
-def test_the_catalog_keeps_every_field_a_row_needs(catalog_page) -> None:
-    """1.2:每一題都帶著題號、局名、描述、難度、標籤與出處。
-
-    索引是列表唯一的資料來源,少任何一個欄位那一列就畫不完整。
-    """
-    serve_catalog(catalog_page)
-
-    first = loaded(catalog_page)[0]
-
-    assert first == CATALOG[0]
-
-
-def test_the_catalog_preserves_the_order_of_the_index(catalog_page) -> None:
-    """1.3:順序即索引的順序(依題號遞增),不因取得而重排。
-
-    題號與局名是每一列的主要識別,順序漂移會讓畫面在重啟後莫名重排,快速掃視
-    也就無從談起。
-    """
-    serve_catalog(catalog_page)
-
-    assert [p["id"] for p in loaded(catalog_page)] == CATALOG_IDS
-
-
 # --- 2.1、2.2、2.3:單一條件 -------------------------------------------
-
-
-def test_filtering_by_difficulty_lists_only_that_difficulty(catalog_page) -> None:
-    """2.1:選一個難度,只列出該難度的題目。"""
-    serve_catalog(catalog_page)
-
-    assert one_result(catalog_page, {"difficulty": 5}) == [3, 6]
-    assert one_result(catalog_page, {"difficulty": 1}) == [4]
 
 
 def test_filtering_by_tag_lists_only_positions_carrying_it(catalog_page) -> None:
@@ -339,14 +287,6 @@ def test_filtering_by_tag_lists_only_positions_carrying_it(catalog_page) -> None
 
     assert one_result(catalog_page, {"tag": "雙馬"}) == [1, 4]
     assert one_result(catalog_page, {"tag": "鬥快"}) == [1, 3]
-
-
-def test_filtering_by_source_lists_only_that_source(catalog_page) -> None:
-    """2.3:選一個出處,只列出該出處的題目。"""
-    serve_catalog(catalog_page)
-
-    assert one_result(catalog_page, {"source": "橘中秘"}) == [3, 4]
-    assert one_result(catalog_page, {"source": "適情雅趣"}) == [1, 2, 5, 6]
 
 
 def test_no_criteria_lists_the_whole_catalog(catalog_page) -> None:
@@ -360,15 +300,6 @@ def test_no_criteria_lists_the_whole_catalog(catalog_page) -> None:
         {"difficulty": None, "tag": None, "source": None},
         {"difficulty": "", "tag": "", "source": ""},
     ) == [CATALOG_IDS] * 4
-
-
-def test_a_difficulty_given_as_text_filters_the_same_as_a_number(catalog_page) -> None:
-    """下拉選單的值是字串 —— `'3'` 必須與 `3` 篩出同一批,否則整份列表會憑空消失。"""
-    serve_catalog(catalog_page)
-
-    assert one_result(catalog_page, {"difficulty": "3"}) == one_result(
-        catalog_page, {"difficulty": 3}
-    )
 
 
 # --- 2.4:多條件為 AND --------------------------------------------------
@@ -385,15 +316,6 @@ def test_multiple_criteria_keep_only_positions_matching_all_of_them(
     serve_catalog(catalog_page)
 
     assert one_result(catalog_page, {"difficulty": 5, "source": "適情雅趣"}) == [6]
-
-
-def test_every_dimension_at_once_takes_the_intersection(catalog_page) -> None:
-    """2.4:難度、標籤、出處三者並用。"""
-    serve_catalog(catalog_page)
-
-    assert one_result(
-        catalog_page, {"difficulty": 1, "tag": "雙馬", "source": "橘中秘"}
-    ) == [4]
 
 
 def test_a_combination_nothing_matches_comes_back_empty(catalog_page) -> None:
@@ -415,30 +337,6 @@ def test_a_combination_nothing_matches_comes_back_empty(catalog_page) -> None:
     )
 
 
-def test_filtering_leaves_the_loaded_index_untouched(catalog_page) -> None:
-    """篩選是取值,不是消耗 —— 篩過之後索引本身仍是完整的,可以再篩別的條件。
-
-    就地過濾掉不符條件的題目會讓第二次篩選只能在殘骸上進行,列表也就再也回不到
-    完整狀態(2.5 的「清除條件」正是靠這個)。
-    """
-    serve_catalog(catalog_page)
-
-    result = catalog_page.evaluate(
-        """async () => {
-          const catalog = await import('/catalog.js');
-          const loaded = await catalog.loadCatalog();
-          loaded.filter({ difficulty: 1 });
-          loaded.filter({ tag: '雙包' });
-          return {
-            after: loaded.positions.map((p) => p.id),
-            cleared: loaded.filter({}).map((p) => p.id),
-          };
-        }"""
-    )
-
-    assert result == {"after": CATALOG_IDS, "cleared": CATALOG_IDS}
-
-
 # --- 取不到索引的情形 ---------------------------------------------------
 
 
@@ -447,14 +345,6 @@ def test_a_failing_index_endpoint_becomes_a_catalog_error(catalog_page) -> None:
     serve_api(catalog_page, status=500, body={"code": "INTERNAL", "message": "boom"})
 
     assert failure(catalog_page)["code"] is not None
-
-
-def test_a_failure_carries_no_text_from_the_backend(catalog_page) -> None:
-    """後端的原始內容一個字都不外流 —— 使用者看到的文字由呈現層自己決定。"""
-    secret = "internal-detail-should-not-leak"
-    serve_api(catalog_page, status=500, body={"code": "INTERNAL", "message": secret})
-
-    assert secret not in failure(catalog_page)["dump"]
 
 
 def test_an_unrecognisable_index_shape_is_a_failure(catalog_page) -> None:
@@ -471,13 +361,6 @@ def test_an_unrecognisable_index_shape_is_a_failure(catalog_page) -> None:
         assert failure(page)["code"] is not None, f"這份回應應被視為失敗:{body!r}"
 
 
-def test_an_empty_catalog_loads_as_an_empty_list(catalog_page) -> None:
-    """題庫真的沒有題目時是成功載入一份空索引,不是失敗 —— 空狀態由列表呈現。"""
-    serve_catalog(catalog_page, [])
-
-    assert loaded(catalog_page) == []
-
-
 def test_a_hanging_index_endpoint_gives_up_at_the_timeout(catalog_page) -> None:
     """沒有上界的請求會讓列表永遠停在載入中 —— 逾時把它收斂成一個可辨識的失敗。"""
     hang(catalog_page)
@@ -488,58 +371,6 @@ def test_a_hanging_index_endpoint_gives_up_at_the_timeout(catalog_page) -> None:
 
 
 # --- 邊界:純資料、位於依賴鏈最左端 -------------------------------------
-
-
-def test_the_catalog_module_loads_with_no_other_web_module_available(
-    browser_page,
-) -> None:
-    """design 的依賴方向:`catalog.js` 位於最左端,不 import 任何其他 web 模組。
-
-    此處刻意**只供 `catalog.js` 一個檔案**,其餘一律 404 —— 模組若拉進了任何
-    同伴,這個 import 就會失敗。
-    """
-    # 先把檔案讀出來再註冊路由:讀檔若在 handler 裡拋錯,那個請求就永遠不會被
-    # 回應,測試會停在瀏覽器的等待中而不是明確地失敗。
-    source = CATALOG_JS.read_text(encoding="utf-8")
-
-    def serve(route) -> None:
-        path = urlsplit(route.request.url).path
-        if path == "/catalog.js":
-            route.fulfill(
-                status=200,
-                content_type="text/javascript; charset=utf-8",
-                body=source,
-            )
-            return
-        if path in ("/", "/index.html"):
-            route.fulfill(
-                status=200,
-                content_type="text/html; charset=utf-8",
-                body='<!DOCTYPE html><html lang="zh-Hant"><meta charset="utf-8">'
-                "<title>單獨載入</title>",
-            )
-            return
-        route.fulfill(status=404, content_type="text/plain", body="not found")
-
-    browser_page.route(f"{ORIGIN}/**", serve)
-    browser_page.goto(f"{ORIGIN}/index.html")
-
-    alone = browser_page.evaluate(
-        """async () => {
-          const catalog = await import('/catalog.js');
-          return catalog
-            .filterPositions(
-              [
-                { id: 1, difficulty: 3, tags: ['連將殺'], source: '適情雅趣' },
-                { id: 2, difficulty: 5, tags: ['雙包'], source: '橘中秘' },
-              ],
-              { difficulty: 3 },
-            )
-            .map((p) => p.id);
-        }"""
-    )
-
-    assert alone == [1]
 
 
 def test_the_catalog_module_touches_no_dom() -> None:

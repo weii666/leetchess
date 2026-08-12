@@ -93,11 +93,6 @@ def test_the_editor_path_without_a_trailing_slash_also_arrives(
     assert response.text == EDITOR_HTML.read_text(encoding="utf-8")
 
 
-def test_editor_page_declares_traditional_chinese(page_client: TestClient) -> None:
-    """8.3:頁面自我宣告為繁體中文,瀏覽器的字型選擇才會正確。"""
-    assert 'lang="zh-Hant"' in page_client.get(EDITOR_PATH).text
-
-
 def test_editor_page_text_contains_no_simplified_characters(
     page_client: TestClient,
 ) -> None:

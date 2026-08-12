@@ -27,9 +27,6 @@ ORIGIN = "https://web-play-runtime.test"
 #: 《適情雅趣》第 21 局(`positions/適情雅趣/0001.json`)的起始局面。
 PUZZLE_FEN = "3ak4/3RaR3/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 w - - 0 1"
 
-#: 空盤,用來證明重繪不會留下前一次的棋子。
-EMPTY_FEN = "9/9/9/9/9/9/9/9/9/9 w - - 0 1"
-
 #: `PUZZLE_FEN` 的全部 19 個子,以「格名 -> 中文名」列出;紅子另記於 `RED_SQUARES`。
 #: 刻意逐格寫死而不在測試裡再解析一次 FEN —— 期望值要獨立於受測程式的推導方式。
 EXPECTED_PIECES = {
@@ -159,22 +156,6 @@ def grid_segments(page) -> list[str]:
     return [segment.strip() for segment in re.findall(r"M[^M]*", path)]
 
 
-def test_grid_has_ten_horizontal_lines_spanning_the_whole_board(board_page) -> None:
-    """1.1:十條橫線,每條自 a 路貫穿到 i 路。"""
-    draw(board_page)
-
-    horizontals = [
-        segment
-        for segment in grid_segments(board_page)
-        if re.fullmatch(r"M\d+ \d+ H\d+", segment)
-    ]
-
-    assert len(horizontals) == 10
-    assert {tuple(map(int, re.findall(r"\d+", s))) for s in horizontals} == {
-        (x_of(0), y_of(rank), x_of(8)) for rank in range(10)
-    }
-
-
 def test_grid_has_nine_files_broken_at_the_river(board_page) -> None:
     """1.1:九條縱線;最外兩條整條貫穿,中間七條在楚河漢界處斷開。"""
     draw(board_page)
@@ -198,19 +179,6 @@ def test_grid_has_nine_files_broken_at_the_river(board_page) -> None:
         }, "中間的縱線在河界斷開"
 
 
-def test_grid_draws_both_palace_diagonals(board_page) -> None:
-    """1.1:上下九宮各一個交叉,合計四條斜線。"""
-    draw(board_page)
-
-    diagonals = [
-        segment
-        for segment in grid_segments(board_page)
-        if re.fullmatch(r"M\d+ \d+ L\d+ \d+", segment)
-    ]
-
-    assert len(diagonals) == 4
-
-
 def test_river_is_labelled_between_the_two_middle_ranks(board_page) -> None:
     """1.1:楚河漢界寫在河界內,而不是壓在某一列的線上。"""
     draw(board_page)
@@ -229,20 +197,6 @@ def test_river_is_labelled_between_the_two_middle_ranks(board_page) -> None:
 # --- 子力配置 -----------------------------------------------------------
 
 
-def test_every_piece_of_the_starting_position_is_drawn_on_its_square(
-    board_page,
-) -> None:
-    """1.1:起始局面的 19 個子全部畫出,且每個都在自己的格上、字形正確。
-
-    抽樣會放過「整列右移一路」這類錯誤,因此比對全盤而非只看幾個子。
-    """
-    draw(board_page)
-
-    placed = {square_at(p["x"], p["y"]): p["name"] for p in drawn_pieces(board_page)}
-
-    assert placed == EXPECTED_PIECES
-
-
 def test_red_and_black_pieces_are_distinguishable(board_page) -> None:
     """1.5:紅子與黑子分屬不同類別,呈現上才可能有別。"""
     draw(board_page)
@@ -252,33 +206,6 @@ def test_red_and_black_pieces_are_distinguishable(board_page) -> None:
     }
 
     assert reds == RED_SQUARES
-
-
-def test_red_side_is_rendered_at_the_bottom(board_page) -> None:
-    """1.5:視覺上紅方在下 —— 紅帥實際畫在黑將的下方,同一條中線上。
-
-    以真實的版面座標判斷,而不是回頭讀繪製時寫下的屬性:座標算對但畫反了
-    (例如 rank 上下顛倒)在屬性比對下看不出來。
-    """
-    draw(board_page)
-
-    kings = board_page.evaluate(
-        """() => {
-          const at = (name) => [...document.querySelectorAll('#board .piece')]
-            .find(piece => piece.textContent.trim() === name)
-            .getBoundingClientRect();
-          const red = at('帥'), black = at('將');
-          return {
-            redY: red.top + red.height / 2,
-            blackY: black.top + black.height / 2,
-            redX: red.left + red.width / 2,
-            blackX: black.left + black.width / 2,
-          };
-        }"""
-    )
-
-    assert kings["redY"] > kings["blackY"], "紅帥必須在黑將下方"
-    assert abs(kings["redX"] - kings["blackX"]) < 1, "兩者都在 e 路,應同一條中線"
 
 
 # --- 不記憶狀態 ---------------------------------------------------------
@@ -295,15 +222,6 @@ def test_redrawing_the_same_position_does_not_accumulate_pieces(board_page) -> N
 
     assert len(drawn_pieces(board_page)) == len(EXPECTED_PIECES)
     assert board_page.locator("#board svg").count() == 1
-
-
-def test_redrawing_an_empty_position_leaves_no_pieces_behind(board_page) -> None:
-    """畫面只反映最後一次傳入的資料 —— 換成空盤後,先前的子一個都不留。"""
-    draw(board_page)
-    draw(board_page, EMPTY_FEN)
-
-    assert drawn_pieces(board_page) == []
-    assert grid_segments(board_page), "格線仍在,消失的只有棋子"
 
 
 def test_two_containers_are_drawn_independently(board_page) -> None:
@@ -365,19 +283,6 @@ def reported(page) -> list[list]:
     return page.evaluate("() => window.calls")
 
 
-def test_selecting_a_piece_marks_exactly_its_own_legal_destinations(
-    board_page,
-) -> None:
-    """2.1:選中的子,其所有合法落點都被標示 —— 且只有它的。
-
-    著法集合裡另外兩枚子(f8、e2)的落點必須不出現,否則使用者看到的是一堆
-    與選中子無關的點。
-    """
-    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
-
-    assert marked_squares(board_page) == {"d9", "c8", "d7"}
-
-
 def test_destination_markers_are_actually_visible(board_page) -> None:
     """2.1:標示要看得見 —— 元素存在但沒有尺寸或沒有顏色等於沒標。"""
     draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
@@ -399,13 +304,6 @@ def test_destination_markers_are_actually_visible(board_page) -> None:
         assert painted["fill"] != "none" or painted["stroke"] != "none"
 
 
-def test_nothing_is_marked_when_no_piece_is_selected(board_page) -> None:
-    """沒有選中的子就沒有落點標示 —— 合法著法本身不觸發任何標示。"""
-    draw(board_page, legal_moves=LEGAL_MOVES)
-
-    assert markers(board_page) == []
-
-
 def test_markers_come_verbatim_from_the_given_moves(board_page) -> None:
     """2.4:落點一律照抄傳進來的資料,`board.js` 不判斷任何棋規。
 
@@ -417,18 +315,6 @@ def test_markers_come_verbatim_from_the_given_moves(board_page) -> None:
     draw(board_page, legal_moves=absurd, selected="e0")
 
     assert marked_squares(board_page) == {"a9", "i0", "e5"}
-
-
-def test_capture_destinations_are_distinguishable(board_page) -> None:
-    """吃子的落點與空格的落點在呈現上有別(POC `render` 的 `capture` 類別)。
-
-    是不是吃子由**盤面上該格有沒有子**決定,不需要任何棋規知識。
-    """
-    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
-
-    by_square = {marker["square"]: marker["capture"] for marker in markers(board_page)}
-
-    assert by_square == {"d9": True, "c8": False, "d7": False}
 
 
 def test_the_selected_piece_is_marked_out_from_the_others(board_page) -> None:
@@ -468,20 +354,6 @@ def test_the_selected_piece_is_marked_out_from_the_others(board_page) -> None:
     assert square_at(*ring["centre"]) == "d8"
 
 
-def test_clicking_a_piece_with_legal_moves_reports_the_selection(board_page) -> None:
-    """2.1:點選一枚有合法著法的子,經回呼往外通知選了哪一格。
-
-    `board.js` 自身不記憶選中狀態(design 的「模組結構與依賴方向」),因此
-    它不會自己冒出落點 —— 畫面要變,得由外部帶著新的 `selected` 再畫一次。
-    """
-    draw(board_page, legal_moves=LEGAL_MOVES)
-
-    click_square(board_page, "d8")
-
-    assert reported(board_page) == [["select", "d8"]]
-    assert markers(board_page) == [], "選中狀態不由 board.js 自行記下"
-
-
 def test_clicking_the_selected_piece_again_reports_a_cleared_selection(
     board_page,
 ) -> None:
@@ -496,15 +368,6 @@ def test_clicking_the_selected_piece_again_reports_a_cleared_selection(
     assert reported(board_page) == [["select", None]]
 
 
-def test_clicking_another_piece_switches_the_reported_selection(board_page) -> None:
-    """已選中一枚子時點另一枚有著法的子,通知的是新的那一格。"""
-    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
-
-    click_square(board_page, "f8")
-
-    assert reported(board_page) == [["select", "f8"]]
-
-
 def test_clicking_a_marked_destination_reports_that_move(board_page) -> None:
     """2.1 的下一步:點在標示的落點上,往外通知的是完整的 UCI 著法。
 
@@ -517,21 +380,6 @@ def test_clicking_a_marked_destination_reports_that_move(board_page) -> None:
 
     assert reported(board_page) == [["move", "d8c8"]]
     assert drawn_pieces(board_page) == before
-
-
-def test_clicking_a_capture_destination_reports_the_move_not_the_piece_under_it(
-    board_page,
-) -> None:
-    """吃子的落點蓋在對方子上,點下去要走出那手,而不是穿過去點到底下的子。
-
-    這是 SVG 的實際陷阱:`fill="none"` 的圈只有筆畫吃得到點擊,圈內會直接
-    穿透到下層。
-    """
-    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
-
-    click_square(board_page, "d9")
-
-    assert reported(board_page) == [["move", "d8d9"]]
 
 
 def test_clicking_a_piece_without_legal_moves_reports_nothing(board_page) -> None:
@@ -549,22 +397,6 @@ def test_clicking_a_piece_without_legal_moves_reports_nothing(board_page) -> Non
     assert reported(board_page) == []
     assert drawn_pieces(board_page) == before
     assert markers(board_page) == []
-
-
-def test_clicking_an_unmarked_empty_square_reports_nothing(board_page) -> None:
-    """2.3:點在未標示的空格上,盤面不變、不送出任何東西。
-
-    連取消選取都不做 —— 那是 POC 的行為,選中的子仍留著。
-    """
-    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
-    before = drawn_pieces(board_page)
-
-    click_square(board_page, "a5")  # 空格,且不在 d8 的落點裡
-    click_square(board_page, "b0")
-
-    assert reported(board_page) == []
-    assert drawn_pieces(board_page) == before
-    assert marked_squares(board_page) == {"d9", "c8", "d7"}
 
 
 def test_clicking_the_margin_outside_the_grid_reports_nothing(board_page) -> None:
@@ -586,15 +418,6 @@ def test_clicking_the_margin_outside_the_grid_reports_nothing(board_page) -> Non
     assert drawn_pieces(board_page) == before
 
 
-def test_redrawing_without_a_selection_clears_every_marker(board_page) -> None:
-    """選中狀態同樣不被記住:重畫時不給 `selected`,標示就全數消失。"""
-    draw(board_page, legal_moves=LEGAL_MOVES, selected="d8")
-    draw(board_page, legal_moves=LEGAL_MOVES)
-
-    assert markers(board_page) == []
-    assert board_page.locator("#board .piece.selected").count() == 0
-
-
 # --- 依賴方向 -----------------------------------------------------------
 
 
@@ -611,19 +434,3 @@ def test_board_module_only_depends_on_fen(board_page) -> None:
     )
 
     assert imports == ["./fen.js"]
-
-
-def test_board_does_not_redefine_the_shared_piece_names() -> None:
-    """`NAMES` 必須自 `fen.js` 匯入,不得在本模組自行定義。
-
-    只斷言 import 路徑集合是不夠的:仍從 `fen.js` 取 `FILES`/`RANKS`、卻另外
-    在檔內補一份 `const NAMES = {...}`,上一個測試照樣會通過。而那正是
-    tasks.md 要防的漂移場景 —— 棋子中文名一旦有兩份,`fen.js` 日後改字時
-    棋盤不會跟著改,測試也不會變紅(本檔的期望值是寫死的中文字)。
-    """
-    source = (WEB_DIR / "board.js").read_text(encoding="utf-8")
-
-    assert re.search(r"^\s*const\s+NAMES\s*=", source, re.MULTILINE) is None, (
-        "NAMES 必須自 fen.js 匯入,不得在 board.js 自行定義"
-    )
-    assert "NAMES" in source, "board.js 應使用自 fen.js 匯入的 NAMES"

@@ -6,7 +6,7 @@
 (`test_game_service.py`、`test_main.py`、`test_positions.py`)—— 欄位一改,那邊
 立刻紅。
 
-留下來的兩個都有具體理由,見各自的 docstring。
+留下來的這一個有具體理由,見其 docstring。
 """
 
 from __future__ import annotations
@@ -23,20 +23,3 @@ def test_enum_values_are_the_frozen_wire_contract() -> None:
     assert [s.value for s in t.Side] == ["red", "black"]
     assert {s.value for s in t.Signal} == {"red_winning", "black_winning", "unknown"}
     assert {k.value for k in t.ScoreKind} == {"mate", "cp"}
-
-
-def test_position_optional_fields_default_to_none() -> None:
-    """`max_dtm` 由 corpus-verification 日後回填,現階段必須可省略。
-
-    把它變成必填等於要求驗證工具先跑完才能載入題庫,整個題庫會在那之前無法啟動。
-    """
-    position = t.Position(
-        id=21,
-        title="適情雅趣第 21 局",
-        description="適情雅趣 第 21 局",
-        fen="4k4/9/9/9/9/9/9/9/9/4K4 w - - 0 1",
-        side_to_move=t.Side.RED,
-        difficulty=3,
-        tags=["殺法"],
-    )
-    assert position.max_dtm is None

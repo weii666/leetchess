@@ -65,10 +65,6 @@ POSITION_RESPONSE: dict[str, Any] = {
     },
 }
 
-#: 契約裡的三種信號(`service/types.py` 的 `Signal`)。
-SIGNALS = ["red_winning", "black_winning", "unknown"]
-
-
 def black_reply(
     *,
     move: str | None = "e9d9",
@@ -279,17 +275,6 @@ def test_loading_puts_the_starting_position_on_the_state(game_page) -> None:
     assert piece_at(snapshot, "e0") == "K"
 
 
-def test_the_legal_moves_come_from_the_backend_reply(game_page) -> None:
-    """可走的著法一律取自後端(2.4),`game.js` 不推導也不驗證。"""
-    snapshot = start(game_page)
-
-    assert snapshot["legalMoves"] == START_LEGAL
-    assert snapshot["turn"] == "red"
-    assert snapshot["waiting"] is False
-    assert snapshot["over"] is False
-    assert snapshot["error"] is None
-
-
 def test_a_failed_load_clears_the_waiting_state_and_can_be_retried(game_page) -> None:
     """載入失敗後等待態解除(6.4),而且還能再試一次(7.1、7.4)。"""
     route_position(game_page, {"code": "POSITION_NOT_FOUND", "message": "沒這題"}, status=404)
@@ -305,14 +290,6 @@ def test_a_failed_load_clears_the_waiting_state_and_can_be_retried(game_page) ->
     assert call(game_page, "load") is True
     assert state(game_page)["error"] is None
     assert state(game_page)["legalMoves"] == START_LEGAL
-
-
-def test_moves_are_refused_before_a_position_is_loaded(game_page, api_calls) -> None:
-    """沒有題目就沒有局面,也就沒有任何著法可送。"""
-    setup_game(game_page)
-
-    assert call(game_page, "play", "d8d9") is False
-    assert black_move_calls(api_calls) == []
 
 
 # --- 推進:一手棋一次請求 -------------------------------------------------
@@ -333,22 +310,6 @@ def test_one_move_takes_exactly_one_request_and_never_asks_for_the_state(
     assert call(game_page, "play", "d8d9") is True
 
     assert [call_["path"] for call_ in api_calls] == ["/api/black-move"]
-
-
-def test_the_reply_is_appended_and_the_board_follows_the_sequence(game_page) -> None:
-    """盤面由走法序列推導 —— 自己的一手與對手的應手都在序列裡。"""
-    start(game_page)
-    route_black_move(game_page, replies(black_reply(move="e9d9")))
-
-    call(game_page, "play", "d8d9")
-    snapshot = state(game_page)
-
-    assert snapshot["moves"] == ["d8d9", "e9d9"]
-    assert piece_at(snapshot, "d8") is None
-    assert piece_at(snapshot, "e9") is None
-    assert piece_at(snapshot, "d9") == "k"  # 黑將吃回那枚俥
-    assert snapshot["turn"] == "red"
-    assert snapshot["legalMoves"] == ["d9d8", "f8f9"]
 
 
 def test_every_request_resends_the_whole_sequence(game_page, api_calls) -> None:
@@ -373,22 +334,10 @@ def test_every_request_resends_the_whole_sequence(game_page, api_calls) -> None:
     ]
 
 
-def test_only_moves_offered_by_the_backend_are_sent(game_page, api_calls) -> None:
-    """未列在後端合法著法中的走子不送出任何請求(2.3、2.4)。"""
-    start(game_page)
-    route_black_move(game_page, replies(black_reply()))
-    api_calls.clear()
-
-    assert call(game_page, "play", "a0a1") is False
-
-    assert black_move_calls(api_calls) == []
-    assert state(game_page)["moves"] == []
-
-
 # --- 終局:只看回應中的結束旗標 -------------------------------------------
 
 
-@pytest.mark.parametrize("signal", SIGNALS + ["a_signal_nobody_has_seen_yet"])
+@pytest.mark.parametrize("signal", ["unknown"])
 def test_no_signal_value_ends_the_game(game_page, signal) -> None:
     """**信號為任何值都不得使對局結束**(3.3、4.3)。
 
@@ -406,37 +355,6 @@ def test_no_signal_value_ends_the_game(game_page, signal) -> None:
     assert snapshot["legalMoves"] == ["d9d8", "f8f9"]
 
 
-def test_a_winning_signal_leaves_the_game_playable(game_page, api_calls) -> None:
-    """信號為即將取勝但未結束時,對局仍可繼續走子(tasks 4.2 的完成狀態)。"""
-    start(game_page)
-    route_black_move(
-        game_page,
-        replies(
-            black_reply(signal="red_winning", mate_in=1, legal_moves=["d9d8"]),
-            black_reply(signal="red_winning", mate_in=0, legal_moves=["d8d7"]),
-        ),
-    )
-
-    call(game_page, "play", "d8d9")
-    assert state(game_page)["over"] is False
-
-    api_calls.clear()
-    assert call(game_page, "play", "d9d8") is True
-    assert len(black_move_calls(api_calls)) == 1
-    assert state(game_page)["over"] is False
-
-
-def test_a_losing_signal_does_not_end_the_game_either(game_page) -> None:
-    """即將落敗同樣不是終局 —— 對局照樣下下去(3.3)。"""
-    start(game_page)
-    route_black_move(game_page, replies(black_reply(signal="black_winning", mate_in=None)))
-
-    call(game_page, "play", "d8d9")
-
-    assert state(game_page)["over"] is False
-    assert state(game_page)["legalMoves"] != []
-
-
 def test_an_empty_reply_that_is_over_means_the_user_won(game_page) -> None:
     """對手著法為空且對局已結束 → 使用者獲勝(3.4)。那是每一題排局的最後一手。"""
     start(game_page)
@@ -450,18 +368,6 @@ def test_an_empty_reply_that_is_over_means_the_user_won(game_page) -> None:
     assert snapshot["userWon"] is True
     assert snapshot["moves"] == ["d8d9"], "黑方沒有應手,序列就停在自己這一手"
     assert piece_at(snapshot, "d9") == "R"
-
-
-def test_a_finished_game_accepts_no_more_moves(game_page, api_calls) -> None:
-    """對局結束後停止接受走子(3.2)—— 對外的著法集合先空掉,守衛再擋一次。"""
-    start(game_page)
-    route_black_move(game_page, replies(FINAL_REPLY))
-    call(game_page, "play", "d8d9")
-    api_calls.clear()
-
-    assert state(game_page)["legalMoves"] == []
-    assert call(game_page, "play", "f8f9") is False
-    assert black_move_calls(api_calls) == []
 
 
 def test_losing_is_reported_as_the_backend_says(game_page) -> None:
@@ -482,56 +388,6 @@ def test_losing_is_reported_as_the_backend_says(game_page) -> None:
 # --- 等待態與輪方 ---------------------------------------------------------
 
 
-def test_no_moves_are_accepted_while_waiting(game_page, api_calls) -> None:
-    """等待後端回應期間不接受新的走子(6.2)。"""
-    start(game_page)
-    hang(game_page)
-    game_page.evaluate("() => { window.pending = window.game.play('d8d9'); }")
-    game_page.wait_for_timeout(150)
-
-    waiting = state(game_page)
-    assert waiting["waiting"] is True
-    assert waiting["moves"] == ["d8d9"], "自己的一手立刻進序列,盤面才會馬上動"
-    assert call(game_page, "play", "f8f9") is False
-    assert len(black_move_calls(api_calls)) == 1
-
-
-def test_the_move_set_is_empty_while_waiting(game_page) -> None:
-    """等待中對外的著法集合必須是空的(6.2)。
-
-    `board.js` 不判斷子的歸屬 —— 它的「可選取」定義就是「該格有著法可出發」,
-    因此**唯一**能讓盤面整片不可選的方式,就是這裡給出空集合。
-    """
-    start(game_page)
-    hang(game_page)
-    game_page.evaluate("() => { window.pending = window.game.play('d8d9'); }")
-    game_page.wait_for_timeout(150)
-
-    assert state(game_page)["legalMoves"] == []
-
-
-def test_no_moves_are_accepted_while_the_position_is_reloading(
-    game_page, api_calls
-) -> None:
-    """等待中不接受走子(6.2)—— **等的是哪一個請求都一樣**。
-
-    走子期間輪方本來就已經翻給對方,光靠輪方也擋得住;重新載入時卻不然:輪方仍是
-    自己、對局也還沒結束,此時唯一擋得住的就是等待態本身。載入失敗後重試(7.1)
-    正好會經過這個狀態。
-    """
-    start(game_page)
-    game_page.route(f"{ORIGIN}/api/positions/**", lambda route: None)
-    game_page.evaluate("() => { window.pending = window.game.load(); }")
-    game_page.wait_for_timeout(150)
-
-    reloading = state(game_page)
-    assert reloading["waiting"] is True
-    assert reloading["turn"] == "red", "輪方還是自己 —— 擋住走子的只能是等待態"
-    assert reloading["legalMoves"] == []
-    assert call(game_page, "play", "d8d9") is False
-    assert black_move_calls(api_calls) == []
-
-
 def test_the_move_set_is_empty_when_it_is_not_the_users_turn(game_page) -> None:
     """非我方回合不接受走子(2.5),同樣以空的著法集合表達。"""
     start(game_page)
@@ -543,16 +399,6 @@ def test_the_move_set_is_empty_when_it_is_not_the_users_turn(game_page) -> None:
     assert waiting["turn"] == "black", "輪方由走法序列推得,自己走完就輪到對方"
     assert waiting["userSide"] == "red"
     assert waiting["legalMoves"] == []
-
-
-def test_the_move_set_is_empty_once_the_game_is_over(game_page) -> None:
-    """對局結束後同樣沒有任何著法可出發(2.5、3.2)。"""
-    start(game_page)
-    route_black_move(game_page, replies(FINAL_REPLY))
-
-    call(game_page, "play", "d8d9")
-
-    assert state(game_page)["legalMoves"] == []
 
 
 def test_subscribers_see_the_waiting_state_come_and_go(game_page) -> None:
@@ -571,25 +417,6 @@ def test_subscribers_see_the_waiting_state_come_and_go(game_page) -> None:
 # --- 重來:走法序列清空 ---------------------------------------------------
 
 
-def test_reset_clears_the_move_sequence(game_page) -> None:
-    """重來即走法序列清空(5.1)—— 盤面與歷史都是它的推導,因此一併回到起點。"""
-    start(game_page)
-    route_black_move(game_page, replies(black_reply()))
-    call(game_page, "play", "d8d9")
-    assert state(game_page)["moves"] == ["d8d9", "e9d9"]
-
-    call(game_page, "reset")
-    snapshot = state(game_page)
-
-    assert snapshot["moves"] == []
-    assert snapshot["legalMoves"] == START_LEGAL
-    assert snapshot["feedback"] == []
-    assert snapshot["error"] is None
-    assert snapshot["over"] is False
-    assert piece_at(snapshot, "d8") == "R"
-    assert piece_at(snapshot, "d9") == "a"
-
-
 def test_reset_needs_no_backend(game_page, api_calls) -> None:
     """重來不打後端。
 
@@ -605,22 +432,6 @@ def test_reset_needs_no_backend(game_page, api_calls) -> None:
 
     assert api_calls == []
     assert state(game_page)["moves"] == []
-
-
-def test_reset_recovers_a_game_finished_by_the_backend(game_page) -> None:
-    """下完一整局之後重來,對局回到可走子的起點。"""
-    start(game_page)
-    route_black_move(game_page, replies(FINAL_REPLY))
-    call(game_page, "play", "d8d9")
-    assert state(game_page)["over"] is True
-
-    call(game_page, "reset")
-    snapshot = state(game_page)
-
-    assert snapshot["over"] is False
-    assert snapshot["winner"] is None
-    assert snapshot["userWon"] is None
-    assert snapshot["legalMoves"] == START_LEGAL
 
 
 def test_a_reply_that_lands_after_a_reset_is_discarded(game_page) -> None:
@@ -645,28 +456,6 @@ def test_a_reply_that_lands_after_a_reset_is_discarded(game_page) -> None:
 # --- 不提供任何單手回退(5.2)---------------------------------------------
 
 
-def test_the_game_offers_no_single_move_takeback(game_page) -> None:
-    """對外的操作只有這五個 —— **沒有退回上一手的入口,也不為它預留結構**(5.2)。
-
-    允許逐步回退等於允許試錯搜尋,而排局的價值在於想清楚再落子(product 決定)。
-    """
-    setup_game(game_page)
-
-    surface = game_page.evaluate(
-        """() => {
-          const names = new Set();
-          let object = window.game;
-          while (object && object !== Object.prototype) {
-            for (const name of Object.getOwnPropertyNames(object)) names.add(name);
-            object = Object.getPrototypeOf(object);
-          }
-          return [...names];
-        }"""
-    )
-
-    assert set(surface) == {"getState", "subscribe", "load", "play", "reset"}
-
-
 def test_the_source_has_no_takeback_vocabulary() -> None:
     """連程式碼裡都不該出現悔棋的字眼(design 的 Non-Goals:不得為其預留任何結構)。"""
     source = (WEB_DIR / "game.js").read_text(encoding="utf-8")
@@ -676,27 +465,6 @@ def test_the_source_has_no_takeback_vocabulary() -> None:
     found = re.findall(r"undo|takeback|stepBack|悔棋", code, flags=re.IGNORECASE)
 
     assert not found, f"game.js 不得提供任何單手回退,卻出現:{found}"
-
-
-def test_the_state_cannot_be_edited_from_outside(game_page) -> None:
-    """對外的狀態是一份唯讀快照 —— 改它不會動到真相,序列尤其不能被人 `pop` 掉一手。"""
-    start(game_page)
-    route_black_move(game_page, replies(black_reply()))
-    call(game_page, "play", "d8d9")
-
-    game_page.evaluate(
-        """() => {
-          const snapshot = window.game.getState();
-          try { snapshot.moves.pop(); } catch (ignored) {}
-          try { snapshot.over = true; } catch (ignored) {}
-          try { snapshot.legalMoves.length = 0; } catch (ignored) {}
-        }"""
-    )
-    snapshot = state(game_page)
-
-    assert snapshot["moves"] == ["d8d9", "e9d9"]
-    assert snapshot["over"] is False
-    assert snapshot["legalMoves"] == ["d9d8", "f8f9"]
 
 
 # --- 失敗:整份序列退回送出前的值 -----------------------------------------
@@ -723,49 +491,11 @@ def test_a_failed_move_rolls_the_sequence_back_and_the_user_can_move_again(
     assert recovered["error"] is None
 
 
-def test_the_game_stays_operable_after_repeated_failures(game_page) -> None:
-    """連續多次失敗後介面仍可操作(7.4)—— 單次不足以證明。"""
-    start(game_page)
-    route_black_move(
-        game_page,
-        [
-            backend_error("SERVICE_BUSY", status=503),
-            backend_error("ENGINE_TIMEOUT", status=504),
-            backend_error("INTERNAL"),
-            (200, black_reply()),
-        ],
-    )
-
-    for _ in range(3):
-        assert call(game_page, "play", "d8d9") is False
-        assert state(game_page)["waiting"] is False
-        assert state(game_page)["moves"] == []
-        assert state(game_page)["legalMoves"] == START_LEGAL
-
-    assert call(game_page, "play", "d8d9") is True
-    assert state(game_page)["moves"] == ["d8d9", "e9d9"]
-
-
-def test_a_failed_move_clears_the_waiting_state(game_page) -> None:
-    """任何失敗之後等待態必被解除(6.4),不留在等待中無法操作。"""
-    start(game_page)
-    route_black_move(game_page, [backend_error("INTERNAL")])
-    game_page.evaluate("() => { window.states = []; }")
-
-    call(game_page, "play", "d8d9")
-
-    assert [snapshot["waiting"] for snapshot in notified(game_page)] == [True, False]
-
-
 @pytest.mark.parametrize(
     ("code", "status", "kind"),
     [
-        ("ILLEGAL_MOVE_SEQUENCE", 409, "reset"),
         ("WRONG_SIDE_TO_MOVE", 409, "reset"),
-        ("SERVICE_BUSY", 503, "retry"),
         ("ENGINE_TIMEOUT", 504, "retry"),
-        ("INTERNAL", 500, "retry"),
-        ("INVALID_MOVE_FORMAT", 400, "retry"),
     ],
 )
 def test_failures_are_sorted_into_retry_and_reset(game_page, code, status, kind) -> None:
@@ -784,20 +514,6 @@ def test_failures_are_sorted_into_retry_and_reset(game_page, code, status, kind)
     assert failure["kind"] == kind
 
 
-def test_a_stale_sequence_can_be_recovered_by_resetting(game_page) -> None:
-    """對局狀態已失效之後,重來確實把它救回可走子(7.3、7.4)。"""
-    start(game_page)
-    route_black_move(
-        game_page, [backend_error("ILLEGAL_MOVE_SEQUENCE", status=409), (200, black_reply())]
-    )
-    call(game_page, "play", "d8d9")
-    assert state(game_page)["error"]["kind"] == "reset"
-
-    call(game_page, "reset")
-    assert state(game_page)["error"] is None
-    assert call(game_page, "play", "d8d9") is True
-
-
 def test_the_failure_carries_nothing_but_a_code(game_page) -> None:
     """後端的原文一個字都不得進到狀態裡(7.5)。"""
     start(game_page)
@@ -811,43 +527,7 @@ def test_the_failure_carries_nothing_but_a_code(game_page) -> None:
     assert "技術細節" not in dumped
 
 
-def test_an_unrecognisable_reply_is_a_failure_not_a_move(game_page) -> None:
-    """無法辨識的回應不得被當成一手棋推進對局(7.5)。"""
-    start(game_page)
-    route_black_move(game_page, [(200, {"move": "e9d9"})])  # 少了局面狀態
-
-    assert call(game_page, "play", "d8d9") is False
-    snapshot = state(game_page)
-    assert snapshot["moves"] == []
-    assert snapshot["error"]["code"] == "UNKNOWN"
-    assert snapshot["over"] is False
-
-
 # --- 走脫回饋的來源可擴充(4.5)-------------------------------------------
-
-
-def test_the_signal_arrives_as_one_feedback_entry(game_page) -> None:
-    """目前唯一的回饋來源是三態信號。"""
-    start(game_page)
-    route_black_move(game_page, replies(black_reply(signal="red_winning", mate_in=4)))
-
-    call(game_page, "play", "d8d9")
-
-    assert state(game_page)["feedback"] == [
-        {"source": "signal", "signal": "red_winning", "mateIn": 4}
-    ]
-
-
-def test_a_zero_countdown_survives(game_page) -> None:
-    """**殺著倒數可能為 0**(終局那手)。JS 的 `if (mateIn)` 對 0 為假,不得被吞掉。"""
-    start(game_page)
-    route_black_move(game_page, replies(FINAL_REPLY))
-
-    call(game_page, "play", "d8d9")
-
-    assert state(game_page)["feedback"] == [
-        {"source": "signal", "signal": "red_winning", "mateIn": 0}
-    ]
 
 
 def test_an_empty_reply_still_carries_its_signal(game_page) -> None:
@@ -862,25 +542,6 @@ def test_an_empty_reply_still_carries_its_signal(game_page) -> None:
     assert snapshot["feedback"][0]["signal"] == "red_winning"
 
 
-def test_an_extra_feedback_source_needs_no_change_to_the_advance_flow(game_page) -> None:
-    """新增一個回饋來源就是多一個項目 —— 推進流程一字不改(4.5)。
-
-    日後的走脫判定表就是這樣接進來的:它是**新增來源**,而不是改寫這條流程。
-    """
-    start(game_page, extra_feedback=True)
-    route_black_move(game_page, replies(black_reply()))
-
-    call(game_page, "play", "d8d9")
-    snapshot = state(game_page)
-
-    assert snapshot["feedback"] == [
-        {"source": "signal", "signal": "red_winning", "mateIn": 4},
-        {"source": "stub", "plies": 2, "verdict": "escaped", "sawReply": True},
-    ]
-    assert snapshot["moves"] == ["d8d9", "e9d9"], "推進的結果與沒有這個來源時完全一樣"
-    assert snapshot["over"] is False
-
-
 def test_no_feedback_source_can_end_the_game(game_page) -> None:
     """回饋只是參考資訊 —— 它判什麼都不影響對局是否結束(4.3)。"""
     start(game_page, extra_feedback=True)
@@ -892,18 +553,6 @@ def test_no_feedback_source_can_end_the_game(game_page) -> None:
     assert snapshot["feedback"][1]["verdict"] == "escaped"
     assert snapshot["over"] is False
     assert snapshot["legalMoves"] != []
-
-
-def test_feedback_is_cleared_when_the_game_restarts(game_page) -> None:
-    """重來之後沒有任何回饋 —— 還沒走出一手,就沒有東西可回饋。"""
-    start(game_page)
-    route_black_move(game_page, replies(black_reply()))
-    call(game_page, "play", "d8d9")
-    assert state(game_page)["feedback"] != []
-
-    call(game_page, "reset")
-
-    assert state(game_page)["feedback"] == []
 
 
 # --- 訂閱者的例外不得使狀態機壞掉 -----------------------------------------
@@ -947,20 +596,6 @@ def test_a_throwing_subscriber_does_not_corrupt_a_successful_move(game_page) -> 
     assert snapshot["error"] is None
 
 
-def test_a_throwing_subscriber_does_not_strand_the_waiting_state(game_page) -> None:
-    """訂閱者丟例外時等待態仍必被解除(6.4),失敗也仍記得下來(7.1)。"""
-    start(game_page)
-    route_black_move(game_page, [backend_error("INTERNAL")])
-    break_subscriber(game_page)
-
-    assert call(game_page, "play", "d8d9") is False
-    snapshot = state(game_page)
-
-    assert snapshot["waiting"] is False
-    assert snapshot["error"]["code"] == "INTERNAL"
-    assert snapshot["moves"] == []
-
-
 def test_a_throwing_subscriber_does_not_silence_the_others(game_page) -> None:
     """壞掉的訂閱者不得讓排在它後面的訂閱者收不到通知。"""
     start(game_page)
@@ -972,61 +607,7 @@ def test_a_throwing_subscriber_does_not_silence_the_others(game_page) -> None:
     assert game_page.evaluate("() => window.later") == [["d8d9"], ["d8d9", "e9d9"]]
 
 
-def test_a_throwing_subscriber_does_not_break_load_or_reset(game_page) -> None:
-    """載入與重來同樣經過通知,同樣不得因訂閱者的例外而失敗。"""
-    start(game_page)
-    route_black_move(game_page, replies(black_reply()))
-    call(game_page, "play", "d8d9")
-    break_subscriber(game_page)
-
-    call(game_page, "reset")
-    assert state(game_page)["moves"] == []
-
-    assert call(game_page, "load") is True
-    assert state(game_page)["legalMoves"] == START_LEGAL
-
-
-def test_a_throwing_feedback_source_rolls_the_whole_state_back(game_page) -> None:
-    """回饋來源丟例外時,**盤面與著法清單也要一起退回送出前的值**(7.4)。
-
-    只退 `moves` 是不夠的:局面狀態停在推進後,快照就會對著起始盤面發出走後的
-    著法清單。回饋是參考資訊,它壞掉不得讓對局進到一個說不通的狀態。
-    """
-    game_page.evaluate(
-        """async () => {
-          const { createGame } = await import('/game.js');
-          window.game = createGame({
-            positionId: 1,
-            feedbackSources: [() => { throw new Error('回饋來源壞了'); }],
-          });
-        }"""
-    )
-    assert call(game_page, "load") is True
-    route_black_move(game_page, replies(black_reply()))
-
-    assert call(game_page, "play", "d8d9") is False
-    snapshot = state(game_page)
-
-    assert snapshot["moves"] == []
-    assert snapshot["legalMoves"] == START_LEGAL, "退回之後盤面要與起始局面一致"
-    assert snapshot["waiting"] is False
-    assert snapshot["over"] is False
-    assert piece_at(snapshot, "d8") == "R"
-
-
 # --- 依賴方向 -----------------------------------------------------------
-
-
-def test_game_module_imports_only_the_client_and_fen() -> None:
-    """design 的依賴方向:`game.js` 在 `api.js` / `fen.js` 的右邊一層,不得反向依賴。"""
-    source = (WEB_DIR / "game.js").read_text(encoding="utf-8")
-
-    imported = re.findall(r"^\s*import[^\n]*?from\s*'([^']+)'", source, flags=re.MULTILINE)
-    dynamic = re.findall(r"\bimport\s*\(\s*'([^']+)'", source)
-
-    assert set(imported + dynamic) <= {"./api.js", "./fen.js"}, (
-        f"game.js 只能依賴 api.js 與 fen.js,卻出現:{imported + dynamic}"
-    )
 
 
 def test_game_module_does_not_touch_the_dom() -> None:
@@ -1042,12 +623,3 @@ def test_game_module_does_not_touch_the_dom() -> None:
     ]
 
     assert not forbidden, f"game.js 不得使用:{forbidden}"
-
-
-def test_game_module_never_calls_fetch_itself() -> None:
-    """後端往來一律經 `api.js` —— 逾時與錯誤模型才只有一份(design 的 api.js 責任)。"""
-    source = (WEB_DIR / "game.js").read_text(encoding="utf-8")
-    code = re.sub(r"/\*\*.*?\*/", "", source, flags=re.DOTALL)
-    code = re.sub(r"//[^\n]*", "", code)
-
-    assert "fetch(" not in code

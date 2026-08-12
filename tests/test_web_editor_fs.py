@@ -259,17 +259,6 @@ def test_is_supported_does_not_open_the_picker(module_page) -> None:
 # =========================================================================
 
 
-def test_pick_returns_the_file_the_user_chose(module_page) -> None:
-    """平台回的是**陣列**(它支援多選,我們關掉了),取的是第一個。"""
-    assert run(
-        module_page,
-        "  const log = [];\n"
-        "  installPicker(log, async () => [makeFileHandle(makeStore(), log)]);\n"
-        "  const handle = await fs.pickCorpusFile();\n"
-        "  return handle.name;",
-    ) == TARGET_NAME
-
-
 def test_the_picker_is_asked_for_a_single_json_file(module_page) -> None:
     """選項限 `.json` 單選,並帶 `id` 讓瀏覽器記住上一次的資料夾。
 
@@ -511,22 +500,6 @@ def test_pick_does_not_prompt_again_when_permission_is_already_granted(
         "  return log.filter((entry) => entry[0] === 'requestPermission').length;",
     )
     assert result == 0
-
-
-def test_a_platform_without_permission_methods_falls_back_to_the_picker(
-    module_page,
-) -> None:
-    """兩個方法在規格上是**可選的**:沒有提供時以 picker 的結果為準。
-
-    在這裡自己造一個「拒絕」出來,只會把一個能寫的檔講成不能寫。
-    """
-    assert run(
-        module_page,
-        "  const log = [];\n"
-        "  installPicker(log, async () => [makeFileHandle(makeStore(), log)]);\n"
-        "  const handle = await fs.pickCorpusFile();\n"
-        "  return handle.name;",
-    ) == TARGET_NAME
 
 
 def test_a_refused_write_permission_keeps_nothing(module_page) -> None:

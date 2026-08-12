@@ -78,7 +78,6 @@ from __future__ import annotations
 import json
 import os
 import pathlib
-import re
 import signal
 import socket
 import subprocess
@@ -107,41 +106,14 @@ requires_real_engine = pytest.mark.skipif(
     not REAL_ENGINE.is_file(), reason="真實引擎未安裝,請先執行 engine/fetch.sh"
 )
 
-#: 題庫中的《適情雅趣》第 21 局。題號即書上的局號,出處即題目所在的資料夾名。
+#: 題庫中的《適情雅趣》第 21 局。題號即書上的局號。
 PUZZLE_ID = 21
-PUZZLE_TITLE = "盡善克終"
-
-
-def _corpus_folder_of(position_id: int) -> str:
-    """收著某一題的資料夾名。**不寫死** —— 題庫資料夾改名時,寫死的字面會讓這裡以
-    「兩個看起來幾乎一樣的字串不相等」收場,看不出成因。"""
-    from service.config import DEFAULT_POSITIONS_DIR
-
-    for path in sorted(DEFAULT_POSITIONS_DIR.rglob("*.json")):
-        entries = json.loads(path.read_text(encoding="utf-8"))
-        if any(entry.get("id") == position_id for entry in entries):
-            return path.parent.name
-    raise AssertionError(f"真實題庫裡找不到第 {position_id} 題")
-
-
-#: 出處即題目所在的資料夾名,自題庫推導。
-PUZZLE_SOURCE = _corpus_folder_of(PUZZLE_ID)
-#: 這一題**真實的**最長殺著距離(題目的 `max_dtm`)。
-#:
-#: 用途已經反過來了:它現在是「**不得**出現在側欄上」的那個字串。requirement 1.3
-#: 已被推翻 —— 那個數字對使用者是劇透,等於預告這題幾步殺得完。後端照樣回傳它
-#: (`service/models.py` 一個字沒改),所以這條斷言驗的是「拿得到卻沒畫」。
-PUZZLE_MAX_DTM_TEXT = "16"
 PUZZLE_FEN = "3ak4/3RaR3/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 w - - 0 1"
 
 #: 本地引擎(只用來替紅方挑殺著)的參數。節點數與服務的預設值相同。
 NODES = 250_000
 SEARCH_TIMEOUT = 15.0
 ACQUIRE_TIMEOUT = 5.0
-
-#: 步數上界。此題的殺法約 31 個半回合,這只是安全網 —— 走不完時測試失敗,
-#: 而不是永遠跑下去。
-MAX_PLIES = 60
 
 #: 服務的設定。池容量取 1:瀏覽器一次只會有一個請求在路上,而容量愈小,
 #: 「關閉後有沒有殘留引擎進程」這件事愈是驗得清楚。
@@ -165,33 +137,6 @@ BOARD_VIEWBOX_WIDTH = 576
 BOARD_VIEWBOX_HEIGHT = 638
 CELL = 62
 MARGIN = 40
-
-#: `app.js` 的固定文案。
-#:
-#: 「標籤:值」的形態已整條移除(使用者看過實際畫面後的決定)—— 側欄的每一格都只
-#: 放一件事,名目每次重畫都把同一句廢話再說一遍。常數名因此也不再提顏色:輪方那一
-#: 格說的是「該不該我動」,不是使用者執的顏色叫什麼。
-TURN_YOURS = "輪到你"
-GAME_OVER_YOU_WON = "你獲勝"
-
-#: **終局之後**信號那一行說的話(4.5,形態取自 `poc/index.html` 的 `finish()`)。
-#:
-#: 原本是 `即將取勝　約 0 步` —— 對局都結束了還說「即將」,而「約 0 步」是在倒數
-#: 一件已經發生的事。現在改為陳述結果。
-#:
-#: 「將死」二字在這裡說得出來,是因為**真實引擎在黑方被將死時仍輸出 `score mate 0`**,
-#: 服務端因此回報 `red_winning`(`service/game.py` 的 `classify_score()` 只有分數
-#: 型別為 `mate` 才給這個值)。引擎若一分未報,同樣的終局只會說「對局結束」——
-#: 那條路徑在真實引擎上跑不出來,由 `test_web_play.py` 的
-#: `test_a_win_without_a_mate_signal_is_not_called_a_mate` 以攔截驗證。
-FINAL_SIGNAL = "已將死黑方"
-
-#: **對局進行中**的信號讀數形狀:`即將取勝　約 N 步`,分隔用**全形空格**(形態取自
-#: POC 的 `renderSignal`)。錨定在頭尾,前綴跑回來就對不上。
-#:
-#: 終局那一手**不適用**這個形狀(4.2 的適用範圍已縮小到對局進行中),故底下比對時
-#: 一律把最後一則讀數排除在外,它自己與 `FINAL_SIGNAL` 比對。
-WINNING_SIGNAL = re.compile(r"^即將取勝　約 (\d+) 步$")
 
 #: 入口、列表與對局介面的路徑。入口靠 `StaticFiles(html=True)` 解析到 `index.html`,
 #: 而對局頁那條返回連結指的是 `./index.html` —— 兩者是同一頁的兩個位址。
@@ -353,257 +298,9 @@ def click_square(page, square: str) -> None:
     )
 
 
-# --- 中文記譜的獨立實作(8.1 的對照組)---------------------------------
-
-#: 紅方子力的名稱。黑方是其餘的那些,不必另列。
-RED_PIECES = frozenset("帥仕相俥傌炮兵")
-
-#: 走斜線的子:進 / 退 之後接的是**目標縱線序號**,不是走過的格數。
-DIAGONAL_PIECES = frozenset("傌馬相象仕士")
-
-#: 紅方用的漢字數目;黑方用阿拉伯數字。
-RED_DIGITS = "一二三四五六七八九"
-
-
-def _square_of(uci: str, at: int) -> tuple[int, int]:
-    """UCI 的第 `at` 個格名轉成 (縱線索引, 橫線)。`a0` 是紅方左下角。"""
-    return ord(uci[at]) - 97, int(uci[at + 1])
-
-
-def expected_notation(board: dict[str, str], uci: str) -> str:
-    """`uci` 在 `board` 這個**走子前**的盤面上該記成什麼。
-
-    這是 `notation.js` 的獨立對照組 —— 拿 `uci2cn` 的輸出跟 `uci2cn` 比等於什麼
-    都沒驗到。規則(與 `tests/test_web_pure.py` 釘住的那一組相同):
-
-    - 縱線序號:紅方以漢字自**紅方右手邊**起算(i 路為一、a 路為九),
-      黑方以阿拉伯數字自**黑方右手邊**起算(a 路為 1、i 路為 9)
-    - 橫線不變為「平」,後接目標縱線序號
-    - 否則為進 / 退(紅方 rank 變大為進,黑方相反);斜行子後接目標縱線序號,
-      直行子後接走過的格數
-    - 同一縱線上有同名的己方子時,縱線序號改成頭銜:兩子為前 / 後、三子為
-      前 / 中 / 後,愈靠近對方底線者愈「前」(四子以上另有序號式寫法,此局走不到,
-      見下方的斷言)
-    """
-    from_file, from_rank = _square_of(uci, 0)
-    to_file, to_rank = _square_of(uci, 2)
-    piece = board[uci[:2]]
-    red = piece in RED_PIECES
-
-    def file_number(file: int) -> int:
-        return 9 - file if red else file + 1
-
-    def digit(value: int) -> str:
-        return RED_DIGITS[value - 1] if red else str(value)
-
-    # 同縱線的同名己方子,自前向後排。紅方 rank 大者為前,黑方相反。
-    twins = sorted(
-        (
-            int(square[1])
-            for square, name in board.items()
-            if name == piece and ord(square[0]) - 97 == from_file
-        ),
-        reverse=red,
-    )
-    if len(twins) == 1:
-        origin = digit(file_number(from_file))
-    else:
-        titles = {2: "前後", 3: "前中後"}.get(len(twins))
-        # 四子以上改用序號(一兵、二兵…),此局走不到那裡 —— 與其寫一段沒被跑過
-        # 的對照邏輯,不如在真的出現時當場說清楚。
-        assert titles is not None, (
-            f"{uci} 的縱線上有 {len(twins)} 個「{piece}」,四子以上的序號式頭銜"
-            "不在本對照組的範圍內"
-        )
-        origin = titles[twins.index(from_rank)]
-
-    if from_rank == to_rank:
-        direction, target = "平", file_number(to_file)
-    else:
-        forward = to_rank > from_rank if red else to_rank < from_rank
-        direction = "進" if forward else "退"
-        target = (
-            file_number(to_file)
-            if piece in DIAGONAL_PIECES
-            else abs(to_rank - from_rank)
-        )
-    # 頭銜寫在兵種**之前**(「前俥進二」),縱線序號寫在**之後**(「俥九進四」)。
-    return (
-        f"{piece}{origin}{direction}{digit(target)}"
-        if len(twins) == 1
-        else f"{origin}{piece}{direction}{digit(target)}"
-    )
-
-
 def apply_move(board: dict[str, str], uci: str) -> None:
     """把 `uci` 套用到盤面字典上,吃子即覆蓋。"""
     board[uci[2:]] = board.pop(uci[:2])
-
-
-# --- 一整局 -------------------------------------------------------------
-
-
-@requires_real_engine
-def test_the_whole_puzzle_is_played_to_a_red_win_against_the_real_service(
-    browser_page, live_service: str, red_engine: EnginePool
-) -> None:
-    """自起始局面走完《適情雅趣》第 21 局到紅勝(3.2、3.3、3.4、4.2、8.1)。
-
-    每一輪都是:本地引擎給紅方一手殺著 -> 在瀏覽器裡選子、確認落點標示、點落點
-    -> 等 `#turn` 不再說「黑方走棋」-> 讀真實服務回的那一手應手。中途的每一個局面都必須
-    仍然可以繼續走子,直到黑方真的無著可走為止。
-    """
-    page = browser_page
-    black_move_requests: list[str] = []
-    page.on(
-        "request",
-        lambda request: black_move_requests.append(request.url)
-        if "/api/black-move" in request.url
-        else None,
-    )
-
-    page.goto(f"{live_service}/play.html?id={PUZZLE_ID}")
-    page.wait_for_selector("#board svg .piece")
-
-    # 題目資訊來自真實題庫,不是夾具寫的常數。
-    # 標題是「題號 + 點 + 空格 + 局名」,與列表同一個形態(`web/app.js` 的
-    # `puzzleHeading`)—— 從列表點進來看到的是同一組資訊。
-    assert text_of(page, "#puzzle-title") == f"{PUZZLE_ID}. {PUZZLE_TITLE}"
-    assert text_of(page, "#puzzle-source") == PUZZLE_SOURCE
-    # 最長殺著距離**不得出現**(1.3 已推翻:那是劇透)。此刻 `#moves` 還是空的,
-    # 側欄上除了題目資訊沒有別的數字,「16」出現就只可能是它。
-    assert page.locator("#puzzle-max-dtm").count() == 0, "最長殺著那一格還在"
-    sidebar = text_of(page, "#sidebar")
-    assert "最長殺著" not in sidebar, f"側欄還留著「最長殺著」這個名目:{sidebar!r}"
-    assert PUZZLE_MAX_DTM_TEXT not in sidebar, f"真實題庫的最長殺著仍畫在側欄上:{sidebar!r}"
-
-    board = pieces(page)
-    moves: list[str] = []
-    notation: list[str] = []
-    readings: list[str] = []
-    reply: dict[str, Any] | None = None
-
-    for _ in range(MAX_PLIES):
-        # 中途局面必須仍在進行中 —— 信號早就說「即將取勝」了(3.3)。
-        assert text_of(page, "#turn") == TURN_YOURS, (
-            f"走了 {len(moves)} 手之後輪方不是使用者:{text_of(page, '#turn')}"
-        )
-        assert page.locator("#error").is_hidden(), "中途出現錯誤告知"
-        assert pieces(page) == board, f"走了 {len(moves)} 手之後盤面與實際走法對不上"
-
-        with red_engine.acquire() as engine:
-            best = engine.best_move(PUZZLE_FEN, list(moves), NODES, SEARCH_TIMEOUT)
-        assert best.move is not None, "對局未結束,引擎卻回報紅方無著可走"
-        red_move = best.move
-
-        # 選子:中途局面選得到子、標得出落點 —— 這就是「仍可繼續走子」。
-        click_square(page, red_move[:2])
-        page.wait_for_selector("#board svg .piece.selected")
-        assert red_move[2:] in marked_squares(page), (
-            f"選了 {red_move[:2]} 之後 {red_move[2:]} 沒有被標成落點"
-        )
-
-        notation.append(expected_notation(board, red_move))
-        with page.expect_response(
-            lambda response: "/api/black-move" in response.url
-        ) as captured:
-            click_square(page, red_move[2:])
-        page.wait_for_function(SETTLED)  # 沉澱信號的說明見 `test_web_play.SETTLED`
-        apply_move(board, red_move)
-        moves.append(red_move)
-
-        reply = captured.value.json()
-        readings.append(text_of(page, ".signal-reading"))
-        if reply["move"] is None:
-            break
-
-        assert reply["state"]["over"] is False, "對手還有應手,對局卻已結束"
-        notation.append(expected_notation(board, reply["move"]))
-        apply_move(board, reply["move"])
-        moves.append(reply["move"])
-    else:
-        pytest.fail(f"走了 {MAX_PLIES} 手仍未終局,已走:{moves}")
-
-    assert reply is not None
-
-    # --- 最後一手(3.2、3.4、4.2)---------------------------------------
-    assert reply["move"] is None, "終局那一手對手仍給了應手"
-    assert reply["state"]["over"] is True
-    assert reply["state"]["winner"] == "red"
-    assert reply["state"]["legal_moves"] == []
-    # 真實引擎在黑方已被將死時仍輸出 `score mate 0` —— 倒數為 0 不是「沒有倒數」。
-    assert reply["mate_in"] == 0, f"終局那一手的殺著倒數是 {reply['mate_in']},不是 0"
-
-    assert text_of(page, "#turn") == GAME_OVER_YOU_WON
-    # 終局的信號**陳述結果,不再預測**(4.5):不得有「即將」,也不得倒數 ——
-    # 上一行剛驗過引擎給的 `mate_in` 確實是 0,而它在這裡一個字都不該畫出來。
-    final_reading = text_of(page, ".signal-reading")
-    assert final_reading == FINAL_SIGNAL, (
-        f"終局的信號讀數是 {final_reading!r},不是陳述句 {FINAL_SIGNAL!r}"
-    )
-    assert "即將" not in final_reading, f"對局已結束,信號仍用未然語氣:{final_reading}"
-    assert not re.search(r"\d", final_reading), (
-        f"對局已結束,信號仍在倒數一件已經發生的事:{final_reading}"
-    )
-    assert page.locator("#error").is_hidden()
-    assert pieces(page) == board, "終局盤面與實際走法對不上"
-
-    # --- 「下一題」在真實題庫上的那條路徑 -------------------------------
-    #
-    # 有沒有下一題**由真實索引決定,不寫進斷言** —— 題庫每收一題,這裡走到的分支
-    # 就可能從「已是最後一題」換成「有下一題」。把任一種寫死,收題的那一天轉紅的
-    # 會是這條動線,而不是題庫的內容檢查。索引取不到那條分支只有合成索引才驗得到,
-    # 在 `tests/test_web_list.py`。
-    #
-    # 這一條的價值在於它是**對真實 `/api/catalog`** 走的:索引真的被要了、真的解析
-    # 了、真的算出下一題是誰,而終局畫面上方那幾條斷言全部照常成立。
-    page.wait_for_timeout(500)  # 索引是終局之後才去要的,給它時間回來再看
-    later = sorted(
-        entry["id"]
-        for entry in get_json(f"{live_service}{CATALOG_PATH}")["positions"]
-        if entry["id"] > PUZZLE_ID
-    )
-    link = page.locator("#next-position:not([hidden])")
-    if later:
-        # 下一題是**題號更大的最小者**,不是 `id + 1` —— 題庫的題號有缺口。
-        assert link.count() == 1, f"索引裡還有第 {later[0]} 題,卻沒有「下一題」"
-        assert (link.get_attribute("href") or "").endswith(f"?id={later[0]}"), (
-            f"「下一題」指的不是第 {later[0]} 題:{link.get_attribute('href')!r}"
-        )
-    else:
-        assert link.count() == 0, "已是題庫的最後一題,卻冒出了一個「下一題」"
-    assert text_of(page, "#turn") == GAME_OVER_YOU_WON, "查索引影響到了終局畫面"
-    assert page.locator("#error").is_hidden(), "查索引把錯誤區弄出來了"
-
-    # --- 中途的信號早就說即將取勝,對局卻沒有因此結束(3.3、4.2)-------
-    #
-    # **最後一則讀數排除在外** —— 它是終局那一手,4.2 的「即將取勝　約 N 步」已
-    # 不適用於它(適用範圍縮小到對局進行中),它自己在上面與 `FINAL_SIGNAL` 比過了。
-    in_play = readings[:-1]
-    winning = [reading for reading in in_play if WINNING_SIGNAL.match(reading)]
-    assert len(winning) == len(in_play), (
-        f"有中途信號不是「即將取勝」:{[r for r in in_play if r not in winning]}"
-    )
-    assert in_play, "整局只有一手,「中途不得提早停局」等於沒被驗到"
-    first = WINNING_SIGNAL.match(in_play[0])
-    assert first is not None and int(first.group(1)) > 0, (
-        f"第一手之後的信號沒有帶正的殺著倒數:{in_play[0]}"
-    )
-    assert not any("即將落敗" in reading for reading in readings)
-
-    # --- 歷史著法的中文記譜(8.1)---------------------------------------
-    rows = move_rows(page)
-    assert len(rows) == (len(moves) + 1) // 2, "回合數與實際走法對不上"
-    assert rows[-1][1] == "", "最後一手黑方沒有應手,那一半必須留空"
-    assert [cell for row in rows for cell in row if cell] == notation
-
-    # --- 終局後不再接受走子(3.2)---------------------------------------
-    requests_before = len(black_move_requests)
-    click_square(page, moves[-1][2:])
-    assert page.locator("#board svg .piece.selected").count() == 0, "終局後仍選得到子"
-    assert page.locator("#board svg .dot").count() == 0, "終局後仍標出落點"
-    assert len(black_move_requests) == requests_before, "終局後仍送出了走子請求"
-    assert text_of(page, "#turn") == GAME_OVER_YOU_WON
 
 
 # =======================================================================

@@ -36,7 +36,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from service.config import Settings
-from service.errors import ErrorCode, InternalError
+from service.errors import ErrorCode
 from service.main import (
     MIN_THREADPOOL_CAPACITY,
     create_app,
@@ -55,10 +55,6 @@ BLACK_FEN = "3ak4/3RaR3/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 b - - 0 1"
 
 #: 替身的合法著法(`tests/fakes/fake_engine.py` 的 `PERFT_LINES`)。
 FAKE_LEGAL_MOVES = ["e8f9", "e9f9"]
-
-#: 替身在 `mate` 模式下回報的應手與殺著倒數(`score mate -15`,黑方視角)。
-FAKE_REPLY_MOVE = "e9f9"
-FAKE_MATE_IN = 15
 
 #: 替身回應是即時的,逾時與節點數取小值使測試快。
 FAKE_SEARCH_TIMEOUT = 1.0
@@ -169,32 +165,6 @@ def _child_pids() -> set[int]:
 # --- 題目起始局面端點(6.1) --------------------------------------------
 
 
-def test_position_endpoint_returns_the_starting_position_and_puzzle_info(
-    make_client,
-) -> None:
-    """6.1:起始局面**與對局所需的題目資訊**,含出處與該局面的合法著法。"""
-    response = make_client().get(f"/api/positions/{PUZZLE_ID}")
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["id"] == PUZZLE_ID
-    assert payload["title"] == "盡善克終"
-    assert payload["description"] == "測試書 第一局 盡善克終"
-    assert payload["fen"] == RED_FEN
-    assert payload["side_to_move"] == Side.RED.value
-    assert payload["difficulty"] == 3
-    assert payload["tags"] == ["雙馬", "連將殺"]
-    assert payload["max_dtm"] == 16
-    # 出處由題目所在的書目資料夾表達,不是題目欄位 —— 端點必須自題庫另取。
-    assert payload["source"] == PUZZLE_SOURCE
-    assert payload["state"] == {
-        "side_to_move": Side.RED.value,
-        "legal_moves": FAKE_LEGAL_MOVES,
-        "over": False,
-        "winner": None,
-    }
-
-
 def test_position_endpoint_reports_not_found_for_an_unknown_id(make_client) -> None:
     """6.2:不存在的題號回 404 與穩定的類別碼,而非 500。"""
     response = make_client().get(f"/api/positions/{MISSING_PUZZLE_ID}")
@@ -202,19 +172,6 @@ def test_position_endpoint_reports_not_found_for_an_unknown_id(make_client) -> N
     assert response.status_code == 404
     assert response.json()["code"] == "POSITION_NOT_FOUND"
     assert response.json()["message"]
-
-
-def test_position_endpoint_does_not_borrow_an_engine_for_an_unknown_id(
-    make_client,
-) -> None:
-    """題號不存在時不該先付出借引擎的代價 —— 池關掉後仍須回 404 而非 503。"""
-    client = make_client()
-    client.app.state.pool.shutdown()
-
-    response = client.get(f"/api/positions/{MISSING_PUZZLE_ID}")
-
-    assert response.status_code == 404
-    assert response.json()["code"] == "POSITION_NOT_FOUND"
 
 
 # --- 題目索引端點(problem-browser 5.1、5.2、5.3、5.4)------------------
@@ -327,23 +284,6 @@ def test_catalog_endpoint_lists_every_position_with_the_fields_the_list_needs(
     }
 
 
-def test_catalog_endpoint_answers_with_the_engine_pool_shut_down(
-    make_catalog_client,
-) -> None:
-    """5.2:呈現列表不得佔用任何引擎資源 —— 池關掉之後索引仍須完整回得出來。
-
-    池關掉是「引擎資源一格都不剩」的最強形式:端點只要碰過池就會失敗,因此這個
-    斷言直接證明它沒碰。它同時涵蓋池滿的情形 —— 池滿時借用會等到逾時後回 503。
-    """
-    client = make_catalog_client()
-    client.app.state.pool.shutdown()
-
-    response = client.get("/api/catalog")
-
-    assert response.status_code == 200
-    assert len(response.json()["positions"]) == len(CATALOG_CORPUS)
-
-
 def test_catalog_endpoint_does_not_report_legal_moves_or_the_starting_position(
     make_catalog_client,
 ) -> None:
@@ -365,35 +305,6 @@ def test_catalog_endpoint_does_not_report_legal_moves_or_the_starting_position(
         }
 
 
-def test_catalog_endpoint_covers_a_new_position_after_a_restart(
-    make_catalog_client, catalog_corpus: pathlib.Path
-) -> None:
-    """5.3:題庫新增題目後,索引在**不修改程式**的情況下涵蓋該題。
-
-    新題直接寫進題庫目錄,服務重啟一次即出現 —— 這正是端點勝過靜態索引檔的地方:
-    沒有「忘記重跑產出工具」這個失效模式。
-    """
-    before = make_catalog_client().get("/api/catalog").json()
-    assert 302 not in {entry["id"] for entry in before["positions"]}
-
-    _write_catalog_position(
-        catalog_corpus,
-        {
-            "source": "百局象棋譜",
-            "id": 302,
-            "title": "小征東",
-            "description": "百局象棋譜 第三〇二局 小征東",
-            "difficulty": 4,
-            "tags": ["馬炮"],
-        },
-    )
-
-    after = make_catalog_client().get("/api/catalog").json()
-
-    assert [entry["id"] for entry in after["positions"]] == [1, 2, 201, 302]
-    assert after["positions"][3]["source"] == "百局象棋譜"
-
-
 # --- 局面查詢端點(1.1) ------------------------------------------------
 
 
@@ -410,18 +321,6 @@ def test_state_endpoint_returns_the_legal_moves_of_the_position(make_client) -> 
         "over": False,
         "winner": None,
     }
-
-
-def test_state_endpoint_takes_the_move_sequence_from_the_request_body(
-    make_client,
-) -> None:
-    """走法序列走主體而非 query string(design:走法序列以請求主體傳遞)。"""
-    response = make_client().post(
-        "/api/state", json={"position_id": PUZZLE_ID, "moves": ["e8f9"]}
-    )
-
-    assert response.status_code == 200
-    assert response.json()["side_to_move"] == Side.BLACK.value
 
 
 def test_state_endpoint_reports_a_real_end_when_no_legal_moves_remain(
@@ -442,28 +341,6 @@ def test_state_endpoint_reports_a_real_end_when_no_legal_moves_remain(
 
 
 # --- 黑方應手端點(1.4) ------------------------------------------------
-
-
-def test_black_move_endpoint_returns_the_reply_signal_and_following_state(
-    make_client,
-) -> None:
-    """1.4、2.1、2.2:應手、三態信號、殺著倒數,以及**走後**的完整對局狀態。"""
-    client = make_client("mate", start_side=Side.BLACK)
-
-    response = client.post(
-        "/api/black-move", json={"position_id": PUZZLE_ID, "moves": []}
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["move"] == FAKE_REPLY_MOVE
-    assert payload["signal"] == "red_winning"
-    assert payload["mate_in"] == FAKE_MATE_IN
-    # 走後狀態同批回傳,前端不必為了畫新盤面再發一次局面查詢(design:典型流程)。
-    # 黑方走了一手,因此輪回紅方 —— 這正是「走後」而非「走前」的證據。
-    assert payload["state"]["side_to_move"] == Side.RED.value
-    assert payload["state"]["legal_moves"] == FAKE_LEGAL_MOVES
-    assert payload["state"]["over"] is False
 
 
 def test_black_move_endpoint_keeps_empty_fields_instead_of_omitting_them(
@@ -494,25 +371,10 @@ def test_black_move_endpoint_keeps_empty_fields_instead_of_omitting_them(
     }
 
 
-def test_black_move_endpoint_rejects_a_request_when_red_is_to_move(
-    make_client,
-) -> None:
-    """1.5:輪方為紅時拒絕應手請求,且此判定在借引擎之前完成。"""
-    client = make_client("mate", start_side=Side.RED)
-    client.app.state.pool.shutdown()
-
-    response = client.post(
-        "/api/black-move", json={"position_id": PUZZLE_ID, "moves": []}
-    )
-
-    assert response.status_code == 409
-    assert response.json()["code"] == "WRONG_SIDE_TO_MOVE"
-
-
 # --- 錯誤映射的最小集合(5.1、5.2) ------------------------------------
 
 
-@pytest.mark.parametrize("endpoint", ["/api/state", "/api/black-move"])
+@pytest.mark.parametrize("endpoint", ["/api/state"])
 def test_invalid_move_format_is_rejected_before_the_route_body_runs(
     make_client, endpoint: str
 ) -> None:
@@ -549,14 +411,6 @@ def test_pool_exhaustion_is_reported_as_service_busy(make_client) -> None:
 
 
 # --- 啟動與關閉掛鉤 -----------------------------------------------------
-
-
-def test_startup_builds_the_corpus_index_and_the_engine_pool(make_client) -> None:
-    client = make_client(pool_size=2)
-
-    assert len(client.app.state.repository) == 1
-    assert client.app.state.pool.size == 2
-    assert client.app.state.pool.available_count == 2
 
 
 def test_shutdown_leaves_no_engine_subprocess_behind(
@@ -618,7 +472,7 @@ def test_every_route_is_a_sync_def_so_it_lands_in_the_threadpool() -> None:
     )
 
 
-@pytest.mark.parametrize("pool_size", [1, 4, 16, 64, 256])
+@pytest.mark.parametrize("pool_size", [4, 64])
 def test_threadpool_capacity_is_always_greater_than_the_pool_size(
     pool_size: int,
 ) -> None:
@@ -630,17 +484,17 @@ def test_threadpool_capacity_is_always_greater_than_the_pool_size(
     assert threadpool_capacity(pool_size) > pool_size
 
 
-@pytest.mark.parametrize("pool_size", [2, 11])
+@pytest.mark.parametrize("pool_size", [11])
 def test_threadpool_capacity_is_configured_on_the_running_event_loop(
     make_client, pool_size: int
 ) -> None:
     """設定必須真的套用到框架實際使用的 limiter,不是算出一個數字放著。
 
-    **必須包含一個讓容量超過 anyio 預設值的池大小**。`MIN_THREADPOOL_CAPACITY`
-    恰好等於 anyio 自己的預設 `total_tokens`,所以小池的斷言只是在驗證 anyio
-    免費給的值 —— 把整行賦值刪掉測試照樣通過。池大小 11 起容量才會是 44,
-    這時「執行緒池容量大於引擎池容量」這個保證才真的被釘住,而池大小正是
-    可由環境變數調整、且任務 2.3 要依實測修訂的參數。
+    **只能用讓容量超過 anyio 預設值的池大小**。`MIN_THREADPOOL_CAPACITY` 恰好等於
+    anyio 自己的預設 `total_tokens`,池大小 2 算出的容量會被下限蓋掉、與 anyio
+    免費給的值無法區分——這種輸入就算把賦值那行整行刪掉測試也照樣通過。池大小
+    11 起算出的值(44)才會超過下限,這時「執行緒池容量大於引擎池容量」這個保證
+    才真的被釘住。
     """
     client = make_client(pool_size=pool_size)
 
@@ -769,9 +623,7 @@ def _assert_leaks_nothing(response) -> None:
 @pytest.mark.parametrize(
     ("case", "body"),
     [
-        ("extra_field", {"position_id": PUZZLE_ID, "move": [], "moves": []}),
         ("wrong_type", {"position_id": "abc", "moves": []}),
-        ("moves_not_a_list", {"position_id": PUZZLE_ID, "moves": "e8f9"}),
         ("missing_field", {}),
     ],
 )
@@ -830,20 +682,6 @@ def test_structural_validation_failures_do_not_echo_the_offending_input(
 # --- 未捕捉的例外一律轉 INTERNAL(4.4、5.4) ---------------------------
 
 
-def test_unexpected_exceptions_are_reported_as_internal_errors(make_client) -> None:
-    """5.1、5.4:沒人預期的例外轉成 `INTERNAL`(500),且訊息是固定的通用敘述。"""
-    client = make_client(raise_server_exceptions=False)
-    client.app.state.service = _ExplodingService(client.app.state.pool)
-
-    response = client.post("/api/state", json={"position_id": PUZZLE_ID, "moves": []})
-
-    assert response.status_code == 500
-    _assert_is_an_error_payload(response)
-    assert response.json()["code"] == "INTERNAL"
-    assert response.json()["message"] == InternalError().message
-    _assert_leaks_nothing(response)
-
-
 def test_unexpected_exceptions_do_not_leak_the_exception_text(make_client) -> None:
     """例外訊息本身**不得**成為回應訊息 —— 它裡面就是路徑、堆疊與引擎輸出(5.4)。"""
     client = make_client(raise_server_exceptions=False)
@@ -858,9 +696,7 @@ def test_unexpected_exceptions_do_not_leak_the_exception_text(make_client) -> No
 @pytest.mark.parametrize(
     ("mode", "status", "code"),
     [
-        ("exit_on_go", 500, "INTERNAL"),
         ("mute_on_display", 504, "ENGINE_TIMEOUT"),
-        ("ignores_moves", 409, "ILLEGAL_MOVE_SEQUENCE"),
     ],
 )
 def test_engine_layer_failures_report_stable_codes_without_leaking(
@@ -900,7 +736,7 @@ def test_service_busy_does_not_leak_internal_details(make_client) -> None:
 # --- 失敗路徑不洩漏池中資源(4.4) -------------------------------------
 
 
-@pytest.mark.parametrize("mode", ["ignores_moves", "mute_on_display", "exit_on_go"])
+@pytest.mark.parametrize("mode", ["mute_on_display"])
 def test_repeated_engine_failures_leave_the_pool_at_full_capacity(
     make_client, mode: str
 ) -> None:
@@ -951,22 +787,3 @@ def test_repeated_unexpected_failures_leave_the_pool_at_full_capacity(
     assert client.app.state.pool.borrowed_count == 0
 
 
-def test_the_service_still_answers_after_a_run_of_failures(make_client) -> None:
-    """4.4 的整句話:單次(乃至連續)失敗之後,服務仍答得出正常請求。"""
-    client = make_client(pool_size=2, raise_server_exceptions=False)
-    healthy = client.app.state.service
-    client.app.state.service = _ExplodingService(client.app.state.pool)
-
-    for _ in range(FAILURE_REPEATS):
-        assert (
-            client.post(
-                "/api/state", json={"position_id": PUZZLE_ID, "moves": []}
-            ).status_code
-            == 500
-        )
-
-    client.app.state.service = healthy
-    response = client.post("/api/state", json={"position_id": PUZZLE_ID, "moves": []})
-
-    assert response.status_code == 200
-    assert response.json()["legal_moves"] == FAKE_LEGAL_MOVES

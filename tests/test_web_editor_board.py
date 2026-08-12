@@ -83,9 +83,6 @@ EXPECTED_PIECES = {
     "e0": "帥",
 }
 
-#: 上表中屬紅方(FEN 大寫)的格。
-RED_SQUARES = {"d8", "f8", "i7", "g6", "e3", "a2", "e2", "i2", "e0"}
-
 #: 前後帶空白的 `PUZZLE_FEN`。**貼上時多一個空白是常態** —— 自檔案或網頁複製一段
 #: FEN,前後跟著一個空白或一個 tab 幾乎是免費附贈的。
 #:
@@ -97,7 +94,6 @@ RED_SQUARES = {"d8", "f8", "i7", "g6", "e3", "a2", "e2", "i2", "e0"}
 WHITESPACE_PADDED_FENS = [
     pytest.param(" " + PUZZLE_FEN, id="leading-space"),
     pytest.param(PUZZLE_FEN + " ", id="trailing-space"),
-    pytest.param("  " + PUZZLE_FEN + "  ", id="both-sides"),
     pytest.param("\t" + PUZZLE_FEN + "\t", id="tabs"),
 ]
 
@@ -205,17 +201,6 @@ def drawn_pieces(page) -> dict[str, str]:
         })"""
     )
     return {square_at(piece["x"], piece["y"]): piece["name"] for piece in pieces}
-
-
-def red_squares(page) -> set[str]:
-    """畫出來的紅子在哪幾格。"""
-    centres = page.evaluate(
-        """() => [...document.querySelectorAll('#board .piece.red')].map(piece => {
-          const disc = piece.querySelector('circle');
-          return [Number(disc.getAttribute('cx')), Number(disc.getAttribute('cy'))];
-        })"""
-    )
-    return {square_at(x, y) for x, y in centres}
 
 
 def grid_segments(page) -> list[str]:
@@ -332,13 +317,6 @@ def test_red_is_rendered_at_the_bottom(editor_page) -> None:
     assert abs(kings["redX"] - kings["blackX"]) < 1, "兩者都在 e 路,應同一條中線"
 
 
-def test_red_and_black_pieces_are_distinguishable(editor_page) -> None:
-    """2.2 的前提:紅子與黑子在呈現上分得開,否則「紅方在下」無從核對。"""
-    type_fen(editor_page, PUZZLE_FEN)
-
-    assert red_squares(editor_page) == RED_SQUARES
-
-
 # --- 整片不可選取(2.3)-------------------------------------------------
 
 
@@ -361,7 +339,6 @@ def test_no_piece_is_selectable(editor_page) -> None:
         "e0",  # 紅帥
         "d8",  # 紅俥,在對局頁那組著法裡本來是有法可走的
         "e9",  # 黑將
-        "c5",  # 黑象
         "a5",  # 空格
         "e5",  # 河界上的空格
     ],

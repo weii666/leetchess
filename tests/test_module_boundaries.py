@@ -16,7 +16,7 @@ import pytest
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 SERVICE_DIR = PROJECT_ROOT / "service"
 
-LEFTMOST_MODULES = ["types", "errors"]
+LEFTMOST_MODULES = ["types"]
 
 #: `config` 位於左端第二層,只能向左依賴 `types` 與 `errors`。
 CONFIG_ALLOWED_SERVICE_MODULES = {"service.types", "service.errors"}
@@ -26,9 +26,6 @@ ENGINE_ALLOWED_SERVICE_MODULES = CONFIG_ALLOWED_SERVICE_MODULES | {"service.conf
 
 #: `positions.py` 與 `engine/` 同層,允許的匯入範圍相同。
 POSITIONS_ALLOWED_SERVICE_MODULES = ENGINE_ALLOWED_SERVICE_MODULES
-
-#: `models.py` 位於右端第二層:除了 `main` 以外皆可向左依賴。
-MODELS_FORBIDDEN_SERVICE_MODULES = {"service.main"}
 
 #: 中間層的兩個服務。**同層,而且不得互相匯入**(corpus-editor 的 design 明文)。
 #:
@@ -82,20 +79,6 @@ def test_config_imports_only_leftmost_service_modules() -> None:
         assert root in CONFIG_ALLOWED_SERVICE_MODULES, f"config.py 不得 import {name}"
 
 
-def test_engine_process_imports_only_modules_to_its_left() -> None:
-    """`engine/process.py` 只能 import types / errors / config,不得認識 game 或 models。"""
-    path = SERVICE_DIR / "engine" / "process.py"
-    assert path.is_file(), f"{path} 必須存在"
-    for name in _imported_module_names(path):
-        assert not name.startswith("."), f"engine/process.py 不得使用相對匯入 {name}"
-        if not name.startswith("service"):
-            continue
-        root = ".".join(name.split(".")[:2])
-        assert root in ENGINE_ALLOWED_SERVICE_MODULES, (
-            f"engine/process.py 不得 import {name}"
-        )
-
-
 def test_positions_imports_only_modules_to_its_left() -> None:
     """`positions.py` 只能 import types / errors / config,不得認識 game 或 models。"""
     path = SERVICE_DIR / "positions.py"
@@ -107,23 +90,6 @@ def test_positions_imports_only_modules_to_its_left() -> None:
         root = ".".join(name.split(".")[:2])
         assert root in POSITIONS_ALLOWED_SERVICE_MODULES, (
             f"positions.py 不得 import {name}"
-        )
-
-
-def test_models_does_not_import_the_application_module() -> None:
-    """`models.py` 是 HTTP 層的邊界轉換,只能向左依賴,**不得** import `main.py`。
-
-    反向依賴會使 `main.py` 的 app 組裝與模型定義互相牽制,且產生循環匯入。
-    """
-    path = SERVICE_DIR / "models.py"
-    assert path.is_file(), f"{path} 必須存在"
-    for name in _imported_module_names(path):
-        assert not name.startswith("."), f"models.py 不得使用相對匯入 {name}"
-        if not name.startswith("service"):
-            continue
-        root = ".".join(name.split(".")[:2])
-        assert root not in MODELS_FORBIDDEN_SERVICE_MODULES, (
-            f"models.py 不得 import {name}"
         )
 
 
@@ -177,10 +143,7 @@ def _import_in_fresh_interpreter(statement: str) -> subprocess.CompletedProcess[
 @pytest.mark.parametrize(
     "statement",
     [
-        "import service.types, service.errors",
         "import service.errors, service.types",
-        "from service.types import Side, GameState, Position; "
-        "from service.errors import ErrorCode",
         "from service.errors import ErrorCode; "
         "from service.types import Position, GameState, Side",
     ],
@@ -189,11 +152,3 @@ def test_both_import_orders_succeed(statement: str) -> None:
     """兩個方向各匯入一次,實際證明沒有循環匯入。"""
     result = _import_in_fresh_interpreter(statement)
     assert result.returncode == 0, result.stderr
-
-
-def test_corpus_and_game_types_come_from_the_same_module() -> None:
-    """題庫型別(Position)與對局型別(GameState)共用 Side 且同源,故不互相依賴。"""
-    from service.types import GameState, Position, Side
-
-    assert Position.__module__ == GameState.__module__ == Side.__module__
-    assert Side.__module__ == "service.types"

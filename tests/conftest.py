@@ -11,20 +11,6 @@ tasks 5.5 的逾時與崩潰恢復測試會沿用同一組夾具。
 前端測試的 Playwright 夾具放在 `tests/conftest_web.py`(檔名取自 design 的
 File Structure Plan),在此匯入以完成註冊 —— pytest 只自動載入名為 `conftest.py`
 的檔案。該模組不在頂層匯入 playwright,故此匯入不影響既有測試的啟動時間。
-
-## 停用清單
-
-`tests/disabled.txt` 列出目前停用的測試,一行一個 node id,由下方的
-`pytest_collection_modifyitems` 在收集階段剔除。
-
-停用而非刪除,是為了讓「要加回來」的成本等於刪掉清單裡的一行 —— 測試碼本身
-原封不動留在版本庫裡,不必從 git 歷史挖回來。清單集中在單一檔案,也使「現在
-到底停用了哪些」可以一眼看完,而不必去各測試檔翻 `@pytest.mark.skip`。
-
-**一個測試要能進入這份清單,判準是它的停用不會讓任何一個變異體從被殺變成存活**
-(見 `.kiro/steering/tech.md` 未涵蓋、屬測試策略的部分)。覆蓋率不是判準:實測
-`service/game.py` 砍掉一半測試後覆蓋率仍是 100%,卻放掉了 `mate 0` 與 `mate 1`
-兩個邊界。
 """
 
 from __future__ import annotations
@@ -42,19 +28,6 @@ from tests.conftest_web import browser, browser_page  # noqa: F401
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
 FAKES_DIR = TESTS_DIR / "fakes"
 FAKE_ENGINE_SCRIPT = FAKES_DIR / "fake_engine.py"
-DISABLED_LIST = TESTS_DIR / "disabled.txt"
-
-
-def _disabled_node_ids() -> set[str]:
-    """讀取停用清單。空行與 `#` 開頭的行忽略,檔案不存在即視為沒有停用任何測試。"""
-    if not DISABLED_LIST.is_file():
-        return set()
-    lines = DISABLED_LIST.read_text(encoding="utf-8").splitlines()
-    return {
-        stripped
-        for line in lines
-        if (stripped := line.strip()) and not stripped.startswith("#")
-    }
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
@@ -69,53 +42,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="連同標記為 slow 的測試一起跑(預設跳過)",
     )
-    parser.addoption(
-        "--disabled-report",
-        action="store_true",
-        default=False,
-        help="列出 tests/disabled.txt 的命中數與失效條目",
-    )
 
 
 def pytest_configure(config: pytest.Config) -> None:
     # 清掉 addopts 寫死的 `-m 'not slow'`,而不是再疊一層 marker 運算式。
     if config.getoption("--slow"):
         config.option.markexpr = ""
-
-
-def pytest_collection_modifyitems(
-    config: pytest.Config, items: list[pytest.Item]
-) -> None:
-    """把 `tests/disabled.txt` 列出的測試從本次收集結果中剔除。
-
-    走 deselect 而非 skip,理由是停用的測試不該出現在輸出裡佔一個 `s` —— 數百個
-    skip 標記會把真正因環境不足而跳過的測試(例如缺引擎 binary 的
-    `requires_real_engine`)淹沒,那正是需要被看見的訊號。
-
-    清單裡對不上任何 node id 的項目**不會**報錯:測試改名或參數調整之後,留著的
-    陳舊條目只是失效,不至於讓整套測試無法啟動。代價是失效條目會靜靜累積,故
-    以 `--disabled-report` 提供一次性的對帳。
-    """
-    disabled = _disabled_node_ids()
-    if not disabled and not config.getoption("--disabled-report"):
-        return
-
-    kept: list[pytest.Item] = []
-    removed: list[pytest.Item] = []
-    for item in items:
-        (removed if item.nodeid in disabled else kept).append(item)
-
-    if removed:
-        config.hook.pytest_deselected(items=removed)
-        items[:] = kept
-
-    if config.getoption("--disabled-report"):
-        matched = {item.nodeid for item in removed}
-        reporter = config.pluginmanager.get_plugin("terminalreporter")
-        if reporter is not None:
-            reporter.write_line(f"停用清單:{len(disabled)} 條,命中 {len(matched)} 個")
-            for stale in sorted(disabled - matched):
-                reporter.write_line(f"  失效條目(對不上任何測試):{stale}")
 
 
 @dataclass(frozen=True)

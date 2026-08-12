@@ -44,7 +44,8 @@ markers = [
 ]
 
 [tool.mutmut]
-# 變異測試:`tests/disabled.txt` 的進入判準就靠這個閘門產生。
+# 變異測試:曾經拿來當「這個測試刪不刪得掉」的判準——刪掉它不會讓任何一個
+# 變異體從被殺變成存活,才准刪(不是看覆蓋率:覆蓋率不看斷言強度)。
 #
 #   uv run --with mutmut mutmut run        產生並執行全部變異體(約 30 分鐘)
 #   uv run --with mutmut mutmut results    列出存活(=沒有任何測試抓得到)的變異體

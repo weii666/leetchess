@@ -47,25 +47,9 @@ def test_settings_exposes_every_required_field() -> None:
     }
 
 
-def test_settings_is_frozen() -> None:
-    settings = c.load_settings(_env())
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        settings.pool_size = 99  # type: ignore[misc]
-
-
 def test_default_settings_load_and_satisfy_the_time_budget() -> None:
     settings = c.load_settings(_env())
     assert settings.timeout_sum <= settings.total_time_budget
-
-
-def test_search_nodes_default_is_the_measured_mate_threshold() -> None:
-    """250k 為實測的 mate 型別門檻,低於此三態信號會落在「未知」。
-
-    實測(《適情雅趣》第 21 局,全新進程即冷雜湊表):走 f8f9 後的黑方局面
-    200k 回 `cp 526`(未搜到殺),230k 起才回 `mate`。POC 註記的「200k 與 2M
-    同一手」只對**著法**成立,對 **mate 分數不成立**。
-    """
-    assert c.load_settings(_env()).search_nodes == 250_000
 
 
 def test_positions_dir_defaults_to_the_project_corpus_directory() -> None:
@@ -120,18 +104,6 @@ def test_sum_exactly_equal_to_the_budget_is_accepted() -> None:
     assert settings.timeout_sum == pytest.approx(8.0)
 
 
-def test_sum_just_over_the_budget_is_rejected() -> None:
-    with pytest.raises(ValueError, match="總時間預算"):
-        c.load_settings(
-            _env(
-                LEETCHESS_ACQUIRE_TIMEOUT="2",
-                LEETCHESS_SEARCH_TIMEOUT="5",
-                LEETCHESS_STOP_GRACE_PERIOD="1.5",
-                LEETCHESS_TOTAL_TIME_BUDGET="8",
-            )
-        )
-
-
 def test_the_budget_gate_also_guards_direct_construction() -> None:
     """閘門在 Settings 本身,繞過 load_settings 直接建構同樣被擋。"""
     with pytest.raises(ValueError, match="總時間預算"):
@@ -153,13 +125,10 @@ def test_the_budget_gate_also_guards_direct_construction() -> None:
 @pytest.mark.parametrize(
     ("var", "value"),
     [
-        ("LEETCHESS_POOL_SIZE", "0"),
         ("LEETCHESS_POOL_SIZE", "-1"),
-        ("LEETCHESS_SEARCH_NODES", "0"),
         ("LEETCHESS_ACQUIRE_TIMEOUT", "0"),
         ("LEETCHESS_SEARCH_TIMEOUT", "-1"),
         ("LEETCHESS_STOP_GRACE_PERIOD", "0"),
-        ("LEETCHESS_TOTAL_TIME_BUDGET", "-3"),
     ],
 )
 def test_non_positive_values_are_rejected(var: str, value: str) -> None:

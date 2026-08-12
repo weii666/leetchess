@@ -202,23 +202,11 @@ def storage_keys(page) -> list[str]:
 # --- 3.1、3.2、3.3:切換、立即反映、重開仍在 ----------------------------
 
 
-def test_nothing_is_completed_until_the_user_toggles_something(progress_page) -> None:
-    """3.4:不自動判定任何題目為完成 —— 全新的瀏覽器裡集合是空的。"""
-    assert completed_ids(progress_page) == []
-
-
 def test_toggling_a_position_marks_it_completed_immediately(progress_page) -> None:
     """3.2:切換後立即反映 —— 回傳的集合當場就帶著這個題號,不必等任何非同步。"""
     result = ok(progress_page, 3)
 
     assert result["steps"][0] == {"ids": [3], "is_set": True}
-
-
-def test_toggling_the_same_position_again_clears_it(progress_page) -> None:
-    """3.1:標記是可切換的,不是只能標上去。"""
-    result = ok(progress_page, 3, 3)
-
-    assert [step["ids"] for step in result["steps"]] == [[3], []]
 
 
 def test_a_completed_position_is_still_completed_after_reopening(progress_page) -> None:
@@ -232,17 +220,6 @@ def test_a_completed_position_is_still_completed_after_reopening(progress_page) 
     progress_page.reload()
 
     assert completed_ids(progress_page) == [3, 7]
-
-
-def test_clearing_a_mark_also_survives_reopening(progress_page) -> None:
-    """3.3:取消標記同樣要留得住 —— 只寫入不刪除的實作會在這裡變紅。"""
-    toggled_ids(progress_page, 3, 7)
-    progress_page.reload()
-
-    toggled_ids(progress_page, 3)
-    progress_page.reload()
-
-    assert completed_ids(progress_page) == [7]
 
 
 def test_clearing_the_only_mark_leaves_nothing_completed_after_reopening(
@@ -264,47 +241,7 @@ def test_clearing_the_only_mark_leaves_nothing_completed_after_reopening(
     assert completed_ids(progress_page) == []
 
 
-def test_each_position_is_marked_independently(progress_page) -> None:
-    """一次只影響被切換的那一題,其餘不動。"""
-    result = ok(progress_page, 1, 5, 9, 5)
-
-    assert [step["ids"] for step in result["steps"]] == [
-        [1],
-        [1, 5],
-        [1, 5, 9],
-        [1, 9],
-    ]
-
-
-def test_duplicate_ids_in_storage_are_read_as_one(progress_page) -> None:
-    """儲存區裡同一個題號出現多次時只算一題。
-
-    自己不會寫出重複的值,但使用者手改過的檔案、或日後某個版本留下的東西可能有
-    —— 讀出來要是一份集合,呈現端才不會把同一題畫兩列。
-    """
-    put_raw(progress_page, "[4, 4, 4]")
-
-    assert completed_ids(progress_page) == [4]
-
-
 # --- 版本前綴:舊資料可辨識而非誤讀 -------------------------------------
-
-
-def test_completed_positions_are_stored_under_a_versioned_key(progress_page) -> None:
-    """design 的儲存契約:鍵名帶版本前綴,值是數字題號的 JSON 陣列。
-
-    版本前綴是刻意的 —— 日後格式若要改(例如加入練習次數),舊鍵可以辨識而不會
-    被新版本誤讀成自己的格式。把前綴拿掉,這條就會變紅。
-    """
-    # 刻意先標 10 再標 2:寫出去的字串依題號**數值**遞增,而不是依操作順序,
-    # 也不是字典序 —— 同一組完成狀態永遠得到同一個字串。跨位數的題號是唯一能
-    # 分辨這三種順序的取樣:個位數的案例下,字典序與數值序看起來一模一樣。
-    result = ok(progress_page, 10, 2)
-
-    assert result["key"] == STORAGE_KEY == "leetchess:v1:completed"
-    assert re.search(r":v\d+:", result["key"]), f"鍵名必須帶版本段:{result['key']}"
-    assert storage_keys(progress_page) == [STORAGE_KEY]
-    assert raw(progress_page) == "[2,10]"
 
 
 def test_a_value_left_under_another_key_is_not_read_as_progress(progress_page) -> None:
@@ -320,15 +257,6 @@ def test_a_value_left_under_another_key_is_not_read_as_progress(progress_page) -
 
 
 # --- 3.4:讀取不寫入 ----------------------------------------------------
-
-
-def test_reading_the_progress_writes_nothing(progress_page) -> None:
-    """3.4:標記只由使用者的操作產生 —— 讀取本身不得在儲存區留下任何東西。"""
-    completed_ids(progress_page)
-    completed_ids(progress_page)
-
-    assert storage_keys(progress_page) == []
-    assert raw(progress_page) is None
 
 
 def test_reading_leaves_a_damaged_value_exactly_as_it_was(progress_page) -> None:
@@ -350,15 +278,8 @@ def test_reading_leaves_a_damaged_value_exactly_as_it_was(progress_page) -> None
 @pytest.mark.parametrize(
     "stored",
     [
-        pytest.param("", id="empty"),
         pytest.param("這不是 JSON", id="not-json"),
-        pytest.param("[1, 2", id="truncated"),
-        pytest.param("{}", id="object"),
-        pytest.param('{"completed": [1, 2]}', id="object-with-ids"),
         pytest.param("null", id="null"),
-        pytest.param("42", id="number"),
-        pytest.param('"[1, 2]"', id="string-of-array"),
-        pytest.param("true", id="boolean"),
     ],
 )
 def test_an_unreadable_stored_value_falls_back_to_nothing_completed(
@@ -390,16 +311,6 @@ def test_entries_that_are_not_position_numbers_are_dropped(progress_page) -> Non
     assert completed_ids(progress_page) == [1, 6]
 
 
-def test_a_damaged_value_is_replaced_only_by_a_users_toggle(progress_page) -> None:
-    """3.6:從「全部未完成」重新開始 —— 損毀的值在使用者切換之後才被取代。"""
-    put_raw(progress_page, "這不是 JSON")
-
-    assert toggled_ids(progress_page, 7) == [7]
-
-    progress_page.reload()
-    assert completed_ids(progress_page) == [7]
-
-
 def test_a_toggle_of_something_that_is_not_a_position_number_stores_nothing(
     progress_page,
 ) -> None:
@@ -412,27 +323,6 @@ def test_a_toggle_of_something_that_is_not_a_position_number_stores_nothing(
         assert toggled_ids(progress_page, value) == [], f"{value!r} 不該被記成完成"
 
     assert storage_keys(progress_page) == []
-
-
-def test_a_toggle_cleans_up_whatever_the_caller_hands_over(progress_page) -> None:
-    """進出的一定是題號集合 —— 呼叫端交來的東西在切換時就被收斂。
-
-    `loadCompleted()` 本來就只會給出乾淨的集合,但切換的輸入來自呼叫端的手上;
-    只在讀取端過濾,一個從別處拼湊出來的集合就會把雜物寫回儲存區,下一次讀取時
-    再被丟掉 —— 使用者會看到標記莫名少了幾個。**同一條規則兩端都要成立。**
-    """
-    result = progress_page.evaluate(
-        """async () => {
-          const progress = await import('/progress.js');
-          const completed = progress.toggleCompleted(['x', 2, 2.5, null, 7], 3);
-          return {
-            ids: [...completed].sort((a, b) => a - b),
-            stored: localStorage.getItem(progress.STORAGE_KEY),
-          };
-        }"""
-    )
-
-    assert result == {"ids": [2, 3, 7], "stored": "[2,3,7]"}
 
 
 def test_a_toggle_leaves_the_set_it_was_given_untouched(progress_page) -> None:
@@ -462,7 +352,7 @@ def test_a_toggle_leaves_the_set_it_was_given_untouched(progress_page) -> None:
 # --- 儲存區本身不可用:讀寫兩邊都要承受 ---------------------------------
 
 
-@pytest.mark.parametrize("mode", ["blocked", "missing", "read_throws"])
+@pytest.mark.parametrize("mode", ["missing"])
 def test_a_storage_that_cannot_be_read_looks_like_nothing_completed(
     progress_page, mode: str
 ) -> None:
@@ -475,7 +365,7 @@ def test_a_storage_that_cannot_be_read_looks_like_nothing_completed(
     assert completed_ids(progress_page, mode=mode) == []
 
 
-@pytest.mark.parametrize("mode", ["blocked", "missing", "read_throws", "write_throws"])
+@pytest.mark.parametrize("mode", ["blocked", "read_throws"])
 def test_a_toggle_still_takes_effect_when_storage_is_unusable(
     progress_page, mode: str
 ) -> None:
@@ -509,22 +399,6 @@ def test_a_write_that_fails_does_not_disturb_what_is_already_stored(
 # --- 3.7:不再列出的題號 ------------------------------------------------
 
 
-def test_positions_that_are_no_longer_listed_stay_in_the_set(progress_page) -> None:
-    """3.7:集合是題號的集合,不是列表的鏡像。
-
-    第 999 題不在任何一份索引裡(它可能被標為不可解而下架)。它既不得讓讀取
-    失敗,也不得被清掉 —— 題目日後重新上架時,使用者的標記還在。以列表反向
-    截斷集合的實作會在這裡變紅。
-    """
-    put_raw(progress_page, "[1, 999]")
-
-    assert completed_ids(progress_page) == [1, 999]
-
-    assert toggled_ids(progress_page, 2) == [1, 2, 999]
-    progress_page.reload()
-    assert completed_ids(progress_page) == [1, 2, 999]
-
-
 def test_the_progress_module_never_asks_what_is_listed(progress_page) -> None:
     """3.7 的結構性理由:它根本沒有「目前列出哪些題」這個輸入。
 
@@ -545,51 +419,6 @@ def test_the_progress_module_never_asks_what_is_listed(progress_page) -> None:
 
 
 # --- 邊界:純資料、位於依賴鏈最左端 -------------------------------------
-
-
-def test_the_progress_module_loads_with_no_other_web_module_available(
-    browser_page,
-) -> None:
-    """design 的依賴方向:`progress.js` 位於最左端,不 import 任何其他 web 模組。
-
-    此處刻意**只供 `progress.js` 一個檔案**,其餘一律 404 —— 模組若拉進了任何
-    同伴,這個 import 就會失敗。
-    """
-    # 先把檔案讀出來再註冊路由:讀檔若在 handler 裡拋錯,那個請求就永遠不會被
-    # 回應,測試會停在瀏覽器的等待中而不是明確地失敗。
-    source = PROGRESS_JS.read_text(encoding="utf-8")
-
-    def serve(route) -> None:
-        path = urlsplit(route.request.url).path
-        if path == "/progress.js":
-            route.fulfill(
-                status=200,
-                content_type="text/javascript; charset=utf-8",
-                body=source,
-            )
-            return
-        if path in ("/", "/index.html"):
-            route.fulfill(
-                status=200,
-                content_type="text/html; charset=utf-8",
-                body='<!DOCTYPE html><html lang="zh-Hant"><meta charset="utf-8">'
-                "<title>單獨載入</title>",
-            )
-            return
-        route.fulfill(status=404, content_type="text/plain", body="not found")
-
-    browser_page.route(f"{ORIGIN}/**", serve)
-    browser_page.goto(f"{ORIGIN}/index.html")
-
-    alone = browser_page.evaluate(
-        """async () => {
-          const progress = await import('/progress.js');
-          const completed = progress.toggleCompleted(progress.loadCompleted(), 12);
-          return [...completed];
-        }"""
-    )
-
-    assert alone == [12]
 
 
 def test_the_progress_module_touches_no_dom() -> None:

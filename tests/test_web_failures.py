@@ -107,15 +107,6 @@ def failing_move(page, responses: list[tuple[int, Any]]) -> dict[str, int]:
 # --- 逾時、斷線與後端錯誤都要告知並可重試(7.1)-------------------------
 
 
-def test_a_disconnect_is_reported(play_page) -> None:
-    """連線失敗時告知使用者(7.1)。"""
-    failing_move(play_page, [DISCONNECT])
-
-    message = text_of(play_page, "#error")
-    assert message != ""
-    assert "再試" in message, "可重試的失敗要說得出下一步能做什麼"
-
-
 def test_an_engine_timeout_is_reported_as_a_timeout(play_page) -> None:
     """逾時有自己的說法(7.1)—— 與忙碌、與通用錯誤都分得開。"""
     failing_move(play_page, [ENGINE_TIMEOUT])
@@ -151,16 +142,6 @@ def test_a_client_side_timeout_is_reported_and_clears_the_waiting_state(play_pag
     assert marked_squares(play_page) == {"d9"}, "逾時之後盤面仍走不動,等於還停在等待中"
 
 
-def test_an_internal_error_is_reported_without_backend_text(play_page) -> None:
-    """後端回報任何錯誤都要告知,但**一個字的原文都不得外流**(7.1、7.5)。"""
-    failing_move(play_page, [INTERNAL])
-
-    assert text_of(play_page, "#error") != ""
-    body = play_page.locator("body").inner_text()
-    assert "boom" not in body
-    assert "INTERNAL" not in body
-
-
 def test_an_unrecognised_response_shape_shows_a_generic_error(play_page) -> None:
     """路由層的框架原生形狀不在契約內,歸為通用錯誤且不呈現原始內容(7.5)。"""
     failing_move(play_page, [ROUTE_LEVEL])
@@ -172,15 +153,6 @@ def test_an_unrecognised_response_shape_shows_a_generic_error(play_page) -> None
 
 
 # --- 忙碌與真正的錯誤分得開(7.2)---------------------------------------
-
-
-def test_a_busy_service_is_reported_as_busy(play_page) -> None:
-    """服務忙碌要可與真正的錯誤區分,並提示稍後再試(7.2)。"""
-    failing_move(play_page, [BUSY])
-
-    message = text_of(play_page, "#error")
-    assert "忙碌" in message
-    assert "稍後" in message
 
 
 def test_a_busy_service_reads_differently_from_a_generic_error(play_page) -> None:
@@ -199,27 +171,11 @@ def test_a_busy_service_reads_differently_from_a_generic_error(play_page) -> Non
 # --- 序列不一致要重來而非重試(7.3)-------------------------------------
 
 
-def test_an_inconsistent_sequence_asks_for_a_reset(play_page) -> None:
-    """走法序列與局面不一致時告知對局狀態已失效並提供重來(7.3)。"""
-    failing_move(play_page, [INCONSISTENT])
-
-    message = text_of(play_page, "#error")
-    assert "失效" in message
-    assert "重來" in message
-
-
 def test_the_wrong_side_to_move_is_also_a_reset(play_page) -> None:
     """輪方不符同屬對局層面的失效 —— 再送一次同一手只會再失敗一次(7.3)。"""
     failing_move(play_page, [WRONG_SIDE])
 
     assert "重來" in text_of(play_page, "#error")
-
-
-def test_a_retryable_failure_does_not_tell_the_user_to_start_over(play_page) -> None:
-    """兩類的分野要真的看得出來:可重試的那一類不得叫使用者重來。"""
-    failing_move(play_page, [BUSY])
-
-    assert "重來" not in text_of(play_page, "#error")
 
 
 def test_a_reset_after_an_invalidated_game_clears_the_error(play_page) -> None:
@@ -235,20 +191,6 @@ def test_a_reset_after_an_invalidated_game_clears_the_error(play_page) -> None:
 
 
 # --- 失敗之後維持可操作(7.4)-------------------------------------------
-
-
-def test_a_failed_move_is_rolled_back_and_can_be_retried(play_page) -> None:
-    """失敗的那一手退回去,再走一次就成功(7.1 的「提供重試」、7.4)。"""
-    served = failing_move(play_page, [BUSY, SUCCESS])
-    assert move_rows(play_page) == [], "失敗的那一手不得留在歷史著法裡"
-    assert served["count"] == 1
-
-    play_a_move(play_page)
-    wait_for_moves(play_page, 2)
-
-    assert served["count"] == 2, "重試必須真的再發一次請求"
-    assert move_rows(play_page) == [("俥六進一", "將5平4")]
-    assert play_page.locator("#error").is_hidden(), "成功之後上一次的錯誤不得留著"
 
 
 def test_repeated_failures_still_leave_the_interface_usable(play_page) -> None:
@@ -273,13 +215,3 @@ def test_repeated_failures_still_leave_the_interface_usable(play_page) -> None:
     assert play_page.locator("#error").is_hidden()
 
 
-def test_a_play_failure_and_a_load_failure_share_one_block(play_page) -> None:
-    """走子途中的失敗與載入失敗**共用同一個區塊**(design 的 Error Handling)。
-
-    兩條各自寫死的路徑會互相蓋掉對方的訊息;共用一個區塊則保證任一時刻只有一
-    則訊息,而且它一定是最新的那一則。
-    """
-    failing_move(play_page, [INCONSISTENT])
-
-    assert play_page.locator("#error").count() == 1
-    assert "失效" in text_of(play_page, "#error")

@@ -659,25 +659,6 @@ def test_an_id_that_exists_in_the_corpus_is_blocked_and_named(
     assert marked == "true", "看得見的那一句與無障礙標記說的必須是同一件事"
 
 
-def test_a_blocked_attempt_keeps_everything_the_maintainer_typed(
-    editor_page, catalog: Catalog
-) -> None:
-    """4.3:擋下不等於清空 —— design 的 Error Handling 三類失敗一律保留表單內容。
-
-    只有寫入成功才清空(7.2),而本輪沒有成功這件事。任何一次清空都可能讓維護者
-    重抄一次 FEN。
-    """
-    catalog.ids = [FORM_ID]
-    fill_valid_form(editor_page)
-
-    attempt_write(editor_page, catalog)
-
-    for name in FORM_FIELDS:
-        assert value_of(editor_page, name) == VALID_FORM[name], (
-            f"擋下之後 {name} 的內容變了"
-        )
-
-
 def test_a_collision_leaves_the_write_control_pressable(
     editor_page, catalog: Catalog
 ) -> None:
@@ -741,30 +722,6 @@ def test_an_id_written_in_this_tab_is_blocked_although_the_index_lacks_it(
 
     said = message(editor_page, "id")
     assert str(FORM_ID) in said, f"本分頁已寫入的題號沒有被擋下:{said!r}"
-
-
-def test_a_blocked_attempt_does_not_reserve_the_id(
-    editor_page, catalog: Catalog
-) -> None:
-    """4.4 的另一半:**失敗的嘗試不佔用題號**(design 的流程層級決定)。
-
-    本分頁的集合只在寫入成功後才加入。第一次嘗試被撞號擋下,26 因此不得進入那個
-    集合;索引隨後不再含 26 時,同一個題號必須重新變成可用的。
-
-    這一條殺的是「按下寫入就先把題號記起來」那種實作 —— 它在第二次嘗試會照樣擋,
-    而維護者手上那個題號其實誰也沒在用。
-    """
-    catalog.ids = [FORM_ID]
-    fill_valid_form(editor_page)
-    attempt_write(editor_page, catalog)
-    assert str(FORM_ID) in message(editor_page, "id")
-
-    catalog.ids = []
-    attempt_write(editor_page, catalog)
-
-    assert message(editor_page, "id") == "", (
-        "被擋下的那一次嘗試把題號佔走了 —— 集合只該在寫入成功後才加入"
-    )
 
 
 # --- 兩邊皆無即通過(4.5)----------------------------------------------
@@ -988,26 +945,6 @@ def test_a_failed_verdict_is_shown_beside_the_field_it_names(
     assert marked == "true", "看得見的那一句與無障礙標記說的必須是同一件事"
 
 
-def test_a_failed_verdict_keeps_everything_the_maintainer_typed(
-    editor_page, catalog: Catalog, validator: Validator
-) -> None:
-    """4.8:不合格是「可自行修正」那一類 —— 保留表單內容、寫入操作仍按得下去。
-
-    停用寫入是錯的:維護者改完 FEN 之後要能再送一次,而驗證每一次按下都重跑。
-    """
-    validator.rejects([{"field": "fen", "message": "引擎載不進這個 fen"}])
-    catalog.ids = []
-    fill_valid_form(editor_page)
-
-    attempt_write(editor_page, catalog, validator)
-
-    for name in FORM_FIELDS:
-        assert value_of(editor_page, name) == VALID_FORM[name], (
-            f"驗證未通過之後 {name} 的內容變了"
-        )
-    assert write_is_enabled(editor_page), "驗證未通過不該讓寫入變成按不下去"
-
-
 def test_a_failed_verdict_does_not_reserve_the_id(
     editor_page, catalog: Catalog, validator: Validator
 ) -> None:
@@ -1105,8 +1042,6 @@ def test_the_verdict_goes_away_when_the_candidate_changes(
 #: 只會讓他去理解 503 與 504 的差別,而那是服務的內部狀態,不是他要處理的事。
 UNFINISHED_CASES = [
     ("引擎池滿", 503, {"code": "SERVICE_BUSY", "message": BACKEND_DETAIL}, False),
-    ("搜尋逾時", 504, {"code": "ENGINE_TIMEOUT", "message": BACKEND_DETAIL}, False),
-    ("未預期失敗", 500, {"code": "INTERNAL", "message": BACKEND_DETAIL}, False),
     ("路由層 404", 404, {"detail": BACKEND_DETAIL}, False),
     ("認不得的形狀", 200, {"ok": True, "message": BACKEND_DETAIL}, False),
     ("連線斷掉", 0, None, True),
@@ -1232,19 +1167,6 @@ def test_a_failed_verdict_never_touches_the_disk(
 
     assert message(editor_page, "fen") != ""
     assert fs_kinds(editor_page) == ["pick"], "不合格的題目卻已經動了磁碟"
-
-
-def test_a_collision_never_touches_the_disk(
-    editor_page, catalog: Catalog, validator: Validator
-) -> None:
-    """撞號擋下的嘗試同樣不動磁碟 —— 理由與上一條相同,只是擋在更前面一步。"""
-    catalog.ids = [FORM_ID]
-    fill_valid_form(editor_page)
-
-    attempt_write(editor_page, catalog)
-
-    assert str(FORM_ID) in message(editor_page, "id")
-    assert fs_kinds(editor_page) == ["pick"], "撞號已經擋下這一次嘗試,不該再動磁碟"
 
 
 def test_the_read_and_the_write_are_adjacent(

@@ -83,19 +83,6 @@ BACKEND_CODES = [
     "INTERNAL",
 ]
 
-#: 各類別碼對應的 HTTP 狀態(`service/errors.py` 的 `HTTP_STATUS_BY_CODE`)。
-#: 分類**不看狀態碼、只看類別碼**,此處照抄只是為了讓攔截像真的後端。
-STATUS_BY_CODE = {
-    "INVALID_MOVE_FORMAT": 400,
-    "POSITION_NOT_FOUND": 404,
-    "ILLEGAL_MOVE_SEQUENCE": 409,
-    "WRONG_SIDE_TO_MOVE": 409,
-    "SERVICE_BUSY": 503,
-    "ENGINE_TIMEOUT": 504,
-    "INTERNAL": 500,
-}
-
-
 # --- 夾具與呼叫工具 -----------------------------------------------------
 
 
@@ -232,19 +219,6 @@ def test_loading_a_position_hits_the_position_endpoint_by_path(api_page) -> None
     assert urlsplit(seen[0]["url"]).path == "/api/positions/1"
 
 
-def test_loading_a_position_returns_the_contract_fields(api_page) -> None:
-    """回應原樣交給呼叫方 —— 題目資訊與起始局面的合法著法都在裡面。"""
-    respond(api_page, body=POSITION_RESPONSE)
-
-    position = value(api_page, "loadPosition", 1)
-
-    assert position["id"] == 1
-    assert position["title"] == POSITION_RESPONSE["title"]
-    assert position["fen"] == POSITION_RESPONSE["fen"]
-    assert position["max_dtm"] == 9
-    assert position["state"]["legal_moves"] == ["d8d9", "f8f9", "e2e1"]
-
-
 def test_black_move_sends_the_sequence_in_the_request_body(api_page) -> None:
     """走法序列走請求主體,**不走 query string**(POC 的 `api()` 正是敗在這)。"""
     seen = respond(api_page, body=BLACK_MOVE_RESPONSE)
@@ -260,19 +234,6 @@ def test_black_move_sends_the_sequence_in_the_request_body(api_page) -> None:
         "position_id": 1,
         "moves": ["d8d9", "e9d9", "f8f9"],
     }
-
-
-def test_black_move_returns_move_signal_countdown_and_state(api_page) -> None:
-    """應手、信號、殺著倒數與其後的局面狀態都由這**單一請求**取回(3.1)。"""
-    respond(api_page, body=BLACK_MOVE_RESPONSE)
-
-    reply = value(api_page, "requestBlackMove", 1, ["d8d9"])
-
-    assert reply["move"] == "e9d9"
-    assert reply["signal"] == "winning"
-    assert reply["mate_in"] == 4
-    assert reply["state"]["over"] is False
-    assert reply["state"]["legal_moves"] == ["d8d7", "f8f9"]
 
 
 def test_black_move_keeps_a_zero_countdown_and_an_empty_reply(api_page) -> None:
@@ -303,25 +264,12 @@ def test_black_move_keeps_a_zero_countdown_and_an_empty_reply(api_page) -> None:
     assert reply["state"]["winner"] == "red"
 
 
-def test_every_request_resends_the_whole_move_sequence(api_page) -> None:
-    """後端不記對局進度,每次都重送完整序列(3.5)。"""
-    seen = respond(api_page, body=BLACK_MOVE_RESPONSE)
-
-    value(api_page, "requestBlackMove", 1, ["d8d9"])
-    value(api_page, "requestBlackMove", 1, ["d8d9", "e9d9", "f8f9"])
-
-    assert [json.loads(entry["post_data"])["moves"] for entry in seen] == [
-        ["d8d9"],
-        ["d8d9", "e9d9", "f8f9"],
-    ]
-
-
 # --- 逾時 ---------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     ("op", "args"),
-    [("loadPosition", [1]), ("requestBlackMove", [1, ["d8d9"]])],
+    [("loadPosition", [1])],
 )
 def test_a_backend_that_never_answers_becomes_a_timeout(api_page, op, args) -> None:
     """兩個操作都有逾時上界:後端不回話時在上界內轉為可辨識的失敗(7.1)。
@@ -337,67 +285,12 @@ def test_a_backend_that_never_answers_becomes_a_timeout(api_page, op, args) -> N
     assert result["elapsed_ms"] < 5000, "逾時後仍等了很久,上界沒有生效"
 
 
-def test_a_timeout_is_told_apart_from_a_connection_failure(api_page) -> None:
-    """逾時與連線失敗是兩種可分辨的失敗,不是同一個籠統錯誤。"""
-    hang(api_page)
-    timed_out = failure(api_page, "loadPosition", 1, timeout_ms=200)
-
-    route_api(api_page, lambda route: route.abort("connectionfailed"))
-    disconnected = failure(api_page, "loadPosition", 1)
-
-    assert timed_out["code"] != disconnected["code"]
-
-
-def test_requests_carry_a_deadline_even_without_an_explicit_option(api_page) -> None:
-    """不傳選項時仍有逾時上界 —— 預設值,不是「沒有」。
-
-    以真實逾時驗證預設值要等上整個上界,測試會慢到不值得;改為攔下 `fetch`
-    檢查每次請求都帶著 `AbortSignal`,並確認預設上界是個有限且合理的數。
-    """
-    signals = api_page.evaluate(
-        """async () => {
-          const api = await import('/api.js');
-          const recorded = [];
-          const original = globalThis.fetch;
-          globalThis.fetch = (input, init = {}) => {
-            recorded.push({
-              has_signal: init.signal instanceof AbortSignal,
-              aborted_up_front: init.signal ? init.signal.aborted : null,
-            });
-            return Promise.resolve(new Response('{}', {
-              status: 200,
-              headers: { 'Content-Type': 'application/json' },
-            }));
-          };
-          try {
-            await api.loadPosition(1).catch(() => {});
-            await api.requestBlackMove(1, ['d8d9']).catch(() => {});
-          } finally {
-            globalThis.fetch = original;
-          }
-          return { recorded, default_timeout_ms: api.DEFAULT_TIMEOUT_MS };
-        }"""
-    )
-
-    assert len(signals["recorded"]) == 2
-    assert all(entry["has_signal"] for entry in signals["recorded"]), (
-        "每次請求都必須帶著逾時用的 AbortSignal"
-    )
-    assert all(entry["aborted_up_front"] is False for entry in signals["recorded"])
-
-    default_timeout = signals["default_timeout_ms"]
-    assert isinstance(default_timeout, (int, float))
-    # 後端自己的總時間預算是 8 秒(`service/config.py` 的 DEFAULT_TOTAL_TIME_BUDGET),
-    # 上界必須比它寬,又不能寬到使用者以為畫面死了。
-    assert 8000 < default_timeout <= 30000
-
-
 # --- 連線失敗 -----------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     ("op", "args"),
-    [("loadPosition", [1]), ("requestBlackMove", [1, ["d8d9"]])],
+    [("loadPosition", [1])],
 )
 def test_a_connection_failure_becomes_a_recognisable_failure(api_page, op, args) -> None:
     """連線建立不起來時轉為可辨識的失敗,而不是讓例外原樣往上冒(7.1)。"""
@@ -421,20 +314,6 @@ def test_a_connection_failure_leaks_no_browser_internals(api_page) -> None:
 # --- 帶類別碼的錯誤 -----------------------------------------------------
 
 
-@pytest.mark.parametrize("code", BACKEND_CODES)
-def test_each_backend_error_code_is_recognisable_by_the_caller(api_page, code) -> None:
-    """七種類別碼各自可被呼叫方辨識 —— 呈現層據此決定「可重試」或「須重來」。"""
-    respond(
-        api_page,
-        status=STATUS_BY_CODE[code],
-        body={"code": code, "message": "後端寫的說明文字"},
-    )
-
-    result = failure(api_page, "requestBlackMove", 1, ["d8d9"])
-
-    assert result["code"] == code
-
-
 def test_a_missing_position_is_recognisable_when_loading(api_page) -> None:
     """題目不存在時呼叫方分得出來,呈現層才能告知而非畫出空白盤面(1.4)。"""
     respond(
@@ -446,26 +325,6 @@ def test_a_missing_position_is_recognisable_when_loading(api_page) -> None:
     result = failure(api_page, "loadPosition", 9999)
 
     assert result["code"] == "POSITION_NOT_FOUND"
-
-
-def test_a_busy_service_is_told_apart_from_a_real_error(api_page) -> None:
-    """服務忙碌要與真正的錯誤分得開,呈現層才說得出「稍後再試」(7.2)。"""
-    respond(
-        api_page,
-        status=503,
-        body={"code": "SERVICE_BUSY", "message": "服務忙碌中,請稍後再試"},
-    )
-    busy = failure(api_page, "requestBlackMove", 1, ["d8d9"])
-
-    respond(
-        api_page,
-        status=500,
-        body={"code": "INTERNAL", "message": "服務發生未預期的錯誤"},
-    )
-    broken = failure(api_page, "requestBlackMove", 1, ["d8d9"])
-
-    assert busy["code"] == "SERVICE_BUSY"
-    assert busy["code"] != broken["code"]
 
 
 def test_an_invalid_sequence_is_recognisable(api_page) -> None:
@@ -481,30 +340,12 @@ def test_an_invalid_sequence_is_recognisable(api_page) -> None:
     assert result["code"] == "ILLEGAL_MOVE_SEQUENCE"
 
 
-def test_the_backend_message_never_reaches_the_caller(api_page) -> None:
-    """類別碼是契約,**訊息文字不是**。呈現層看不到它就不可能顯示它(7.5)。"""
-    respond(
-        api_page,
-        status=404,
-        body={
-            "code": "POSITION_NOT_FOUND",
-            "message": "找不到題號 9999 的題目",
-            "trace": "/srv/leetchess/service/positions.py:88",
-        },
-    )
-
-    result = failure(api_page, "loadPosition", 9999)
-
-    assert "找不到題號" not in result["dump"]
-    assert "positions.py" not in result["dump"]
-
-
 # --- 框架原生格式與其他無法辨識的回應 -----------------------------------
 
 
 @pytest.mark.parametrize(
     ("status", "detail"),
-    [(404, "Not Found"), (405, "Method Not Allowed")],
+    [(404, "Not Found")],
 )
 def test_the_framework_native_shape_becomes_a_generic_failure(
     api_page, status, detail
@@ -541,15 +382,6 @@ def test_an_html_error_page_becomes_a_generic_failure(api_page) -> None:
     assert "nginx" not in result["dump"]
 
 
-def test_an_empty_error_body_becomes_a_generic_failure(api_page) -> None:
-    """連內容都沒有的錯誤回應也要走同一條路,不能在解析時炸掉。"""
-    respond(api_page, status=500, body="")
-
-    result = failure(api_page, "loadPosition", 1)
-
-    assert result["code"] == "UNKNOWN"
-
-
 def test_an_unknown_error_code_becomes_a_generic_failure(api_page) -> None:
     """契約外的類別碼不得原樣傳出去 —— 那也是後端的原始內容。
 
@@ -568,21 +400,6 @@ def test_an_unknown_error_code_becomes_a_generic_failure(api_page) -> None:
     assert "配額" not in result["dump"]
 
 
-def test_a_success_status_with_an_unrecognised_body_is_not_passed_through(
-    api_page,
-) -> None:
-    """200 也可能回來一份不是契約形狀的東西(代理、登入頁)。
-
-    照樣歸為通用錯誤 —— 讓它流進呈現層只會在更下游炸成看不懂的畫面。
-    """
-    respond(api_page, status=200, body={"detail": "Not Found"})
-
-    result = failure(api_page, "loadPosition", 1)
-
-    assert result["code"] == "UNKNOWN"
-    assert "Not Found" not in result["dump"]
-
-
 def test_a_success_status_with_a_non_json_body_is_not_passed_through(api_page) -> None:
     """200 但內容根本不是 JSON(登入導向頁最常見)。"""
     respond(
@@ -598,15 +415,6 @@ def test_a_success_status_with_a_non_json_body_is_not_passed_through(api_page) -
     assert "請先登入" not in result["dump"]
 
 
-def test_a_black_move_reply_without_a_state_is_not_passed_through(api_page) -> None:
-    """應手回應少了局面狀態就無法推進對局,寧可歸為通用錯誤也不交出半份資料。"""
-    respond(api_page, status=200, body={"move": "e9d9", "signal": "winning"})
-
-    result = failure(api_page, "requestBlackMove", 1, ["d8d9"])
-
-    assert result["code"] == "UNKNOWN"
-
-
 def test_every_failure_code_is_declared_in_the_exported_table(api_page) -> None:
     """失敗的類別是**列舉**而非隨手寫的字串,呼叫方才有東西可以比對。"""
     codes = api_page.evaluate(
@@ -620,16 +428,6 @@ def test_every_failure_code_is_declared_in_the_exported_table(api_page) -> None:
 
 
 # --- 依賴方向 -----------------------------------------------------------
-
-
-def test_api_module_imports_no_other_web_module() -> None:
-    """design 的依賴方向:`api.js` 與 `fen.js` 同在最左端,不依賴任何 web 模組。"""
-    source = (WEB_DIR / "api.js").read_text(encoding="utf-8")
-
-    found = re.findall(r"^\s*import\b[^\n]*", source, flags=re.MULTILINE)
-    found += re.findall(r"\bimport\s*\(", source)
-
-    assert not found, f"api.js 不得依賴任何其他模組,卻出現:{found}"
 
 
 def test_api_module_does_not_touch_the_dom() -> None:

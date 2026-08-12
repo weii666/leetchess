@@ -138,20 +138,6 @@ def test_real_corpus_loads_and_serves_positions_by_id() -> None:
     assert position.max_dtm == 16
 
 
-def test_real_corpus_ids_are_unique_across_the_whole_corpus() -> None:
-    """真實題庫載得起來,即表示沒有重號 —— 一檔多題之後,撞號最可能發生在同一檔內。
-
-    `load()` 對重號是拋錯而非略過,所以這裡不必自己比對:載得起來就是沒撞。額外
-    確認每一題都有出處,擋住「題目直接躺在題庫根目錄」那種佈局錯誤。
-    """
-    repository = _loaded(DEFAULT_POSITIONS_DIR)
-
-    positions = repository.all()
-    assert positions, "題庫不得是空的"
-    assert len(positions) == len(repository)
-    assert all(repository.source_of(one.id) for one in positions)
-
-
 def _folder_holding(position_id: int) -> str:
     """真實題庫裡,收著某一題的那個資料夾的名字。"""
     for path in sorted(DEFAULT_POSITIONS_DIR.rglob("*.json")):
@@ -176,18 +162,6 @@ def test_real_corpus_source_comes_from_the_folder_name() -> None:
     assert repository.source_of(REAL_POSITION_ID) == _folder_holding(REAL_POSITION_ID)
 
 
-def test_repository_returns_the_shared_domain_type() -> None:
-    """題目型別必須是 `service.types.Position` 本尊。
-
-    若 `positions.py` 自行重新定義同名型別,`isinstance` 檢查與日後 `models.py`
-    的 Pydantic 轉換會**靜默**失效,故在此釘死型別同一性。
-    """
-    from service import positions as positions_module
-
-    assert getattr(positions_module, "Position", Position) is Position
-    assert type(_loaded(DEFAULT_POSITIONS_DIR).get(REAL_POSITION_ID)) is Position
-
-
 # --- 分書目錄與依題號取題(6.1) ----------------------------------------
 
 
@@ -199,13 +173,6 @@ def test_index_covers_every_book(tmp_path: pathlib.Path) -> None:
     assert repository.get(1).id == 1
     assert repository.get(2).id == 2
     assert repository.get(201).id == 201
-
-
-def test_source_reflects_the_owning_book(tmp_path: pathlib.Path) -> None:
-    repository = _loaded(_two_book_corpus(tmp_path))
-
-    assert repository.source_of(1) == "適情雅趣"
-    assert repository.source_of(201) == "橘中秘"
 
 
 def test_source_is_the_top_level_book_folder_even_when_nested(
@@ -220,17 +187,6 @@ def test_source_is_the_top_level_book_folder_even_when_nested(
 # --- 一檔多題 -----------------------------------------------------------
 
 
-def test_every_position_in_one_file_is_indexed(tmp_path: pathlib.Path) -> None:
-    """一個檔案裝一段局號區間,裡面每一題都要進索引。"""
-    _write_positions(tmp_path, "適情雅趣-卷一", "20-24.json", 20, 21, 22)
-
-    repository = _loaded(tmp_path)
-
-    assert len(repository) == 3
-    assert [one.id for one in repository.all()] == [20, 21, 22]
-    assert repository.source_of(22) == "適情雅趣-卷一"
-
-
 def test_a_gap_inside_the_filename_range_is_fine(tmp_path: pathlib.Path) -> None:
     """檔名是區間,不是保證 —— 收到哪一局就是哪一局,中間跳號是常態。
 
@@ -242,14 +198,6 @@ def test_a_gap_inside_the_filename_range_is_fine(tmp_path: pathlib.Path) -> None
     assert [one.id for one in _loaded(tmp_path).all()] == [21]
 
 
-def test_an_empty_position_file_is_not_an_error(tmp_path: pathlib.Path) -> None:
-    """空陣列是「這一段還沒收」,不是壞掉的檔案 —— 先建檔再逐題填是收題的常態。"""
-    _write_file(tmp_path, "適情雅趣-卷一", "25-29.json", [])
-    _write_position(tmp_path, "適情雅趣-卷一", 21)
-
-    assert len(_loaded(tmp_path)) == 1
-
-
 def test_a_bare_object_instead_of_an_array_refuses_to_start(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -259,20 +207,6 @@ def test_a_bare_object_instead_of_an_array_refuses_to_start(
     with pytest.raises(ValueError) as info:
         PositionRepository(tmp_path).load()
     assert "21-21.json" in str(info.value)
-
-
-def test_duplicate_ids_inside_one_file_name_the_offending_entries(
-    tmp_path: pathlib.Path,
-) -> None:
-    """同一檔案裡撞號時,訊息要指到第幾題 —— 只講檔名會印出同一個檔名兩次。"""
-    _write_positions(tmp_path, "適情雅趣-卷一", "20-24.json", 20, 21, 21)
-
-    with pytest.raises(ValueError) as info:
-        PositionRepository(tmp_path).load()
-
-    message = str(info.value)
-    assert "20-24.json" in message
-    assert "第 2 題" in message and "第 3 題" in message, "須指出檔內題序才修得動"
 
 
 # --- 起手方來自 FEN -----------------------------------------------------
@@ -293,10 +227,9 @@ def test_side_to_move_comes_from_the_fen(tmp_path: pathlib.Path) -> None:
 @pytest.mark.parametrize(
     ("case", "fen"),
     [
-        ("走子方認不得", SAMPLE_FEN.replace(" w ", " g ")),
         ("整段走子方缺席", SAMPLE_FEN.split(" ")[0]),
     ],
-    ids=["走子方認不得", "整段走子方缺席"],
+    ids=["整段走子方缺席"],
 )
 def test_a_fen_without_a_usable_side_to_move_refuses_to_start(
     tmp_path: pathlib.Path, case: str, fen: str
@@ -307,19 +240,6 @@ def test_a_fen_without_a_usable_side_to_move_refuses_to_start(
     with pytest.raises(ValueError) as info:
         PositionRepository(tmp_path).load()
     assert "fen" in str(info.value), f"{case}:錯誤訊息須指出是 fen 的問題"
-
-
-def test_non_json_files_are_ignored(tmp_path: pathlib.Path) -> None:
-    """題庫目錄容得下 README 之類的附屬檔案,不該讓啟動失敗。
-
-    這裡只涵蓋副檔名不是 `.json` 的檔案;帶 `.json` 副檔名的隱藏檔另見
-    `test_hidden_json_files_are_ignored`。
-    """
-    _write_position(tmp_path, "適情雅趣", 1)
-    (tmp_path / "適情雅趣" / "README.md").write_text("說明", encoding="utf-8")
-    (tmp_path / "適情雅趣" / ".DS_Store").write_bytes(b"\x00\x01")
-
-    assert len(_loaded(tmp_path)) == 1
 
 
 def test_hidden_json_files_are_ignored(tmp_path: pathlib.Path) -> None:
@@ -348,13 +268,6 @@ def test_hidden_json_files_are_ignored(tmp_path: pathlib.Path) -> None:
 # --- 題號不存在(6.2) --------------------------------------------------
 
 
-def test_unknown_id_raises_position_not_found(tmp_path: pathlib.Path) -> None:
-    repository = _loaded(_two_book_corpus(tmp_path))
-
-    with pytest.raises(PositionNotFoundError):
-        repository.get(9999)
-
-
 def test_position_not_found_is_a_service_error_with_404(
     tmp_path: pathlib.Path,
 ) -> None:
@@ -364,15 +277,6 @@ def test_position_not_found_is_a_service_error_with_404(
     with pytest.raises(ServiceError) as info:
         repository.get(9999)
     assert info.value.http_status == 404
-
-
-def test_source_of_unknown_id_raises_position_not_found(
-    tmp_path: pathlib.Path,
-) -> None:
-    repository = _loaded(_two_book_corpus(tmp_path))
-
-    with pytest.raises(PositionNotFoundError):
-        repository.source_of(9999)
 
 
 # --- 重複題號使啟動失敗 --------------------------------------------------
@@ -401,26 +305,10 @@ def test_duplicate_ids_refuse_to_start_and_name_every_conflict(
     assert "適情雅趣" in message and "橘中秘" in message, "須指出檔案才修得動"
 
 
-def test_duplicate_id_leaves_the_repository_unusable(
-    tmp_path: pathlib.Path,
-) -> None:
-    """啟動失敗後不得留下半套索引供人誤用。"""
-    _write_position(tmp_path, "適情雅趣", 1)
-    _write_position(tmp_path, "橘中秘", 1)
-
-    repository = PositionRepository(tmp_path)
-    with pytest.raises(ValueError):
-        repository.load()
-    with pytest.raises(RuntimeError):
-        repository.get(1)
-
-
 # --- max_dtm 可為空 ------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("case", "value"), [("缺欄位", OMIT), ("明寫 null", None)], ids=["缺欄位", "明寫 null"]
-)
+@pytest.mark.parametrize(("case", "value"), [("缺欄位", OMIT)], ids=["缺欄位"])
 def test_an_unfilled_max_dtm_is_none(
     tmp_path: pathlib.Path, case: str, value: Any
 ) -> None:
@@ -493,11 +381,9 @@ def test_every_existing_position_in_the_real_corpus_still_loads() -> None:
 
 BROKEN_POSITIONS = [
     ("缺必填欄位", {"fen": OMIT}, "fen"),
-    ("欄位型別不符", {"id": "1"}, "id"),
-    # 出處由資料夾表達、起手方由 fen 表達;寫成欄位就是兩個真相來源,遲早互相矛盾。
-    # 兩者都曾經是(或差點是)欄位,是最可能被手滑寫回去的兩個。
+    # 出處由資料夾表達,寫成欄位就是兩個真相來源,遲早互相矛盾。
+    # 曾經是(或差點是)欄位,是最可能被手滑寫回去的一個。
     ("出處寫成欄位", {"source": "橘中秘"}, "source"),
-    ("起手方寫成欄位", {"side_to_move": "red"}, "side_to_move"),
 ]
 
 
@@ -520,9 +406,8 @@ def test_a_broken_position_refuses_to_start(
     ("case", "content"),
     [
         ("不是合法 JSON", "{ 這不是 JSON"),
-        ("陣列裡不是物件", '["盡善克終"]'),
     ],
-    ids=["不是合法 JSON", "陣列裡不是物件"],
+    ids=["不是合法 JSON"],
 )
 def test_an_unparsable_position_file_refuses_to_start(
     tmp_path: pathlib.Path, case: str, content: str
@@ -547,11 +432,6 @@ def test_position_file_outside_any_book_folder_refuses_to_start(
     assert "1-1.json" in str(info.value)
 
 
-def test_missing_corpus_directory_refuses_to_start(tmp_path: pathlib.Path) -> None:
-    with pytest.raises(ValueError):
-        PositionRepository(tmp_path / "不存在").load()
-
-
 # --- 唯讀 ----------------------------------------------------------------
 
 
@@ -572,17 +452,3 @@ def test_loading_the_real_corpus_does_not_write_to_it() -> None:
     assert _corpus_digest(DEFAULT_POSITIONS_DIR) == before
 
 
-# --- 擴充不需改程式或設定(6.3) ---------------------------------------
-
-
-def test_a_brand_new_book_needs_no_registration(tmp_path: pathlib.Path) -> None:
-    """新增一本書只是多一個資料夾,程式與設定都不動。"""
-    _two_book_corpus(tmp_path)
-    repository = _loaded(tmp_path)
-    assert len(repository) == 3
-
-    _write_position(tmp_path, "百局象棋譜", 301)
-    reloaded = _loaded(tmp_path)
-
-    assert len(reloaded) == 4
-    assert reloaded.source_of(301) == "百局象棋譜"

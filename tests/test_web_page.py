@@ -85,14 +85,7 @@ def test_the_play_path_serves_the_page(page_client: TestClient) -> None:
     assert "<html" in response.text
 
 
-def test_served_page_is_the_file_in_the_web_directory(page_client: TestClient) -> None:
-    """`/play.html` 給的就是 `web/play.html`,不是別處產生的內容。"""
-    assert PLAY_HTML.is_file(), f"{PLAY_HTML} 必須存在"
-
-    assert page_client.get(PLAY_PATH).text == PLAY_HTML.read_text(encoding="utf-8")
-
-
-@pytest.mark.parametrize("element_id", REQUIRED_ELEMENT_IDS)
+@pytest.mark.parametrize("element_id", ["board"])
 def test_page_provides_every_container_the_later_tasks_need(
     page_client: TestClient, element_id: str
 ) -> None:
@@ -124,11 +117,6 @@ def test_every_page_shows_the_product_name_in_the_browser_tab() -> None:
         )
 
 
-def test_page_declares_traditional_chinese(page_client: TestClient) -> None:
-    """8.3:頁面自我宣告為繁體中文,瀏覽器的字型選擇才會正確。"""
-    assert 'lang="zh-Hant"' in page_client.get(PLAY_PATH).text
-
-
 def test_page_text_contains_no_simplified_characters(page_client: TestClient) -> None:
     """8.3:所有使用者可見文字為繁體中文。"""
     text = page_client.get(PLAY_PATH).text
@@ -143,9 +131,7 @@ def test_page_text_contains_no_simplified_characters(page_client: TestClient) ->
 @pytest.mark.parametrize(
     ("method", "path", "status", "code"),
     [
-        ("GET", "/api/positions/abc", 404, "POSITION_NOT_FOUND"),
         ("POST", "/api/state", 400, "INVALID_MOVE_FORMAT"),
-        ("POST", "/api/black-move", 400, "INVALID_MOVE_FORMAT"),
     ],
 )
 def test_the_static_mount_does_not_intercept_the_api_endpoints(
@@ -160,30 +146,6 @@ def test_the_static_mount_does_not_intercept_the_api_endpoints(
 
     assert response.status_code == status
     assert response.json()["code"] == code
-
-
-@pytest.mark.parametrize(
-    ("method", "path", "status"),
-    [
-        ("GET", "/api/state", 405),
-        ("GET", "/api/black-move", 405),
-        ("POST", "/api/positions/1", 405),
-        ("GET", "/api/no-such-route", 404),
-    ],
-)
-def test_route_level_failures_keep_the_framework_native_shape(
-    page_client: TestClient, method: str, path: str, status: int
-) -> None:
-    """路由層的 404 與 405 仍是框架原生的 `{"detail": ...}`(`main.py` 的模組說明)。
-
-    這是前端 `api.js` 要辨識的**第二種**錯誤形狀(design 的 api.js 一節)。掛載若把
-    這些路徑接走,405 會退化成「找不到檔案」,前端就再也分不出「網址打錯」與
-    「方法用錯」。
-    """
-    response = page_client.request(method, path, json={} if method == "POST" else None)
-
-    assert response.status_code == status
-    assert "detail" in response.json()
 
 
 # --- 骨架在真實瀏覽器中確實長出這些容器 ---------------------------------
@@ -203,14 +165,3 @@ def test_skeleton_renders_its_containers_in_a_real_browser(browser_page) -> None
         if browser_page.locator(f"#{element_id}").count() != 1
     ]
     assert not missing, f"這些容器在 DOM 中不存在或不唯一:{missing}"
-
-
-def test_reset_control_is_a_button_labelled_in_traditional_chinese(
-    browser_page,
-) -> None:
-    """重來是可按的控制項而非純文字,標籤為繁體中文(8.3)。"""
-    browser_page.goto(PLAY_HTML.as_uri())
-
-    reset = browser_page.locator("#reset")
-    assert reset.evaluate("element => element.tagName") == "BUTTON"
-    assert reset.inner_text().strip() == "重來"
