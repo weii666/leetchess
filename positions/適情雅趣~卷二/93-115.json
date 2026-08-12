@@ -1,0 +1,249 @@
+[
+  {
+    "id": 93,
+    "title": "魚駭月鉤",
+    "description": "適情雅趣 第九三局 魚駭月鉤",
+    "fen": "3k2b1r/C4R3/P3b4/n2c1R3/9/1N7/9/4BA3/3p1p3/c1BAK4 w - - 0 1",
+    "difficulty": 2,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 6
+  },
+  {
+    "id": 94,
+    "title": "負笈追師",
+    "description": "適情雅趣 第九四局 負笈追師",
+    "fen": "2baka3/1R7/4b2nn/4R2CN/4N4/9/9/5p3/2rc4r/5K3 w - - 0 1",
+    "difficulty": 1,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 5
+  },
+  {
+    "id": 95,
+    "title": "英雄貫斗",
+    "description": "適情雅趣 第九五局 英雄貫斗",
+    "fen": "9/1n2ak3/5aP2/3N5/6b2/5r3/1C7/4R1p2/1p3r1p1/1C2K2c1 w - - 0 1",
+    "difficulty": 2,
+    "tags": [
+      "勝負未知"
+    ]
+  },
+  {
+    "id": 96,
+    "title": "勇退急流",
+    "description": "適情雅趣 第九六局 勇退急流",
+    "fen": "3akc3/4a4/4b1n2/C2RR2N1/4C4/5r3/9/3pB2r1/4p4/3K5 w - - 0 1",
+    "difficulty": 2,
+    "tags": [
+      "勝負未知"
+    ]
+  },
+  {
+    "id": 97,
+    "title": "敵居萬人",
+    "description": "適情雅趣 第九七局 敵居萬人",
+    "fen": "4k3N/3Pn4/4b4/c1p3n1R/4P3r/9/5R3/5C3/2r1p4/5K3 w - - 0 1",
+    "difficulty": 2,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 6
+  },
+  {
+    "id": 98,
+    "title": "姜公釣渭",
+    "description": "適情雅趣 第九八局 姜公釣渭",
+    "fen": "4ka3/4aN3/9/RC7/2b2Pb2/9/9/4pp3/3nr3r/5K3 w - - 0 1",
+    "difficulty": 2,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 7
+  },
+  {
+    "id": 99,
+    "title": "偷營劫寨",
+    "description": "適情雅趣 第九九局 偷營劫寨",
+    "fen": "c2a1k3/3Ra4/4c1P2/7R1/9/9/9/1C2B4/1r7/2BK5 w - - 0 1",
+    "difficulty": 1,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 5
+  },
+  {
+    "id": 100,
+    "title": "飛黃結路",
+    "description": "適情雅趣 第一〇〇局 飛黃結路",
+    "fen": "2r6/4akN2/C3P2c1/1C4P2/7r1/8R/9/5p3/4p4/5K3 w - - 0 1",
+    "difficulty": 2,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 6
+  },
+  {
+    "id": 101,
+    "title": "震驚百里",
+    "description": "適情雅趣 第一〇一局 震驚百里",
+    "fen": "R1bak2CR/5P3/9/9/9/1rB6/9/9/4p3r/5KB2 w - - 0 1",
+    "difficulty": 2,
+    "tags": [
+      "勝負未知"
+    ]
+  },
+  {
+    "id": 102,
+    "title": "金門待漏",
+    "description": "適情雅趣 第一〇二局 金門待漏",
+    "fen": "3ak4/R3a1P1R/b3b4/1C7/4c4/9/9/9/2r3r2/4K4 w - - 0 1",
+    "difficulty": 2,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 6
+  },
+  {
+    "id": 103,
+    "title": "雙鷺窺魚",
+    "description": "適情雅趣 第一〇三局 雙鷺窺魚",
+    "fen": "3ak3N/4aP3/8R/1rr5N/9/9/9/9/5p3/4K4 w - - 0 1",
+    "difficulty": 1,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 4
+  },
+  {
+    "id": 104,
+    "title": "徑行自遂",
+    "description": "適情雅趣 第一〇四局 徑行自遂",
+    "fen": "6b2/1N3k2C/5a3/3R5/9/R8/9/4c1n2/3p5/3AKAr1c w - - 0 1",
+    "difficulty": 2,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 8
+  },
+  {
+    "id": 105,
+    "title": "戰如烈火",
+    "description": "適情雅趣 第一〇五局 戰如烈火",
+    "fen": "2b1ka3/4a3c/4b4/6n2/7RN/9/9/3CCR3/2rp1p3/4KAr1c w - - 0 1",
+    "difficulty": 2,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 6
+  },
+  {
+    "id": 106,
+    "title": "兵馬出塞",
+    "description": "適情雅趣 第一〇六局 兵馬出塞",
+    "fen": "2bak3r/3Ra4/4b4/6P2/7n1/2R3BN1/9/2n1C4/1r7/c3K3C w - - 0 1",
+    "difficulty": 3,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 10
+  },
+  {
+    "id": 107,
+    "title": "丹山起鳳",
+    "description": "適情雅趣 第一〇七局 丹山起鳳",
+    "fen": "1R1c1ab2/5k3/3r1a3/3C5/6b1N/3R5/9/3AB4/2p1p4/3K1N1rc w - - 0 1",
+    "difficulty": 3,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 12
+  },
+  {
+    "id": 108,
+    "title": "爭舟走渡",
+    "description": "適情雅趣 第一〇八局 爭舟走渡",
+    "fen": "2bak4/4aPP2/4b4/3N5/2r1C4/9/9/C2R2nr1/4Ap3/3AK3c w - - 0 1",
+    "difficulty": 1,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 4
+  },
+  {
+    "id": 109,
+    "title": "欲罷不能",
+    "description": "適情雅趣 第一〇九局 欲罷不能",
+    "fen": "2na1kb1R/2R6/4ba3/4C4/7r1/2C6/4c3P/4B4/4A3p/3AK3c w - - 0 1",
+    "difficulty": 2,
+    "tags": [
+      "勝負未知"
+    ]
+  },
+  {
+    "id": 110,
+    "title": "料事多中",
+    "description": "適情雅趣 第一一〇局 料事多中",
+    "fen": "3akaP2/9/4bR3/4p3C/7N1/9/3p5/4B4/3rApp2/c1NAK4 w - - 0 1",
+    "difficulty": 2,
+    "tags": [
+      "勝負未知"
+    ]
+  },
+  {
+    "id": 111,
+    "title": "興戎出好",
+    "description": "適情雅趣 第一一一局 興戎出好",
+    "fen": "2b1ka3/3Ra4/1c2b3c/N8/R8/6B2/4C1r2/C8/4Ap1n1/3AK4 w - - 0 1",
+    "difficulty": 1,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 5
+  },
+  {
+    "id": 112,
+    "title": "飛鯨吞釣",
+    "description": "適情雅趣 第一一二局 飛鯨吞釣",
+    "fen": "2bak4/C3a2NR/4b4/9/6p2/1C2c4/9/4B4/1r2A1c2/3RKAr2 w - - 0 1",
+    "difficulty": 1,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 4
+  },
+  {
+    "id": 113,
+    "title": "威鎮四海",
+    "description": "適情雅趣 第一一三局 威鎮四海",
+    "fen": "2b2k3/1R2a1P2/3a5/4p1N2/6b2/9/3nP4/4C1C2/3rAp3/c1nAK4 w - - 0 1",
+    "difficulty": 2,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 8
+  },
+  {
+    "id": 114,
+    "title": "踐履篤實",
+    "description": "適情雅趣 第一一四局 踐履篤實",
+    "fen": "2bak2r1/C3a4/1N2b3c/4p2N1/9/2R6/9/2n6/3pA4/c1rAK3R w - - 0 1",
+    "difficulty": 3,
+    "tags": [
+      "連將殺"
+    ],
+    "max_dtm": 12
+  },
+  {
+    "id": 115,
+    "title": "耕莘待聘",
+    "description": "適情雅趣 第一一五局 耕莘待聘",
+    "fen": "4k4/3PaR3/4ba3/2NN5/2p1r1b2/9/9/4C4/1nrpA4/c3KAR2 w - - 0 1",
+    "difficulty": 2,
+    "tags": [
+      "勝負未知"
+    ]
+  }
+]
