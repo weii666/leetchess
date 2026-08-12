@@ -48,6 +48,31 @@
 import { loadCatalog } from './catalog.js';
 import { readDifficulty } from './difficulty.js';
 import { loadCompleted, toggleCompleted } from './progress.js';
+import { loadStarred, toggleStarred } from './starred.js';
+
+/** SVG 命名空間 —— 星號圖示是唯一需要它的元素(其餘皆為一般 HTML 節點)。 */
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * 星號圖示的路徑。**沒有描邊/填色的差別在這裡決定** —— 兩種狀態共用同一個
+ * `<path>`,由 `list.css` 依 `data-starred` 切換 `fill`/`stroke`,顏色因此永遠
+ * 是同一顆星,不會出現標星前後形狀跳動的觀感。
+ *
+ * **五個外角與五個內凹角都是圓角**,不是直線相交的尖角(參照使用者提供的
+ * leetcode 圖示)。這件事必須做在路徑本身裡,不能指望 `stroke-linejoin: round`
+ * 代勞 —— 那個屬性只影響描邊怎麼畫,已標星是純填色(`fill: currentColor`),
+ * 填色範圍就是路徑本身的形狀,路徑是尖角,填出來就是尖角。做法是在標準五角星的
+ * 十個頂點各自切一刀:每個頂點往兩側鄰邊各退一小段距離,兩個退讓點之間用一段
+ * 以原頂點為控制點的二次貝茲曲線相接,原本的直角銳角因此變成一段圓弧。外角
+ * (五個尖端)退讓比例較大、內凹角退讓比例較小,尖端因此看起來更飽滿圓潤,
+ * 內凹角只是稍微去掉銳利感,兩者的視覺比重才不會顛倒。
+ */
+const STAR_PATH =
+  'M11.07,4.23 Q12,2 12.93,4.23 L14.07,6.96 Q14.65,8.36 16.16,8.48 ' +
+  'L19.11,8.72 Q21.51,8.91 19.68,10.48 L17.43,12.4 Q16.28,13.39 16.63,14.86 ' +
+  'L17.32,17.75 Q17.88,20.09 15.82,18.83 L13.29,17.29 Q12,16.5 10.71,17.29 ' +
+  'L8.18,18.83 Q6.12,20.09 6.68,17.75 L7.37,14.86 Q7.72,13.39 6.57,12.4 ' +
+  'L4.32,10.48 Q2.49,8.91 4.89,8.72 L7.84,8.48 Q9.35,8.36 9.93,6.96 Z';
 
 const elements = {
   positions: document.getElementById('positions'),
@@ -80,6 +105,10 @@ const playHref = (id) => `${PLAY_PAGE}?id=${encodeURIComponent(id)}`;
 /** 完成標記的無障礙名稱 —— 一整欄的核取方塊長得一樣,要靠局名才分得出是哪一題。 */
 const toggleLabel = (title) => `標記「${title}」為已完成`;
 
+/** 星號按鈕的無障礙名稱,依目前是否已標星動態切換文字(同上,理由一致)。 */
+const starLabel = (title, isStarred) =>
+  isStarred ? `取消標星「${title}」` : `標星「${title}」`;
+
 /**
  * 已上架的題目。**尚未載入完成或載入失敗時是空陣列** —— 那兩種情形下畫面上不該
  * 留著上一次的列。
@@ -94,6 +123,13 @@ let positions = [];
  * **讀取不寫入任何東西**(3.4),光是開啟列表不會產生任何標記。
  */
 let completed = loadCompleted();
+
+/**
+ * 標星的題號。與 `completed` 同一套規則(狀態由本檔持有,`starred.js` 是純函式,
+ * 切換一律寫成 `starred = toggleStarred(...)`),但兩者是**兩份獨立資料**——標星
+ * 是使用者自己整理題目的方式,不代表做過或做對。
+ */
+let starred = loadStarred();
 
 /** 這一次載入是否失敗。 */
 let failed = false;
@@ -122,21 +158,51 @@ function difficultyCell(value) {
 }
 
 /**
+ * 星號那一格。**與難度格同一套結構契約**:認不得的 `data-*` 沒有,這裡永遠有兩種
+ * 合法狀態,`list.css` 依 `data-starred` 決定描邊或填色、以及是否常駐可見。
+ *
+ * 圖示是一個 `<button>` 包一枚 `<svg>` 星星,而非核取方塊 —— 星號沒有「已勾選」的
+ * 既定觀感(核取方塊暗示的是一個表單欄位),按鈕加圖示才對得上「標記/收藏」這個
+ * 動作的慣例(參照形態:leetcode 的星號)。
+ */
+function starCell(position, isStarred) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'position-star';
+  button.dataset.starred = String(isStarred);
+  button.setAttribute('aria-pressed', String(isStarred));
+  button.setAttribute('aria-label', starLabel(position.title || UNTITLED, isStarred));
+  button.addEventListener('click', () => star(position.id));
+
+  const icon = document.createElementNS(SVG_NS, 'svg');
+  icon.setAttribute('viewBox', '0 0 24 24');
+  icon.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS(SVG_NS, 'path');
+  path.setAttribute('d', STAR_PATH);
+  icon.append(path);
+  button.append(icon);
+
+  return button;
+}
+
+/**
  * 一列(1.2、1.3)。
  *
- * 欄序:**題號、局名、標籤、難度、完成標記**。前兩項是主要識別,故在左;標籤與
- * 難度是次要資訊,故在右。**難度緊鄰完成標記**,兩者因此在整份列表上連成固定的
- * 兩直欄 —— 標籤是全列最不可預測的一項(數量、長度都不定),把它夾在局名與難度
- * 之間,難度才不會跟著標籤多寡左右浮動。`list.css` 讓標籤欄靠右對齊,空隙因此落在
- * 標籤**左**側而不是右側。
+ * 欄序:**題號、局名、標籤、難度、完成標記、星號**。題號與局名是主要識別,故在
+ * 最左;標籤與難度是次要資訊,故在右。**難度緊鄰完成標記**,兩者因此在整份列表
+ * 上連成固定的直欄 —— 標籤是全列最不可預測的一項(數量、長度都不定),把它夾在
+ * 局名與難度之間,難度才不會跟著標籤多寡左右浮動。`list.css` 讓標籤欄靠右對齊,
+ * 空隙因此落在標籤**左**側而不是右側。
  *
- * **完成標記在最右**,與題庫類產品的慣例一致:左緣留給題號那一欄,一路往下掃的是
- * 題號而不是勾選框。
+ * **完成標記緊接難度之後**,與題庫類產品的慣例一致:左緣留給題號那一欄,一路
+ * 往下掃的是題號而不是勾選框。**星號排在全列最後**——它原本放在最左側(題號
+ * 之前),使用者看過實際畫面後指出這與最初提供的 leetcode 參考圖不符:該圖裡
+ * 星號其實是每列**最右側**的元素(在難度標籤之後),因此移到這裡修正這個誤讀。
  *
- * 完成標記在**結構上就落在 `<a>` 之外**(它是 `<li>` 的直接子節點,與連結平行),
- * 「按標記不會跳進對局頁」(4.1)因此是版面的結果。移動它的位置**只能動 DOM 順序
- * 或視覺順序** —— 一旦被塞進連結裡,那條保證就得改由 `stopPropagation` 之類的補救
- * 維持,而那種補救擋不住鍵盤與中鍵。
+ * 星號與完成標記都在**結構上就落在 `<a>` 之外**(兩者皆為 `<li>` 的直接子節點,
+ * 與連結平行),「按標記不會跳進對局頁」(4.1)因此是版面的結果,標星同理。移動
+ * 它們的位置**只能動 DOM 順序或視覺順序** —— 一旦被塞進連結裡,那條保證就得改由
+ * `stopPropagation` 之類的補救維持,而那種補救擋不住鍵盤與中鍵。
  */
 function row(position) {
   const item = document.createElement('li');
@@ -150,6 +216,11 @@ function row(position) {
   if (done) item.dataset.completed = '';
 
   const title = position.title || UNTITLED;
+
+  // 命名為 `starButton` 而非 `star`:模組頂層另有一個切換標星的函式叫 `star`,
+  // 同一個作用域裡撞名雖然不影響行為(閉包解析的是定義處的作用域,不是呼叫處),
+  // 但讀起來容易誤會成同一樣東西。
+  const starButton = starCell(position, starred.has(position.id));
 
   const toggle = document.createElement('input');
   toggle.type = 'checkbox';
@@ -196,10 +267,10 @@ function row(position) {
     }
   }
 
-  // 完成標記排在最後 —— **DOM 順序即視覺順序**,不靠 `order` 或 `direction` 之類的
+  // 星號排在最後 —— **DOM 順序即視覺順序**,不靠 `order` 或 `direction` 之類的
   // 純視覺搬移:那些手法只挪畫面,Tab 與螢幕閱讀器仍照 DOM 走,兩者一旦分家,
   // 鍵盤使用者的行進順序就與眼睛看到的對不上。
-  item.append(id, name, tags, difficulty, toggle);
+  item.append(id, name, tags, difficulty, toggle, starButton);
   return item;
 }
 
@@ -258,6 +329,18 @@ function mark(id) {
   render();
   elements.positions
     .querySelector(`li[data-id="${id}"] .position-toggle`)
+    ?.focus();
+}
+
+/**
+ * 切換一題的標星。與 `mark(id)` 同一套理由(新集合一律取自純函式的回傳值、重畫
+ * 之後把焦點放回同一個按鈕),差別只在切換的是 `starred` 而非 `completed`。
+ */
+function star(id) {
+  starred = toggleStarred(starred, id);
+  render();
+  elements.positions
+    .querySelector(`li[data-id="${id}"] .position-star`)
     ?.focus();
 }
 

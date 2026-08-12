@@ -220,13 +220,14 @@ CATALOG_PATH = "/api/catalog"
 # 列的結構契約(由 `web/list.js` 產生、`web/list.css` 據以上色):
 #
 #   <li class="position" data-id="<題號>" [data-completed]>
-#     <span class="position-id">                          <- 「<題號>.」,右對齊
+#     <span class="position-id">                          <- 「<題號>.」,靠右對齊
 #     <a class="position-title" href="./play.html?id=<題號>">   <- 固定 8em(八個中文字)
 #     <span class="position-tags">                         <- 靠左對齊,緊接局名
 #     <span class="position-difficulty" [data-level="1|2|3"]>   <- 靠右對齊
 #     <input type="checkbox" class="position-toggle">
+#     <button class="position-star" data-starred="true|false">  <- 標星,見 web/starred.js
 #
-# **DOM 順序即左到右的欄序。** 難度緊鄰完成標記(不在局名旁邊)。五欄只有標籤欄是
+# **DOM 順序即左到右的欄序。** 難度緊鄰完成標記(不在局名旁邊)。六欄只有標籤欄是
 # 彈性的,其餘寬度固定 —— 每個 `<li>` 各自是一個 grid,固定寬度是各列欄界能對齊成
 # 直欄的唯一辦法。
 #
@@ -234,10 +235,11 @@ CATALOG_PATH = "/api/catalog"
 # 是難度標籤的上色掛勾;三者都不是測試專用的鉤子,列表本身要靠它們才畫得出樣式與
 # 導航(4.1)。
 #
-# **完成標記排在最後,而且是 `<li>` 的直接子節點** —— 它與 `<a>` 平行而非在其中,
-# 「按標記不會跳進對局頁」(4.1)因此是結構的結果。欄序改過一次(標記自最左移到
-# 最右,使用者看過實際畫面後的意見),改的是 `append` 的順序而不是 CSS 的 `order`:
-# 純視覺搬移會讓 Tab 順序與眼睛看到的分家。
+# **完成標記與星號都是 `<li>` 的直接子節點** —— 它們與 `<a>` 平行而非在其中,
+# 「按標記/星號不會跳進對局頁」(4.1)因此是結構的結果。欄序改過幾次(完成標記
+# 自最左移到最右、星號自最左移到全列最後,都是使用者看過實際畫面後的意見),
+# 改的一律是 `append` 的順序而不是 CSS 的 `order`:純視覺搬移會讓 Tab 順序與
+# 眼睛看到的分家。
 
 
 @pytest.fixture
