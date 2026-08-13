@@ -49,6 +49,14 @@
   --line: #6b5433;
 
   /*
+   * 「重來」按鈕的底色。與 `list.css` 的 `--chip-bg` 逐位元組相同 —— 兩顆按鈕
+   * (那邊是「重試」)觀感本來就一樣,只是值先前各自寫死。這裡只是給它一個
+   * 名字,不是與 `list.css` 共用同一份定義(兩頁的自訂屬性表本來就不互相
+   * 依賴,也沒有測試比對這一條)。
+   */
+  --chip-bg: #4a4a4a;
+
+  /*
    * 難度三色。**與 `list.css` 共用**(`tests/test_web_list.py` 的
    * `SHARED_CUSTOM_PROPERTIES` 會比對兩頁的值)—— 同一題在列表與對局頁必須是同一
    * 個顏色,否則使用者會以為自己點錯了題。
@@ -577,7 +585,7 @@ body {
   padding: 8px 16px;
   border: none;
   border-radius: var(--radius-sm);
-  background: #4a4a4a;
+  background: var(--chip-bg);
   color: var(--text);
   cursor: pointer;
 }

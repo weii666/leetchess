@@ -334,6 +334,22 @@ body {
 }
 
 /*
+ * 難度選單原本吃瀏覽器原生下拉箭頭 —— 深色 `--field-bg` 底下,原生箭頭的顏色由
+ * 系統決定,不保證跟頁面配色一致。列表頁 `#filter-select`(`list.css`)已用
+ * `appearance: none` 換成自畫箭頭解過同一題,這裡照搬同一招:顏色改用
+ * `--text-muted` 配合深色底(那邊底色是亮色配深色箭頭,這裡反過來)。
+ */
+.field select {
+  appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23a8a8a8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='4 6 8 10 12 6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px;
+  cursor: pointer;
+}
+
+/*
  * 難度的三個分級各自帶顏色,**與列表頁、對局頁同一組色**(1 / 2 / 3 依序為簡單、
  * 中等、困難,見 `.kiro/steering/structure.md` 的題目 schema;三個分級的**說法**
  * 只出自 `web/difficulty.js`,收題頁的三個檔案裡一個字都不得寫)。收題的人挑的就是
