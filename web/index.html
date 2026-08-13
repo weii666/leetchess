@@ -16,9 +16,6 @@
   本檔只有容器,沒有互動邏輯也沒有樣式:內容由 list.js 填入、版面由 list.css 決定
   (兩者皆屬 tasks 3.2)。那個任務的 boundary 只有那兩個檔案,回頭改不到本檔,
   因此每一個容器都必須在此一次備齊 —— 與 play.html 當初的理由相同。
-
-  刻意沒有篩選區:篩選互動已移入 Backlog(tasks.md 的範圍說明)。先擺一組按不動的
-  下拉選單,使用者會以為產品壞了,比沒有更糟。
 -->
 <header>
   <!--
@@ -27,12 +24,47 @@
     硬翻成「力扣象棋」之類反而不是同一個東西。
   -->
   <h1>LeetChess</h1>
-
-  <!-- 完成題數與總題數須對使用者可見(3.5),由 list.js 填入。 -->
-  <p id="progress">已完成 <span id="completed-count">—</span> / <span id="total-count">—</span> 題</p>
 </header>
 
 <main>
+  <!--
+    篩選控制(漏斗圖示 + 下拉選單)與完成計數同一行:控制項靠左、計數靠右
+    (`#filter-bar` 的 `justify-content: space-between`)。置於整份列表最上方,
+    但只有下拉選單影響下面 #positions 那份列表——#progress 的 m/n 隨篩選結果
+    更新是 list.js 的邏輯,不是「這一行都歸篩選管」;對下面 #daily-position 的
+    推薦列同樣沒有作用(內容由 list.js 產生)——推薦列擺在這一行之後只是版面
+    順序,不受它左右。
+  -->
+  <div id="filter-bar">
+    <!-- 漏斗圖示與下拉選單分成一組,才能與 #progress 各自貼一邊(見 list.css)。 -->
+    <div class="filter-control">
+      <svg class="filter-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4.25 5.61C6.27 8.2 10 13 10 13v6c0 .55.45 1 1 1h2c.55 0 1-.45 1-1v-6s3.72-4.8 5.74-7.39c.51-.66.04-1.61-.79-1.61H5.04c-.83 0-1.3.95-.79 1.61z"/>
+      </svg>
+      <label for="filter-select" class="visually-hidden">篩選題目</label>
+      <select id="filter-select">
+        <option value="all">全部題目</option>
+        <option value="favorite">我的最愛</option>
+        <option value="easy">簡單的題目</option>
+        <option value="medium">適中的問題</option>
+        <option value="hard">困難的問題</option>
+      </select>
+    </div>
+
+    <!-- 完成題數與總題數須對使用者可見(3.5),由 list.js 填入。 -->
+    <p id="progress">已完成 <span id="completed-count">—</span> / <span id="total-count">—</span> 題</p>
+  </div>
+
+  <!--
+    每日推薦題(欄位文字為「每日一題」),顯示在篩選列之下、正常列表之上。內容由
+    list.js 產生,骨架不夾帶任何寫死的題目。這個容器只會有 0 或 1 個
+    <li class="position">——題庫還沒載好、載入失敗、或題庫是空的時候是空的,
+    不另外做一套錯誤或空狀態文案:索引本身的錯誤/空狀態已經由下面的
+    #error/#empty 處理,推薦列只是「這次沒有可推薦的題」,安靜地不顯示即可。
+    **不受上方篩選列影響**——永遠顯示今天推薦的那一題,不論篩選條件選了什麼。
+  -->
+  <ul id="daily-position"></ul>
+
   <!-- 每一題一列(1.2、1.3)。內容由 list.js 產生,骨架不夾帶任何寫死的題目。 -->
   <ul id="positions"></ul>
 

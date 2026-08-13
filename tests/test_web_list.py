@@ -24,12 +24,6 @@
 一開始就不呈現,只有瀏覽器答得出來 —— 標籤沒閉合、`hidden` 打錯位置,在字串比對
 下完全看不出來。
 
-## 篩選區刻意不存在
-
-篩選互動已移入 Backlog(tasks.md)。骨架若先擺一組按不動的下拉選單,使用者會以為
-產品壞了。`test_the_list_page_ships_no_filter_controls` 把這個決定釘住 —— 日後接上
-篩選時它會轉紅,那時該連同 tasks.md 的 Backlog 一起改。
-
 後半(3.2)驗證 `web/list.js` 與 `web/list.css`:列畫得對不對、完成標記按不按得動、
 空狀態與錯誤狀態有沒有被混為一談。
 
@@ -585,6 +579,428 @@ def test_the_rendered_list_contains_no_simplified_characters(list_page) -> None:
 
 
 # =======================================================================
+# 每日推薦題(`web/daily.js` 的 `pickDailyPosition()` 畫成 `#daily-position`
+# 那一列)
+# =======================================================================
+#
+# `daily.js` 本身選中哪一題只是純函式邏輯,由 `test_web_daily.py` 驗證;這裡驗證
+# `list.js` 怎麼把它**畫出來**:推薦列是否恰好一列、選中的題目與直接呼叫
+# `pickDailyPosition()` 算出的是否一致(不能寫死是哪一題,挑哪一題取決於執行當下
+# 的真實日期)、標籤欄是否換成「每日一題」而不洩漏原本的標籤(防劇透)、下面的
+# 編號列表是否原樣保留同一題(「下面列表不變」),以及在推薦列操作完成標記/星號時
+# 是否與下面的正常列同步、焦點是否留在使用者實際點下去的那個容器。
+
+#: 推薦列標籤欄的固定文字(`list.js` 的 `FEATURED_LABEL`)。
+FEATURED_LABEL = "每日一題"
+
+
+def featured_row(page) -> dict[str, Any] | None:
+    """`#daily-position` 目前畫出來的那一列;沒有推薦題時為 `None`。"""
+    items = page.evaluate(
+        """() => [...document.querySelectorAll('#daily-position > li')].map((li) => ({
+          id: li.dataset.id ?? null,
+          html: li.innerHTML,
+          tags: [...li.querySelectorAll('.position-tags .position-tag, .position-tags .position-tag-featured')].map(
+            (el) => el.textContent,
+          ),
+          checked: li.querySelector('input[type="checkbox"]')?.checked ?? null,
+          marked: li.matches('[data-completed]'),
+          starred: li.querySelector('.position-star')?.dataset.starred ?? null,
+        }))"""
+    )
+    return items[0] if items else None
+
+
+def expected_daily_id(page, positions: list[dict[str, Any]]) -> Any:
+    """直接呼叫 `pickDailyPosition(positions, todayKey())`,算出「應該」被推薦的
+    題號 —— 交叉驗證的依據,而不是把某個題號寫死在斷言裡。
+    """
+    return page.evaluate(
+        """async ({ positions }) => {
+          const { pickDailyPosition, todayKey } = await import('/daily.js');
+          return pickDailyPosition(positions, todayKey())?.id ?? null;
+        }""",
+        {"positions": positions},
+    )
+
+
+def test_the_daily_position_shows_exactly_one_recommended_row(list_page) -> None:
+    """推薦列剛好一列,且是題庫裡真的存在的題號。"""
+    open_list(list_page)
+
+    featured = featured_row(list_page)
+    assert featured is not None, "推薦列沒有畫出任何題目"
+    assert featured["id"] in LISTED_IDS
+
+
+def test_the_daily_position_matches_pick_daily_position(list_page) -> None:
+    """推薦列選中的題目與直接呼叫 `pickDailyPosition()` 算出來的一致。"""
+    open_list(list_page)
+
+    featured = featured_row(list_page)
+    assert featured is not None
+
+    expected = expected_daily_id(list_page, CATALOG)
+    assert featured["id"] == str(expected)
+
+
+def test_the_daily_position_hides_the_real_tags(list_page) -> None:
+    """推薦列的標籤欄只有「每日一題」,不是題目原本的殺法名 —— 防劇透(1.2 的
+    tags 若直接畫出去,等於告訴使用者這題怎麼殺)。
+    """
+    open_list(list_page)
+
+    featured = featured_row(list_page)
+    assert featured is not None
+    assert featured["tags"] == [FEATURED_LABEL]
+
+    entry = next(e for e in CATALOG if str(e["id"]) == featured["id"])
+    for tag in entry["tags"]:
+        assert tag not in featured["html"], f"推薦列洩漏了原本的標籤:{tag}"
+
+
+def test_the_same_position_also_appears_in_the_normal_list(list_page) -> None:
+    """下面編號列表完全不變:推薦題依然以原本的題號、原本的位置出現在正常列表裡,
+    同一題因此在頁面上出現兩次。
+    """
+    open_list(list_page)
+
+    featured = featured_row(list_page)
+    assert featured is not None
+
+    normal_ids = [row["id"] for row in rows(list_page)]
+    assert featured["id"] in normal_ids
+    assert normal_ids == LISTED_IDS
+
+
+def test_toggling_from_the_daily_row_syncs_the_normal_row(list_page) -> None:
+    """在推薦列勾選完成,下面同一題的正常列同步更新(反之亦然)——兩者共用同一份
+    `completed` 狀態,`render()` 重畫時一起套用。
+    """
+    open_list(list_page)
+    featured = featured_row(list_page)
+    assert featured is not None
+    position_id = featured["id"]
+
+    list_page.locator(
+        f'#daily-position > li[data-id="{position_id}"] input[type="checkbox"]'
+    ).click()
+
+    normal_state = next(row for row in rows(list_page) if row["id"] == position_id)
+    assert normal_state["checked"] is True
+    assert normal_state["marked"] is True
+
+    toggle(list_page, int(position_id))
+
+    normal_state = next(row for row in rows(list_page) if row["id"] == position_id)
+    assert normal_state["checked"] is False
+    assert featured_row(list_page)["checked"] is False
+
+
+def test_starring_from_the_daily_row_syncs_the_normal_row(list_page) -> None:
+    """在推薦列按星號,下面同一題的正常列同步變成已標星 —— 與完成標記同一套理由,
+    共用同一份 `starred` 狀態。
+    """
+    open_list(list_page)
+    featured = featured_row(list_page)
+    assert featured is not None
+    position_id = featured["id"]
+    assert featured["starred"] == "false"
+
+    list_page.locator(
+        f'#daily-position > li[data-id="{position_id}"] .position-star'
+    ).click()
+
+    assert featured_row(list_page)["starred"] == "true"
+
+    normal_starred = list_page.evaluate(
+        f"""() => document
+          .querySelector('#positions > li[data-id="{position_id}"] .position-star')
+          ?.dataset.starred"""
+    )
+    assert normal_starred == "true"
+
+
+def test_toggling_from_the_daily_row_keeps_focus_in_the_daily_row(list_page) -> None:
+    """從推薦列按下完成標記,重畫後焦點留在推薦列裡的核取方塊,不會被拉去下面
+    列表裡同題號的那一顆 —— 兩個容器現在可能有相同 `data-id`,`mark()`/`star()`
+    的 `root` 參數就是為了解決這個焦點還原的問題(見 `list.js`)。
+    """
+    open_list(list_page)
+    featured = featured_row(list_page)
+    assert featured is not None
+    position_id = featured["id"]
+
+    list_page.locator(
+        f'#daily-position > li[data-id="{position_id}"] input[type="checkbox"]'
+    ).click()
+
+    focused = list_page.evaluate(
+        """() => {
+          const el = document.activeElement;
+          return {
+            inDaily: !!el.closest('#daily-position'),
+            inPositions: !!el.closest('#positions'),
+            className: el.className,
+          };
+        }"""
+    )
+    assert focused["inDaily"] is True
+    assert focused["inPositions"] is False
+    assert focused["className"] == "position-toggle"
+
+
+# =======================================================================
+# 篩選:全部題目 / 我的最愛 / 難度三檔(`list.js` 的 `visiblePositions()`)
+# =======================================================================
+#
+# 篩選只影響 `#positions` 那份列表與 `#progress` 的 m/n 計數,`#daily-position` 的
+# 推薦列固定畫 `daily`,不吃篩選條件 —— 即使推薦題被篩選條件排除在外,它仍然要
+# 出現(見 `list.js` 的 `render()`)。
+#
+# 難度篩選轉呼叫 `catalog.js` 既有、已測試的 `filterPositions()`;「我的最愛」比對
+# 的是 `starred.js` 已載入的 `starred` 集合。兩者判準的出處都不在 `list.js`。
+#
+# 網址是狀態保留的唯一場所(從對局頁按上一頁回列表是整頁重新載入,沒有第二個地方
+# 活得過那次導覽):選了篩選之後網址要立刻反映,直接帶著那個網址開新分頁也要能
+# 還原同一個篩選條件。
+
+#: 涵蓋三種難度(既有 `CATALOG` 的難度只有 3、5、0,沒有 1、2,篩不出簡單/適中)。
+FILTER_CATALOG: list[dict[str, Any]] = [
+    {
+        "id": 201,
+        "title": "簡明入局",
+        "description": "紅先勝,單步照將",
+        "difficulty": 1,
+        "tags": ["入門"],
+        "source": "測試題庫",
+    },
+    {
+        "id": 202,
+        "title": "縱橫捭闔",
+        "description": "紅先勝,騰挪取勢",
+        "difficulty": 2,
+        "tags": ["中局"],
+        "source": "測試題庫",
+    },
+    {
+        "id": 203,
+        "title": "背水一戰",
+        "description": "紅先勝,棄子搶攻",
+        "difficulty": 3,
+        "tags": ["殘局"],
+        "source": "測試題庫",
+    },
+    {
+        "id": 204,
+        "title": "背城借一",
+        "description": "紅先勝,連將入局",
+        "difficulty": 3,
+        "tags": ["殘局"],
+        "source": "測試題庫",
+    },
+]
+
+#: 難度篩選值到分級的對照,與 `list.js` 的 `FILTER_DIFFICULTY` 是同一份判準。
+FILTER_DIFFICULTY = {"easy": 1, "medium": 2, "hard": 3}
+
+
+def filter_select(page):
+    """篩選下拉的 `<select id="filter-select">` locator。"""
+    return page.locator("#filter-select")
+
+
+def choose_filter(page, value: str) -> None:
+    """真實選取下拉選單裡的一個選項,不是直接改 DOM 的 `value`。"""
+    filter_select(page).select_option(value)
+
+
+#: 篩選條件的儲存鍵(`web/filter.js` 的 `STORAGE_KEY`)。
+FILTER_STORAGE_KEY = "leetchess:v1:filter"
+
+
+def stored_filter(page) -> Any:
+    """`sessionStorage` 裡目前的篩選條件原始值(沒寫過時為 `None`)。"""
+    return page.evaluate(f"() => sessionStorage.getItem({json.dumps(FILTER_STORAGE_KEY)})")
+
+
+def seed_filter(page, value: str) -> None:
+    """在導覽之前先把篩選條件寫進 `sessionStorage`——模擬「上一頁就是選了這個
+    篩選」而不是使用者這次進來才選。必須在 `page.goto` **之前**呼叫,道理與
+    `list_page` 夾具的說明一致:`list.js` 開頁時只讀一次。
+    """
+    page.add_init_script(
+        f"sessionStorage.setItem({json.dumps(FILTER_STORAGE_KEY)}, {json.dumps(value)})"
+    )
+
+
+# --- 骨架 -----------------------------------------------------------------
+
+
+def test_the_filter_bar_ships_five_options(page_client: TestClient) -> None:
+    """篩選下拉的五個選項,文字與 value 都要對 —— 這是使用者唯一看得到的說法。"""
+    html = LIST_HTML.read_text(encoding="utf-8")
+    assert '<select id="filter-select">' in html
+    for value, label in [
+        ("all", "全部題目"),
+        ("favorite", "我的最愛"),
+        ("easy", "簡單的題目"),
+        ("medium", "適中的問題"),
+        ("hard", "困難的問題"),
+    ]:
+        assert f'<option value="{value}">{label}</option>' in html
+
+
+# --- 預設與難度篩選 ---------------------------------------------------------
+
+
+def test_the_default_filter_lists_every_position(list_page) -> None:
+    """開頁時篩選是「全部題目」,列表與計數與未篩選時一致。"""
+    open_list(list_page, FILTER_CATALOG)
+
+    assert filter_select(list_page).input_value() == "all"
+    assert [row["id"] for row in rows(list_page)] == [
+        str(entry["id"]) for entry in FILTER_CATALOG
+    ]
+    assert counts(list_page) == ["0", str(len(FILTER_CATALOG))]
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_ids"),
+    [
+        ("easy", ["201"]),
+        ("medium", ["202"]),
+        ("hard", ["203", "204"]),
+    ],
+)
+def test_choosing_a_difficulty_filters_the_list(
+    list_page, value: str, expected_ids: list[str]
+) -> None:
+    """選一個難度,只留下該難度的題目,m/n 也只算這個子集合。"""
+    open_list(list_page, FILTER_CATALOG)
+
+    choose_filter(list_page, value)
+
+    assert [row["id"] for row in rows(list_page)] == expected_ids
+    assert counts(list_page) == ["0", str(len(expected_ids))]
+
+
+def test_choosing_all_again_restores_the_full_list(list_page) -> None:
+    """選過難度之後改回「全部題目」,列表與計數都要還原,不留殘影。"""
+    open_list(list_page, FILTER_CATALOG)
+    choose_filter(list_page, "hard")
+
+    choose_filter(list_page, "all")
+
+    assert [row["id"] for row in rows(list_page)] == [
+        str(entry["id"]) for entry in FILTER_CATALOG
+    ]
+    assert counts(list_page) == ["0", str(len(FILTER_CATALOG))]
+
+
+# --- 我的最愛 ---------------------------------------------------------------
+
+
+def test_choosing_favorite_lists_only_starred_positions(list_page) -> None:
+    """標星兩題後選「我的最愛」,只留下標星過的那兩題。"""
+    open_list(list_page, FILTER_CATALOG)
+
+    for position_id in (201, 203):
+        list_page.locator(
+            f'#positions > li[data-id="{position_id}"] .position-star'
+        ).click()
+
+    choose_filter(list_page, "favorite")
+
+    assert sorted(int(row["id"]) for row in rows(list_page)) == [201, 203]
+    assert counts(list_page) == ["0", "2"]
+
+
+def test_unstarring_while_favorite_filter_is_active_removes_the_row(
+    list_page,
+) -> None:
+    """在「我的最愛」篩選下取消標星,那一列立刻從畫面消失 —— 重畫一律照當下的
+    `starred` 集合求值,不留著上一次篩出來的那份。
+    """
+    open_list(list_page, FILTER_CATALOG)
+    list_page.locator('#positions > li[data-id="201"] .position-star').click()
+    choose_filter(list_page, "favorite")
+    assert [row["id"] for row in rows(list_page)] == ["201"]
+
+    list_page.locator('#positions > li[data-id="201"] .position-star').click()
+
+    assert rows(list_page) == []
+    assert counts(list_page) == ["0", "0"]
+
+
+# --- 每日一題不受篩選影響 -----------------------------------------------------
+
+
+def test_the_daily_row_ignores_the_active_filter(list_page) -> None:
+    """篩選條件排除掉推薦題所屬的難度時,推薦列依然畫著同一題 —— 推薦列固定畫
+    `daily`,不吃 `visiblePositions()`。
+    """
+    open_list(list_page, FILTER_CATALOG)
+    featured = featured_row(list_page)
+    assert featured is not None
+    entry = next(e for e in FILTER_CATALOG if str(e["id"]) == featured["id"])
+
+    # 選一個推薦題**不屬於**的難度,確保篩選真的與推薦題錯開。
+    excluded_value = next(
+        value
+        for value, difficulty in FILTER_DIFFICULTY.items()
+        if difficulty != entry["difficulty"]
+    )
+    choose_filter(list_page, excluded_value)
+
+    still_featured = featured_row(list_page)
+    assert still_featured is not None
+    assert still_featured["id"] == featured["id"]
+
+
+# --- 狀態保留(sessionStorage) ------------------------------------------------
+#
+# 篩選條件記在 `sessionStorage`(`web/filter.js`),不是網址參數 —— 「回到列表」
+# 那條連結(`web/app.js` 的 `mountBackLink()`)是固定的 `href="./index.html"`,
+# 不會帶著上一頁的篩選狀態,網址參數因此接不起「點進一題再回來」這個往返。
+# `sessionStorage` 不必靠任何一條特定連結傳遞,同一分頁的 session 活得過任何
+# 返回路徑。見「每日一題不受篩選影響」之後、4.2 之前的完整往返測試。
+
+
+def test_choosing_a_filter_persists_to_session_storage(list_page) -> None:
+    """選了篩選之後立刻寫進 `sessionStorage`。"""
+    open_list(list_page, FILTER_CATALOG)
+
+    choose_filter(list_page, "easy")
+
+    assert stored_filter(list_page) == "easy"
+
+
+def test_a_stored_filter_is_restored_on_load(list_page) -> None:
+    """開頁前 `sessionStorage` 已經有篩選條件時,下拉選單與列表都照這個條件
+    還原 —— 模擬「篩選後點進一題、返回列表」的整頁重新載入。
+    """
+    seed_filter(list_page, "hard")
+    open_list(list_page, FILTER_CATALOG)
+
+    assert filter_select(list_page).input_value() == "hard"
+    assert [row["id"] for row in rows(list_page)] == ["203", "204"]
+
+
+def test_an_unrecognized_stored_filter_falls_back_to_all(list_page) -> None:
+    """`sessionStorage` 裡是認不得的篩選值時回退成「全部題目」,而不是整份
+    列表消失。
+    """
+    seed_filter(list_page, "impossible")
+    open_list(list_page, FILTER_CATALOG)
+
+    assert filter_select(list_page).input_value() == "all"
+    assert [row["id"] for row in rows(list_page)] == [
+        str(entry["id"]) for entry in FILTER_CATALOG
+    ]
+
+
+# =======================================================================
 # tasks 4.1:自列表進入對局(requirements 4.1、4.2)
 # =======================================================================
 #
@@ -828,6 +1244,28 @@ def test_the_marks_survive_a_round_trip_through_a_game(list_page) -> None:
     assert counts(list_page) == before == ["2", TOTAL]
     assert json.loads(stored_completed(list_page)) == [2, 5]
     assert served["positions"] == ["3"], f"中途載入的不是所選的那一題:{served}"
+
+
+def test_the_filter_survives_a_round_trip_through_a_game(list_page) -> None:
+    """篩選條件經得起「點進一題、再從對局介面按返回」——這是使用者實測抓到的
+    迴歸(見 `web/filter.js` 的檔頭說明):返回連結是固定的
+    `href="./index.html"`(`web/app.js` 的 `mountBackLink()`),不會帶著上一頁
+    的篩選狀態;篩選因此必須靠 `sessionStorage` 撐過這趟整頁重新載入,不能只
+    在網址參數上做文章——這條測試直接走那條真正的返回連結,不是自己組網址。
+    """
+    served = open_list_that_can_be_played(list_page, FILTER_CATALOG)
+
+    choose_filter(list_page, "hard")
+    assert [row["id"] for row in rows(list_page)] == ["203", "204"]
+
+    open_position(list_page, 203)
+    assert urlsplit(list_page.url).path == PLAY_PATH, "沒有真的進到對局介面"
+
+    go_back(list_page)
+
+    assert filter_select(list_page).input_value() == "hard"
+    assert [row["id"] for row in rows(list_page)] == ["203", "204"]
+    assert served["positions"] == ["203"], f"中途載入的不是所選的那一題:{served}"
 
 
 # --- 4.5(修訂後):對局介面顯示該題的出處,描述兩頁都不畫 ---------------

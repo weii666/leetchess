@@ -33,10 +33,15 @@
  *
  * ## 哪些題目該列出來不是這裡的決定
  *
- * `loadCatalog()` 回來的就是索引的全部,本檔**不得再加任何一層過濾**。題庫裡曾有
+ * `loadCatalog()` 回來的就是索引的全部,本檔**不得自行發明過濾判準**。題庫裡曾有
  * 一個 `solvable` 欄位供列表篩掉偽題,已隨題目 schema 移除 —— 它從未有過非空的值,
  * 那道過濾因此不曾濾掉任何一題。日後真要篩,判準會有一個明確的出處,而不是在呈現
  * 層多長一個 truthy 判斷。
+ *
+ * 使用者透過篩選下拉主動選擇的顯示範圍是另一回事:判準的出處在 `catalog.js` 既有、
+ * 已測試的 `filterPositions()`(難度)與 `starred.js` 已載入的 `starred` 集合
+ * (我的最愛),本檔只是照使用者的選擇呼叫它們、決定畫哪一個子集合,並不是自己
+ * 發明了一條新的篩選規則。
  *
  * ## 使用者看到的文字全部在這裡生出來
  *
@@ -45,10 +50,12 @@
  * 出現或收起來。文字一律繁體中文(6.2)。
  */
 
-import { loadCatalog } from './catalog.js';
+import { loadCatalog, filterPositions } from './catalog.js';
 import { readDifficulty } from './difficulty.js';
 import { loadCompleted, toggleCompleted } from './progress.js';
 import { loadStarred, toggleStarred } from './starred.js';
+import { pickDailyPosition, todayKey } from './daily.js';
+import { loadFilter, saveFilter } from './filter.js';
 
 /** SVG 命名空間 —— 星號圖示是唯一需要它的元素(其餘皆為一般 HTML 節點)。 */
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -75,13 +82,18 @@ const STAR_PATH =
   'L4.32,10.48 Q2.49,8.91 4.89,8.72 L7.84,8.48 Q9.35,8.36 9.93,6.96 Z';
 
 const elements = {
+  dailyPosition: document.getElementById('daily-position'),
   positions: document.getElementById('positions'),
   completedCount: document.getElementById('completed-count'),
   totalCount: document.getElementById('total-count'),
   empty: document.getElementById('empty'),
   error: document.getElementById('error'),
   retry: document.getElementById('retry'),
+  filterSelect: document.getElementById('filter-select'),
 };
+
+/** 每日推薦題的標籤欄文字(1.2 的 tags 用它換掉,理由見 `row()` 的 `featured`)。 */
+const FEATURED_LABEL = '每日一題';
 
 /** 沒有值可填時的佔位符號(與對局介面一致)。 */
 const BLANK = '—';
@@ -116,6 +128,14 @@ const starLabel = (title, isStarred) =>
 let positions = [];
 
 /**
+ * 今天的推薦題(`daily.js` 的 `pickDailyPosition()`)。`positions` 成功載入後算
+ * 一次即可——同一組 `(positions, 今天日期)` 是決定性的,不必每次 `render()` 都
+ * 重算。載入中、失敗、或題庫是空的時候維持 `null`,`render()` 那時就不畫這一列
+ * (見 `elements.dailyPosition` 的用法)。
+ */
+let daily = null;
+
+/**
  * 完成的題號。狀態由本檔持有,`progress.js` 是純函式(design 把它定為「純函式 +
  * localStorage、依賴為無」),因此切換一律寫成 `completed = toggleCompleted(...)`。
  *
@@ -130,6 +150,18 @@ let completed = loadCompleted();
  * 是使用者自己整理題目的方式,不代表做過或做對。
  */
 let starred = loadStarred();
+
+/**
+ * 難度篩選的判準值,對照下拉選單的 `<option value="...">`(index.html)與
+ * `difficulty.js` 的分級(1–3)。「我的最愛」不在這裡——它比對的是 `starred`
+ * 集合,不是難度,見 `visiblePositions()`。
+ */
+const FILTER_DIFFICULTY = { easy: 1, medium: 2, hard: 3 };
+
+/** 目前的篩選條件。開頁時讀一次 `sessionStorage`(`filter.js` 的
+ * `loadFilter()`),之後只由選單的 `change` 事件更動。 */
+let filter = loadFilter();
+elements.filterSelect.value = filter;
 
 /** 這一次載入是否失敗。 */
 let failed = false;
@@ -164,15 +196,18 @@ function difficultyCell(value) {
  * 圖示是一個 `<button>` 包一枚 `<svg>` 星星,而非核取方塊 —— 星號沒有「已勾選」的
  * 既定觀感(核取方塊暗示的是一個表單欄位),按鈕加圖示才對得上「標記/收藏」這個
  * 動作的慣例(參照形態:leetcode 的星號)。
+ *
+ * `root` 是這一格畫在哪個容器裡(`elements.positions` 或 `elements.dailyPosition`,
+ * 見 `row()`),原樣轉給 `star()` 供切換後重新聚焦——理由見 `star()` 的說明。
  */
-function starCell(position, isStarred) {
+function starCell(position, isStarred, root) {
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'position-star';
   button.dataset.starred = String(isStarred);
   button.setAttribute('aria-pressed', String(isStarred));
   button.setAttribute('aria-label', starLabel(position.title || UNTITLED, isStarred));
-  button.addEventListener('click', () => star(position.id));
+  button.addEventListener('click', () => star(position.id, root));
 
   const icon = document.createElementNS(SVG_NS, 'svg');
   icon.setAttribute('viewBox', '0 0 24 24');
@@ -203,8 +238,19 @@ function starCell(position, isStarred) {
  * 與連結平行),「按標記不會跳進對局頁」(4.1)因此是版面的結果,標星同理。移動
  * 它們的位置**只能動 DOM 順序或視覺順序** —— 一旦被塞進連結裡,那條保證就得改由
  * `stopPropagation` 之類的補救維持,而那種補救擋不住鍵盤與中鍵。
+ *
+ * @param {object} position 要畫的題目。
+ * @param {{root?: Element, featured?: boolean}} [options]
+ *   `root` 是這個 `<li>` 最終會被放進哪個容器(`elements.positions` 或
+ *   `elements.dailyPosition`),預設 `elements.positions`——完成標記與星號的
+ *   事件處理器要靠它,重新渲染後才找得到正確的節點聚焦(見 `mark()`/`star()`)。
+ *   `featured` 為 true 時是**每日推薦題那一列**(`elements.dailyPosition` 專用):
+ *   標籤欄不畫題目原本的 `tags`,換成 `FEATURED_LABEL`(「每日一題」)——原本的
+ *   標籤(殺法名)等於直接劇透怎麼解,推薦題只提示「有這一題」,不提示解法。
+ *   難度、題號、局名、完成標記、星號完全不受影響,同一顆按鈕、同一份狀態,只是
+ *   多畫在這裡一次(見 `render()`)。
  */
-function row(position) {
+function row(position, { root = elements.positions, featured = false } = {}) {
   const item = document.createElement('li');
   item.className = 'position';
   // 題號是列與題目的對應,樣式與進入對局的連結(4.1)都靠同一個值。
@@ -220,14 +266,14 @@ function row(position) {
   // 命名為 `starButton` 而非 `star`:模組頂層另有一個切換標星的函式叫 `star`,
   // 同一個作用域裡撞名雖然不影響行為(閉包解析的是定義處的作用域,不是呼叫處),
   // 但讀起來容易誤會成同一樣東西。
-  const starButton = starCell(position, starred.has(position.id));
+  const starButton = starCell(position, starred.has(position.id), root);
 
   const toggle = document.createElement('input');
   toggle.type = 'checkbox';
   toggle.className = 'position-toggle';
   toggle.checked = done;
   toggle.setAttribute('aria-label', toggleLabel(title));
-  toggle.addEventListener('change', () => mark(position.id));
+  toggle.addEventListener('change', () => mark(position.id, root));
 
   // 題號是「數字 + 點」,不加「第…題」(參照形態:leetcode 的 `1. Two Sum`)。
   // **點是分隔符而不是贅字** —— 它把題號與局名分開,而題號欄本身仍是獨立一欄。
@@ -251,19 +297,30 @@ function row(position) {
 
   const tags = document.createElement('span');
   tags.className = 'position-tags';
-  const labels = Array.isArray(position.tags) ? position.tags : [];
-  if (labels.length === 0) {
-    // 沒有標籤時留佔位符號,那一欄才不會塌掉而讓整列看起來少了一項。
-    const none = document.createElement('span');
-    none.className = 'position-tag-none';
-    none.textContent = BLANK;
-    tags.append(none);
+  if (featured) {
+    // 防劇透:推薦題不畫題目原本的殺法名,只印一個說明「這是推薦」而已。
+    // **不是** `.position-tag`——這不是殺法標籤(不描述題目內容),用
+    // `position-tag-featured`(白底深字反色、方形小圓角)取代,靠對比最大化
+    // 抓住視線,不新增任何顏色(理由見 `list.css`)。
+    const chip = document.createElement('span');
+    chip.className = 'position-tag-featured';
+    chip.textContent = FEATURED_LABEL;
+    tags.append(chip);
   } else {
-    for (const label of labels) {
-      const chip = document.createElement('span');
-      chip.className = 'position-tag';
-      chip.textContent = label;
-      tags.append(chip);
+    const labels = Array.isArray(position.tags) ? position.tags : [];
+    if (labels.length === 0) {
+      // 沒有標籤時留佔位符號,那一欄才不會塌掉而讓整列看起來少了一項。
+      const none = document.createElement('span');
+      none.className = 'position-tag-none';
+      none.textContent = BLANK;
+      tags.append(none);
+    } else {
+      for (const label of labels) {
+        const chip = document.createElement('span');
+        chip.className = 'position-tag';
+        chip.textContent = label;
+        tags.append(chip);
+      }
     }
   }
 
@@ -275,24 +332,47 @@ function row(position) {
 }
 
 /**
+ * 目前篩選條件下該列出的題目。**不含每日推薦列** —— 那一列永遠畫 `daily`,
+ * 不吃篩選條件(見 `render()`),`#filter-bar` 的說明文字也是這麼寫的。
+ *
+ * 「我的最愛」比對的是已載入的 `starred` 集合,難度篩選則轉呼叫 `catalog.js`
+ * 既有、已測試的 `filterPositions()` —— 兩者判準的出處都不在本檔,理由見檔頭
+ * 「哪些題目該列出來不是這裡的決定」。
+ */
+function visiblePositions() {
+  if (filter === 'favorite') {
+    return positions.filter((position) => starred.has(position.id));
+  }
+  const difficulty = FILTER_DIFFICULTY[filter];
+  if (difficulty !== undefined) {
+    return filterPositions(positions, { difficulty });
+  }
+  return positions;
+}
+
+/**
  * 完成題數與總題數(3.5)。
  *
- * 已完成的算法是**完成集合與目前列出的題目取交集**,不是集合本身的大小。集合是
+ * `visible` 是目前篩選條件下列出的題目(`visiblePositions()` 的回傳值,由
+ * `render()` 算一次傳進來)—— 選了「簡單的題目」之後,這裡的 m/n 也只算簡單題目
+ * 那個子集合,與畫面上實際列出來的列數對得上。
+ *
+ * 已完成的算法是**完成集合與 `visible` 取交集**,不是集合本身的大小。集合是
  * 題號的集合而非列表的鏡像(3.7):裡面可能留著已經下架、或這份索引根本沒有的
  * 題號,直接數會出現「已完成 5 / 3 題」這種讀不通的數字。
  *
  * 還沒載到索引(載入中或失敗)時兩個數字都是佔位符號 —— 那時「總共幾題」還不知道,
  * 寫 0 等於宣稱題庫是空的,而那正是錯誤狀態最不該偽裝成的東西。
  */
-function renderProgress() {
+function renderProgress(visible) {
   if (loading || failed) {
     elements.completedCount.textContent = BLANK;
     elements.totalCount.textContent = BLANK;
     return;
   }
-  const done = positions.filter((position) => completed.has(position.id)).length;
+  const done = visible.filter((position) => completed.has(position.id)).length;
   elements.completedCount.textContent = String(done);
-  elements.totalCount.textContent = String(positions.length);
+  elements.totalCount.textContent = String(visible.length);
 }
 
 /**
@@ -306,11 +386,20 @@ function renderProgress() {
  *
  * 「題庫為空」與「索引壞掉」對使用者是兩件事,`catalog.js` 對認不得的回應形狀
  * 刻意拋錯而不是給一份空陣列,正是為了讓這裡分得開;合成一個畫面會讓「索引壞掉」
- * 看起來像「題庫沒有題目」,而重試也就無從談起。
+ * 看起來像「題庫沒有題目」,而重試也就無從談起。**空狀態比對的是 `positions`
+ * 而非篩選後的子集合** —— 篩選篩出零題是「這個篩選條件沒有東西可看」,與「題庫
+ * 真的沒有題目」是不同的情形,不共用同一則文案。
  */
 function render() {
-  elements.positions.replaceChildren(...positions.map(row));
-  renderProgress();
+  const visible = visiblePositions();
+  elements.positions.replaceChildren(...visible.map((position) => row(position)));
+  // `daily` 為 `null` 時傳空陣列給 `replaceChildren`,那一列乾脆不存在,不畫任何
+  // 佔位或錯誤文案——索引本身的錯誤/空狀態已經由 #error/#empty 處理過一次。
+  // **不吃篩選條件** —— 每日推薦題固定顯示今天推薦的那一題,見 `visiblePositions()`。
+  elements.dailyPosition.replaceChildren(
+    ...(daily ? [row(daily, { root: elements.dailyPosition, featured: true })] : []),
+  );
+  renderProgress(visible);
   elements.empty.hidden = loading || failed || positions.length > 0;
   elements.error.hidden = !failed;
 }
@@ -323,25 +412,28 @@ function render() {
  *
  * 重畫之後把焦點放回同一題的核取方塊:整份重畫會換掉原本那個節點,而以鍵盤操作的
  * 使用者會因此被丟回頁面開頭,一題也標不下去。
+ *
+ * `root` 是使用者實際點下去的那個容器(`elements.positions` 或
+ * `elements.dailyPosition`,由 `row()` 透過 `toggle` 的 `change` 監聽器傳進來)。
+ * 同一題現在可能同時畫在兩個容器裡(每日推薦題也在正常列表裡出現一次),重畫後
+ * 若永遠往 `elements.positions` 找,從推薦列按下去的使用者,焦點會被丟到下面
+ * 列表裡那一顆同題號的核取方塊,跟眼睛看的地方對不上。
  */
-function mark(id) {
+function mark(id, root = elements.positions) {
   completed = toggleCompleted(completed, id);
   render();
-  elements.positions
-    .querySelector(`li[data-id="${id}"] .position-toggle`)
-    ?.focus();
+  root.querySelector(`li[data-id="${id}"] .position-toggle`)?.focus();
 }
 
 /**
  * 切換一題的標星。與 `mark(id)` 同一套理由(新集合一律取自純函式的回傳值、重畫
- * 之後把焦點放回同一個按鈕),差別只在切換的是 `starred` 而非 `completed`。
+ * 之後把焦點放回同一個按鈕、`root` 決定焦點找回哪個容器),差別只在切換的是
+ * `starred` 而非 `completed`。
  */
-function star(id) {
+function star(id, root = elements.positions) {
   starred = toggleStarred(starred, id);
   render();
-  elements.positions
-    .querySelector(`li[data-id="${id}"] .position-star`)
-    ?.focus();
+  root.querySelector(`li[data-id="${id}"] .position-star`)?.focus();
 }
 
 /**
@@ -357,10 +449,14 @@ async function start() {
 
   try {
     positions = (await loadCatalog()).positions;
+    // 只在成功時算一次:同一組 (positions, 今天日期) 是決定性的,重試失敗後
+    // 再成功一次也不該換題——`positions` 沒變,推薦題也不該跟著跳。
+    daily = pickDailyPosition(positions, todayKey());
   } catch {
     // `catalog.js` 只給得出一個類別碼,而 Error Handling 對索引取不到只有一則
     // 說法與一個重試 —— 不為每種失敗各做一套 UI。
     positions = [];
+    daily = null;
     failed = true;
   } finally {
     loading = false;
@@ -372,6 +468,15 @@ async function start() {
 // 重試不重讀完成狀態:那份資料與這次失敗無關,重讀只會多一次沒有理由的儲存區存取。
 elements.retry.addEventListener('click', () => {
   start();
+});
+
+// 篩選條件變更:更新狀態、寫進 sessionStorage、整份重畫。不重取索引 —— 篩選
+// 在記憶體裡對同一份 `positions` 求值,不必也不該再發一次請求(與 `catalog.js`
+// 的 `filter()` 同一套理由)。
+elements.filterSelect.addEventListener('change', () => {
+  filter = elements.filterSelect.value;
+  saveFilter(filter);
+  render();
 });
 
 render();

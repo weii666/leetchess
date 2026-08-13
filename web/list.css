@@ -217,7 +217,16 @@ body {
   line-height: 1.6;
 }
 
-/* --- 頁首與完成計數 --------------------------------------------------- */
+/* --- 頁首 --------------------------------------------------------------- */
+
+/*
+ * 與 `main` 的區塊間距。`#progress` 原本在頁首內,靠它自己的 `margin-bottom:
+ * var(--gap)` 撐開這段距離;移到 `#filter-bar` 那一行(見 `index.html`)之後
+ * 頁首只剩 `h1`,少了那段間距,標題會貼著篩選列——這裡補回同一個值。
+ */
+header {
+  margin: 0 0 var(--gap);
+}
 
 h1 {
   margin: 0 0 4px;
@@ -225,9 +234,40 @@ h1 {
   line-height: 1.3;
 }
 
+/* --- 列 --------------------------------------------------------------- */
+
+/*
+ * 篩選列(漏斗圖示 + 下拉選單)與完成計數同一行,整份列表最上方。與下面的
+ * `#daily-position` 純粹是版面順序的先後,不是「管轄範圍」的先後——只有下拉
+ * 選單影響 `#positions` 那份列表,推薦列不受它左右(見 `index.html` 的說明)。
+ *
+ * `justify-content: space-between` 讓漏斗圖示與下拉選單貼左、`#progress` 貼右,
+ * 中間不需要的空隙留給瀏覽器算,不必自己湊一個 `margin-left` 的值。
+ *
+ * `margin-bottom` 取一個介於兩者之間的值(16px):比 `#daily-position`、
+ * `#positions` 內部的列距(8px)鬆,但比頁首到這一行的間距(`var(--gap)`,
+ * 24px)緊——篩選列與它管轄的列表仍需要一點呼吸空間跟下面的列分開,不能貼得
+ * 像列表本身的行距那麼近,但也不必比照頁首那種區塊與區塊之間的間距。
+ */
+#filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+/* 漏斗圖示 + 下拉選單分成一組,`#filter-bar` 的 `space-between` 才會把這一組
+ * 整個貼左、`#progress` 貼右,而不是把圖示、選單、計數三者各自撐開分佈。 */
+.filter-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* 完成題數與總題數(3.5)—— 整頁只有這一行數字,給它強調色。 */
 #progress {
-  margin: 0 0 var(--gap);
+  margin: 0;
   color: var(--text-muted);
   font-size: 14px;
 }
@@ -246,7 +286,107 @@ h1 {
   font-variant-numeric: tabular-nums;
 }
 
-/* --- 列 --------------------------------------------------------------- */
+.filter-icon {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  /* 中性色,不用 `--accent`——那個金色專屬星號(見檔頭)。 */
+  color: var(--text-muted);
+  fill: currentColor;
+}
+
+/*
+ * 下拉選單本身。**反色**(`--text` 底、`--page-bg` 字)—— 這個處理原本是
+ * `.position-tag-featured` 專屬,騰給推薦列的金色外框之後空了出來;篩選是
+ * 使用者到這頁第一個要操作的控制項,借同一套「全頁唯一亮底深字」的高對比
+ * 處理,視覺上讓它先被看到。
+ *
+ * `appearance: none` 換掉瀏覽器原生的下拉箭頭,自畫一個 —— 原生箭頭貼著右邊界
+ * 畫,右側留白因此比左側的文字留白窄一截,兩側對不齊。改用背景圖畫箭頭後,
+ * `background-position` 的 10px 就是右側留白,與左側 `padding-left` 的 10px
+ * 對稱。箭頭顏色是 `--page-bg` 的字面值(`#2b2b2b`)——data URI 裡引用不到
+ * CSS 變數,底色反轉之後箭頭也要跟著文字換成深色,才在白底上看得見。
+ */
+#filter-select {
+  appearance: none;
+  font: inherit;
+  font-size: 14px;
+  padding: 6px 30px 6px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background-color: var(--text);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%232b2b2b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='4 6 8 10 12 6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px;
+  color: var(--page-bg);
+  cursor: pointer;
+}
+
+/* 白底已經是全頁最亮的層次,hover 找不到更亮的地方去,方向因此反過來:
+ * 比 `--text` 略暗一階的灰,示意「這是 hover 態」而不必變得更亮。 */
+#filter-select:hover {
+  background-color: #dcdcdc;
+}
+
+#filter-select:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+/*
+ * 視覺上隱藏但螢幕閱讀器讀得到 —— `#filter-select` 的 `<label>` 用它:選單本身的
+ * `<option>` 文字已經說明了篩選對象,不必在畫面上再重複一次「篩選題目」四個字,
+ * 但無障礙名稱仍需要那個文字。標準 clip 隱藏寫法,而非 `display: none`(那樣
+ * 螢幕閱讀器也讀不到了)。
+ */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/*
+ * 每日推薦題(欄位文字為「每日一題」),`#filter-bar` 之下、`#positions` 之上的
+ * 獨立 `<ul>`,由 `list.js` 放 0 或 1 個 `<li class="position">`。推薦列複用整套
+ * 既有列樣式(`row()` 呼叫時 `featured: true` 只換標籤欄的內容),唯一的例外是
+ * 標籤欄那一格改用 `.position-tag-featured`(見該規則)。
+ *
+ * `margin-bottom` 與 `#positions` 內部的 `gap` 同值(8px),讓推薦列在視覺上像是
+ * 同一份列表的第一行,而不是另外分隔出來的區塊——這是「顯示在第一行」的原意。
+ */
+#daily-position {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+/*
+ * 推薦列的金色外框——**刻意借用星號的 `--accent`**,不是另開一個強調色。
+ * 金色因此同時代表「已標星」與「今天推薦」兩件事,兩者在視覺上都是「這題
+ * 特別」,語意重疊是使用者確認過可以接受的取捨,不是沒注意到的疏漏。
+ *
+ * 用 `outline` 而非 `border`:outline 不佔版面空間、不影響 `.position` 的
+ * grid 版面計算,`outline-offset` 讓它畫在既有邊界內側,視覺上與一般的
+ * `border` 沒有差別,但推薦列不會因此比下面的列多幾個 px、跟正常列對不齊。
+ *
+ * **線寬 1.5px、78% 不透明度**(`rgba(255, 212, 121, 0.78)`,即 `--accent` 的
+ * RGB 值降到 78% alpha)—— 原色實心的 2px 在掃視時搶過標籤與局名,但降到
+ * 1px、55% alpha 又太柔和,兩次調整後折衷在原本與那一版的中間值。降不透明度
+ * 而不是整個換成更淡的實色,是因為淡色實色在深色列底(`--panel-bg`)上會失真
+ * 變成另一個色相,而半透明的金色不論疊在哪個列底(一般或已完成)都還是
+ * 「變淡的金色」,不會跑掉。
+ */
+#daily-position .position {
+  outline: 1.5px solid rgba(255, 212, 121, 0.78);
+  outline-offset: -1.5px;
+}
 
 #positions {
   margin: 0;
@@ -263,15 +403,16 @@ h1 {
  * 欄界能對齊成直欄的唯一辦法。任何一欄改成 `auto`,它的寬度就會隨該列的內容變動,
  * 右緣立刻參差。
  *
- * ## 題號欄 2.2em
+ * ## 題號欄 3em
  *
- * 原本是 3em(為四位數題號「1234.」留餘裕),中途曾因為星號一度緊鄰題號左側而
- * 收窄到這個值(星號貼著題號時,窄一點的欄能讓右對齊的短題號留白少一點)。星號
- * 後來移到全列最右側(見下方「星號欄」),不再與題號相鄰,那個理由已經不成立,
- * 但 2.2em 本身仍是夠用的寬度,沒有理由再改寬:題庫目前收到第 308 題,三位數是
- * 實際上限;2.2em = 35.2px,實測 16px 粗體等寬數字下「999.」31.1px,仍有 4px
- * 餘裕。**代價還在**:題庫若真的收到第四位數(第 1000 題),這一欄會放不下而
- * 向右溢出,屆時要連同這則註解一起把欄寬調回四位數的餘裕。
+ * 為四位數題號「1234.」留餘裕:3em = 48px,實測 16px 粗體等寬數字下「1234.」
+ * 39.8px,仍有 8px 餘裕。題庫目前只收到第 308 題,三位數是實際上限,但收第二本
+ * 書之後題號還會繼續往上長,先把四位數的空間留好,不必等真的收到第 1000 題、
+ * 這一欄溢出了才回頭改。
+ *
+ * 中途曾因為星號一度緊鄰題號左側而收窄到 2.2em(星號貼著題號時,窄一點的欄能讓
+ * 右對齊的短題號留白少一點)。星號後來移到全列最右側(見下方「星號欄」),不再
+ * 與題號相鄰,那個理由已經不成立,因此改回這個留有四位數餘裕的寬度。
  *
  * ## 局名欄 8em
  *
@@ -303,7 +444,7 @@ h1 {
  */
 .position {
   display: grid;
-  grid-template-columns: 2.2em 8em minmax(0, 1fr) 5em auto 1.9em;
+  grid-template-columns: 3em 8em minmax(0, 1fr) 5em auto 1.9em;
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
@@ -607,6 +748,31 @@ h1 {
   background: var(--tag-bg);
   color: var(--text);
   font-size: var(--chip-font-size);
+  line-height: 1.6;
+}
+
+/*
+ * 每日推薦題的「每日一題」(`list.js` 的 `row()`,`featured: true` 時用這個
+ * class)。**與 `.position-tag` 同色**(`--tag-bg` 灰底、`--text` 白字)——這裡
+ * 曾經是反色的高對比 badge,但那是在「這一列唯一的特殊信號只有這顆 badge」的
+ * 前提下才需要的做法。整列現在多了金色外框(`#daily-position .position`,理由
+ * 見那裡),「這列不一樣」已經由外框負責,badge 不必再獨自扛住全部的注意力。
+ *
+ * **圓角維持方形小圓角(`--radius-sm`),不跟 `.position-tag` 一起改成藥丸。**
+ * 顏色與標籤一致之後,形狀是這顆 badge 唯一還留著的區分線索——「藥丸 = 描述
+ * 題目內容的殺法標籤,方形 = 非內容標籤」是這頁原本的形狀語言(見
+ * `.position-tag` 的圓角說明),這裡若也改藥丸,使用者掃到「每日一題」時會有
+ * 一瞬間以為那是某種殺法名稱。與 `#filter-select` 共用同一個 `--radius-sm`
+ * 不會混淆:兩者大小、顏色、所在情境都不同,`--radius-sm` 本來就是頁面「小
+ * 元件共用的圓角」token,不是專屬形狀。
+ */
+.position-tag-featured {
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--tag-bg);
+  color: var(--text);
+  font-size: var(--chip-font-size);
+  font-weight: 700;
   line-height: 1.6;
 }
 
