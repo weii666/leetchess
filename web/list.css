@@ -330,7 +330,7 @@ h1 {
 }
 
 #filter-select:focus-visible {
-  outline: 2px solid var(--text);
+  outline: 1px solid var(--text);
   outline-offset: 2px;
 }
 
@@ -376,15 +376,15 @@ h1 {
  * grid 版面計算,`outline-offset` 讓它畫在既有邊界內側,視覺上與一般的
  * `border` 沒有差別,但推薦列不會因此比下面的列多幾個 px、跟正常列對不齊。
  *
- * **線寬 1.5px、78% 不透明度**(`rgba(255, 212, 121, 0.78)`,即 `--accent` 的
- * RGB 值降到 78% alpha)—— 原色實心的 2px 在掃視時搶過標籤與局名,但降到
- * 1px、55% alpha 又太柔和,兩次調整後折衷在原本與那一版的中間值。降不透明度
- * 而不是整個換成更淡的實色,是因為淡色實色在深色列底(`--panel-bg`)上會失真
- * 變成另一個色相,而半透明的金色不論疊在哪個列底(一般或已完成)都還是
- * 「變淡的金色」,不會跑掉。
+ * **線寬 1.5px、100% 實色**(`var(--accent)`,兩次不透明度調整——78%、45%——
+ * 之後拍板回實色,線寬維持 1.5px 那一版)。`outline-offset` 是負值,這圈金邊
+ * 會疊在 `.position` 自己的左邊那條 3px 完成標記線(`border-left`,已完成時是
+ * `--text-muted` 灰)外側那一小段上;實色金邊會整段蓋過那條灰線,推薦列的
+ * 「已完成/未完成」因此改成靠背景色深淺(`--panel-bg` / `--panel-bg-strong`)
+ * 與核取方塊本身分辨,不再靠這條左邊線——這是拍板實色的已知取捨,不是沒注意到。
  */
 #daily-position .position {
-  outline: 1.5px solid rgba(255, 212, 121, 0.78);
+  outline: 1.5px solid var(--accent);
   outline-offset: -1.5px;
 }
 
