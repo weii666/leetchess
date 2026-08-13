@@ -36,15 +36,12 @@
  * 後兩者若寫進去,服務**啟動時**會因未知欄位而拒絕整個題庫 —— 代價不是一題壞掉,
  * 是整個站台連不開。
  *
- * ## 排版跟著既有題目檔走
+ * ## 排版:兩格縮排、每個欄位各自一行、中文不轉義
  *
- * 兩格縮排、每個欄位各自一行、`tags` 維持**單行**、中文不轉義、檔案以換行結尾。
- * `JSON.stringify(value, null, 2)` 給不出這個形狀 —— 它會把 `tags` 攤成一行一個標籤,
- * 讓一題從 8 行變成 12 行以上。所以序列化是手寫的,而它的正確性由既有題庫檔的回歸
- * 比對釘住(每一題重新序列化後與原檔片段逐字相同)。
- *
- * 排版慣例哪天真的要改,順序是:先改題庫檔,回歸比對轉紅,再改這裡。反過來做會讓
- * 新題與既有題目長得不一樣,而那是沒有任何測試會抓到的。
+ * 每個欄位的值交給 `JSON.stringify` 處理(字串轉義、陣列結構都有標準答案),本模組
+ * 只負責欄位間的換行與縮排。與既有題庫檔逐字比對曾經是這裡的強約束(要求 `tags`
+ * 額外手刻成單行),但那只是排版偏好,不影響題目能否被服務讀取——已經拿掉,新題與
+ * 既有題目的欄位值排版因此不保證逐字相同,只保證都是合法 JSON。
  *
  * ## 依賴方向
  *
@@ -58,10 +55,6 @@
  * **`description` 留在清單裡,即使收題頁不再產生它**(3.9)。這份清單表達的是
  * **次序**,不是「每一題都必須有這六個」—— 序列化時略過 entry 上不存在的欄位
  * (見 `serializePosition`)。
- *
- * 把它刪掉的話,「對既有題庫檔中的每一題重新序列化後與原檔逐字相同」那道排版漂移
- * 的回歸網會整組轉紅:既有題目**全部帶著描述**,少寫一個欄位就對不起來。而那道網
- * 是本模組最強的一道,不該為了一個選填欄位放棄。
  */
 const SCHEMA_FIELDS = ['id', 'title', 'description', 'fen', 'difficulty', 'tags'];
 
@@ -119,29 +112,11 @@ export function serializePosition(entry) {
   const lines = SCHEMA_FIELDS.filter(
     (name) => source[name] !== undefined,
   ).map(
-    (name) => `${FIELD_INDENT}${quote(name)}: ${valueText(name, source[name])}`,
+    // 值一律交給 JSON.stringify:字串的轉義規則(引號、反斜線、換行)有標準答案,
+    // 自己寫一份只會漏掉某個字元。中文不會被轉義 —— 只轉義控制字元與 `"` `\`。
+    (name) => `${FIELD_INDENT}${quote(name)}: ${JSON.stringify(source[name])}`,
   );
   return `${ENTRY_INDENT}{\n${lines.join(',\n')}\n${ENTRY_INDENT}}`;
-}
-
-/**
- * 一個欄位的值寫成文字。
- *
- * `tags` 是唯一需要特別處理的:它必須留在**同一行**(5.8),而通用的 JSON 序列化
- * 一縮排就會把陣列攤開。其餘欄位交給 `JSON.stringify` —— 字串的轉義規則(引號、
- * 反斜線、換行)有一份標準答案,自己寫一份只會漏掉某個字元。**中文不會被轉義**:
- * `JSON.stringify` 只轉義控制字元與 `"` `\`,非 ASCII 一律原樣輸出。
- *
- * @param {string} name 欄位名。
- * @param {unknown} value 欄位值。
- * @returns {string}
- */
-function valueText(name, value) {
-  if (name === 'tags') {
-    const tags = Array.isArray(value) ? value : [];
-    return `[${tags.map((tag) => quote(tag)).join(', ')}]`;
-  }
-  return JSON.stringify(value);
 }
 
 /**

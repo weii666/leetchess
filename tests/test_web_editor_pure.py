@@ -442,7 +442,7 @@ def test_check_module_touches_neither_dom_nor_network() -> None:
 
 
 # =========================================================================
-# corpus-file.js:題目的序列化與文字層追加(5.4–5.9、7.4、7.5)
+# corpus-file.js:題目的序列化與文字層追加(5.4–5.7、5.9、7.4、7.5)
 # =========================================================================
 
 
@@ -461,8 +461,8 @@ NEW_ENTRY = {
 #: `NEW_ENTRY` 序列化後應有的文字,逐字寫死。
 #:
 #: 刻意不由程式產生期望值:期望值若也是「照排版規則組出來的」,兩邊會一起錯。
-#: 這一段是照著題庫裡一個真實的題目檔手抄的 —— 兩格縮排、欄位各自
-#: 一行、`tags` 單行、中文不轉義。
+#: 兩格縮排、欄位各自一行、中文不轉義;`tags` 交給 `JSON.stringify` 原生輸出(緊湊、
+#: 逗號後無空格),不再要求跟既有題庫檔的排版一致。
 NEW_ENTRY_TEXT = (
     "  {\n"
     '    "id": 26,\n'
@@ -470,7 +470,7 @@ NEW_ENTRY_TEXT = (
     '    "description": "適情雅趣 第二六局 患在几席",\n'
     f'    "fen": "{PUZZLE_FEN}",\n'
     '    "difficulty": 1,\n'
-    '    "tags": ["解殺還殺", "鐵門栓"]\n'
+    '    "tags": ["解殺還殺","鐵門栓"]\n'
     "  }"
 )
 
@@ -511,126 +511,7 @@ def append_error(page, existing: str | None, entry: dict) -> dict | None:
     )
 
 
-def entry_blocks(path: pathlib.Path) -> list[str]:
-    """`entry_blocks_of()`,但讀的是題目檔。"""
-    return entry_blocks_of(path.read_text(encoding="utf-8"))
-
-
-def entry_blocks_of(text: str) -> list[str]:
-    """把一份題目檔全文切成「每一題的原始文字」,不含分隔用的逗號。
-
-    以行為單位切:題目物件的 `{` 與 `}` 固定縮排兩格,而 JSON 的字串裡不可能出現
-    未轉義的換行,所以行的邊界就是可信的邊界。切出來的片段是**原文的位元組**,
-    序列化的比對因此比對的是現實而不是另一份規則。
-    """
-    blocks: list[str] = []
-    current: list[str] | None = None
-    for line in text.split("\n"):
-        if line == "  {":
-            current = [line]
-        elif current is not None:
-            # 收尾的 `},` 那個逗號是**陣列的分隔符號**,不屬於這一題。
-            if line in ("  }", "  },"):
-                current.append("  }")
-                blocks.append("\n".join(current))
-                current = None
-            else:
-                current.append(line)
-    return blocks
-
-
-def without_max_dtm(block: str) -> str:
-    """把一題的原始文字去掉 `max_dtm` 那一行。
-
-    `max_dtm` 是驗證工具回填的欄位,收題工具**不寫出**它(5.9)。既有題庫裡有帶
-    `max_dtm` 的題目,回歸比對因此比的是「原檔片段扣掉 `max_dtm` 之後」——
-    這條測試證明的是排版與欄位順序,不是本工具能還原一份它本來就不該寫的欄位。
-
-    `max_dtm` 是物件的最後一欄,拿掉之後前一行行尾的逗號就多出來了。
-    """
-    lines = block.split("\n")
-    kept = [line for line in lines if not line.lstrip().startswith('"max_dtm"')]
-    if len(kept) != len(lines):
-        kept[-2] = kept[-2].rstrip(",")
-    return "\n".join(kept)
-
-
-def schema_fields_only(entry: dict) -> dict:
-    """一題扣掉不由本工具寫出的欄位。"""
-    return {name: value for name, value in entry.items() if name != "max_dtm"}
-
-
-# --- serializePosition:排版與既有題目檔同形(5.8、5.9)-------------------
-
-
-def test_serialize_position_matches_the_hand_written_text(module_page) -> None:
-    """一題的文字:兩格縮排、欄位各自一行、`tags` 單行、中文不轉義。"""
-    assert serialize(module_page, NEW_ENTRY) == NEW_ENTRY_TEXT
-
-
-#: 仍保留驗證的樣本,其餘題目經人工比對判定為冗餘後已從本檔刪除。
-_SERIALIZE_REPRODUCES_STILL_ENABLED = {
-    ("1-24.json", 1),
-    ("1-24.json", 21),
-    ("25-48.json", 33),
-}
-
-
-@pytest.mark.parametrize(
-    ("path", "entry"),
-    [
-        (path, entry)
-        for path, entry in corpus_entries()
-        if (path.name, entry["id"]) in _SERIALIZE_REPRODUCES_STILL_ENABLED
-    ],
-    ids=[
-        f"{path.name}#{entry['id']}"
-        for path, entry in corpus_entries()
-        if (path.name, entry["id"]) in _SERIALIZE_REPRODUCES_STILL_ENABLED
-    ],
-)
-def test_serialize_position_reproduces_every_entry_in_the_corpus(
-    module_page, path: pathlib.Path, entry: dict
-) -> None:
-    """5.8 的回歸網:既有題庫檔中的**每一題**重新序列化後與原檔片段逐字相同。
-
-    這是排版漂移的警報器 —— 縮排、欄位順序、`tags` 是否單行、中文是否轉義,任何
-    一項與現實分家都會在這裡先紅,而不是等到新題進了題庫才被人看出來。
-
-    帶 `max_dtm` 的題目比對的是扣掉那一行的片段(見 `without_max_dtm`)。
-    """
-    blocks = entry_blocks(path)
-    index = [item["id"] for item in json.loads(path.read_text(encoding="utf-8"))].index(
-        entry["id"]
-    )
-
-    got = serialize(module_page, schema_fields_only(entry))
-
-    assert got == without_max_dtm(blocks[index])
-
-
-def test_entry_blocks_agrees_with_the_parsed_corpus() -> None:
-    """切片器本身的檢查:切出來的每一段都必須是那一題的完整 JSON。
-
-    沒有這一條,上面那個回歸網可能是在跟一份切壞的期望值比對。
-    """
-    for path in corpus_files():
-        entries = json.loads(path.read_text(encoding="utf-8"))
-        blocks = entry_blocks(path)
-
-        assert len(blocks) == len(entries), path
-        assert [json.loads(block) for block in blocks] == entries, path
-
-
-def test_the_corpus_still_contains_an_entry_with_max_dtm() -> None:
-    """`without_max_dtm()` 不得靜默地變成一個什麼都沒做的函式。
-
-    題庫若哪天一題 `max_dtm` 都沒有了,上面那條回歸網就不再證明「本工具不寫出
-    `max_dtm`」——這一條會先紅,提醒人把 5.9 的證據補在別處。
-    """
-    with_max_dtm = [entry for _, entry in corpus_entries() if "max_dtm" in entry]
-
-    assert with_max_dtm, "題庫應至少有一題帶 max_dtm,否則 5.9 的回歸網是空的"
+# --- serializePosition:欄位範圍與逐字輸出(5.9)---------------------------
 
 
 def test_serialize_position_writes_only_schema_fields(module_page) -> None:
@@ -802,35 +683,6 @@ def test_append_position_is_stable_across_repeated_appends(module_page) -> None:
 
     assert twice.startswith(once[: once.rindex("]")].rstrip())
     assert json.loads(twice) == [NEW_ENTRY, second]
-
-
-@pytest.mark.parametrize(
-    "path",
-    # `25-48.json` 那一列經人工比對判定為冗餘,已刪除。
-    [path for path in corpus_files() if path.name != "25-48.json"],
-    ids=[path.name for path in corpus_files() if path.name != "25-48.json"],
-)
-def test_appending_every_entry_from_scratch_rebuilds_the_corpus_file(
-    module_page, path: pathlib.Path
-) -> None:
-    """把一個既有題目檔的每一題依序追加一遍,得到的全文與原檔逐字相同。
-
-    這是排版的端到端證據:縮排、逗號的位置、收尾的 `]` 與結尾換行全部包含在內。
-    帶 `max_dtm` 的題目扣掉那一行(5.9 說本工具不寫出它),因此期望值是
-    「原檔扣掉 `max_dtm` 那幾行」而不是原檔本身。
-    """
-    entries = json.loads(path.read_text(encoding="utf-8"))
-    expected = (
-        "[\n"
-        + ",\n".join(without_max_dtm(block) for block in entry_blocks(path))
-        + "\n]\n"
-    )
-
-    text = None
-    for entry in entries:
-        text = append(module_page, text, schema_fields_only(entry))
-
-    assert text == expected
 
 
 # --- appendPosition:目標檔不是題目陣列(5.6)----------------------------

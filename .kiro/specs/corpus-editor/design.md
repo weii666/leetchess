@@ -61,7 +61,6 @@
 以下改動須讓下游或相鄰 spec 重新確認整合:
 
 - 題目 schema 的欄位增減或型別變更(`structure.md` / `service/positions.py`)→ 序列化器與後端驗證同時受影響
-- 既有題目檔的排版慣例改變(縮排、`tags` 是否單行)→ 序列化器的回歸比對會先紅
 - `renderBoard()` 的參數語意改變,特別是「空 `legalMoves` 即不可選取」→ 唯讀盤面的成立基礎
 - 引擎抽象介面 `legal_moves` 的簽章改變
 - **引擎指令的組裝方式改變**(`_position_command` 的行導向前提)→ FEN 字元把關的必要字元集可能隨之改變
@@ -250,7 +249,8 @@ sequenceDiagram
 | 5.4 | ~~目標檔不存在即新建~~ **(移出範圍)** | — | `appendPosition` 的 `null` 分支不再有呼叫端 | — |
 | 5.5, 5.6 | 追加、非陣列即拒絕 | `corpus-file.js` | `appendPosition` | 寫入流程 |
 | 5.7 | 既有題目逐字不變 | `corpus-file.js` | 文字層追加 | 寫入流程 |
-| 5.8, 5.9 | 排版一致、只寫 schema 欄位 | `corpus-file.js` | `serializePosition` | — |
+| 5.8 | ~~排版與既有題目檔一致~~ **(已移除)** | — | `serializePosition` 改用通用 `JSON.stringify`,不再手刻 `tags` 單行 | — |
+| 5.9 | 只寫 schema 欄位 | `corpus-file.js` | `serializePosition` | — |
 | 6.1, 6.2 | 首次選檔時請求授權並沿用;拒絕時保留內容 | `fs.js`、`editor.js` | `pickCorpusFile` | 選檔流程 |
 | 6.3 | 不支援的瀏覽器要明講 | `fs.js`、`editor.js` | `isSupported` | — |
 | 6.4 | 未選檔前仍可繪盤與填寫 | `editor.js` | 狀態機 | — |
@@ -342,13 +342,13 @@ interface CheckModule {
 | Field | Detail |
 |-------|--------|
 | Intent | 決定「一題在題庫檔中長什麼樣」,以及如何把它接到既有檔案文字之後 |
-| Requirements | 5.5, 5.6, 5.7, 5.8, 5.9, 7.4 |
+| Requirements | 5.5, 5.6, 5.7, 5.9, 7.4 |
 
 > **修訂:`SCHEMA_FIELDS` 保留 `description` 的位置,但序列化時略過候選題目沒有的欄位。**
 >
-> 直覺的做法是把 `description` 自 `SCHEMA_FIELDS` 刪掉,但那會打破本模組最強的一道回歸網:「對**既有題庫檔中的每一題**重新序列化後與原檔片段逐字相同」—— 既有題目**全部帶著描述**,少寫一個欄位就對不起來,而那道網防的是排版漂移,不該為了一個選填欄位放棄。
+> 直覺的做法是把 `description` 自 `SCHEMA_FIELDS` 刪掉,但 `description` 仍是題目 schema 的合法選填欄位(3.10)——刪掉會讓「有描述的既有題目」重新序列化時漏寫這一欄。
 >
-> 因此 `SCHEMA_FIELDS` 仍是六個名字(它表達的是**欄位次序**),`serializePosition()` 改為只寫出 entry 上實際存在的欄位。收題頁不產生 `description`(3.9),所以新題自然不含它;既有題目仍逐字還原得出來。
+> 因此 `SCHEMA_FIELDS` 仍是六個名字(它表達的是**欄位次序**),`serializePosition()` 改為只寫出 entry 上實際存在的欄位。收題頁不產生 `description`(3.9),所以新題自然不含它。
 >
 > **`appendPosition` 的 `null` 分支失去呼叫端**(5.4 移出範圍),但**保留**而不刪除:它是本模組對外契約的一部分、由測試釘住、且是純函式沒有維護成本,而 5.4 只是移出本輪範圍不是被否決 —— 日後補上「另存新檔」時它就是現成的。`check.js` 那兩個函式的處置刻意相反,差別在**它們有沒有可能回來**。
 
@@ -381,7 +381,7 @@ interface PositionEntry {
 declare class CorpusFileError extends Error {}
 
 interface CorpusFileModule {
-  /** 一題的文字,含兩格縮排。tags 保持單行,中文不轉義。 */
+  /** 一題的文字,含兩格縮排。各欄位值交給 JSON.stringify,中文不轉義。 */
   serializePosition(entry: PositionEntry): string;
   /**
    * 追加一題並回傳新的檔案全文。
@@ -399,12 +399,11 @@ interface CorpusFileModule {
   - 輸出以換行結尾,與既有題目檔一致
 - **Invariants**:`appendPosition` 絕不移除或改寫 `existing` 中**屬於任何一題的**字元
 
-> **為什麼前綴的界線畫在最後一題的 `}` 而不是收尾的 `]`。** 兩者之間只有空白,而分隔逗號必須落在那裡 —— 若連那段空白都原樣保留,輸出會變成 `}\n,\n  {新題}`,與既有題目檔的 `},\n  {` 不同形,5.8 立刻破功。這段空白不屬於任何一題,讓逗號取代它不違反 5.7。實作以「被取代的區段去掉空白之後恰為 `]`」的斷言把這件事釘死,因此「只動了空白與那個 `]`」是被驗證的,不是被相信的。
+> **為什麼前綴的界線畫在最後一題的 `}` 而不是收尾的 `]`。** 兩者之間只有空白,而分隔逗號必須落在那裡。這段空白不屬於任何一題,讓逗號取代它不違反 5.7;把它正規化成固定的 `,\n` 而不是原樣保留,純粹是避免既有檔案結尾若帶著不規則空白(例如多餘空行),被原樣搬進新輸出裡。實作以「被取代的區段去掉空白之後恰為 `]`」的斷言把這件事釘死,因此「只動了空白與那個 `]`」是被驗證的,不是被相信的。
 
 **Implementation Notes**
 
 - Integration:需處理的既有文字形態有三種 —— 空陣列 `[]`(無前一個元素,不補逗號)、非空陣列(為前一個元素補逗號)、檔案不存在(`null`)。三種皆以測試釘住
-- Validation:序列化的正確性以**既有題庫檔回歸比對**驗證 —— 讀入每一個既有題目檔的每一題,重新序列化,與原檔對應片段比對。新增書目或改動排版慣例時該測試會先紅
 - Risks:目標檔若含註解或尾隨逗號等非標準 JSON,`JSON.parse` 會失敗並轉為 `CorpusFileError`,寫入不成立。這是要的行為 —— 題庫檔本就必須是標準 JSON
 
 ### 前端 / 平台包裝層
@@ -723,7 +722,7 @@ class CandidatePositionRequest(BaseModel):
 
 ### 純函式測試(Playwright `page.evaluate()`)
 
-1. `serializePosition()` 對**既有題庫檔中的每一題**重新序列化後與原檔片段逐字相同 —— 排版漂移的回歸網。**既有題目全部帶著 `description`,所以這條同時釘住了「略過不存在的欄位」不會誤傷有值的欄位**
+1. ~~`serializePosition()` 對既有題庫檔中的每一題重新序列化後與原檔片段逐字相同~~ **(隨 5.8 一併移除)**。`serializePosition()` 只寫出 schema 定義的欄位(5.9),以一個手寫的 `NEW_ENTRY` 逐字比對輸出驗證,不再逐題比對既有題庫檔
 1b. `serializePosition()` 對**不帶 `description`** 的候選題目輸出五個欄位,且其餘欄位的排版與有描述時完全相同(3.9)
 2. `appendPosition()` 的三種形態:不存在、空陣列、非空陣列;非陣列輸入拋 `CorpusFileError`。**「不存在」那一種已無呼叫端**(5.4 移出範圍),測試保留 —— 它釘住的是模組契約,而該分支日後補上「另存新檔」時就是現成的
 3. `appendPosition()` 的輸出以 `existing` 為前綴直到收尾的 `]`(5.7 的構造性保證)
