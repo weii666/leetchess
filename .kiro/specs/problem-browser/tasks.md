@@ -126,7 +126,7 @@
 
 ## 範圍說明
 
-本任務計畫涵蓋 requirements.md 的 Requirement 1、3、4、5,以及 Requirement 6 的 6.2。**Requirement 2(篩選)已部分接上介面(見下方說明),6.1 / 6.3(行動裝置版面)仍在下方 Backlog。**
+本任務計畫涵蓋 requirements.md 的 Requirement 1、3、4、5,以及 Requirement 6 的 6.2、6.3(6.3 併入 3.2,見 requirements.md)。**Requirement 2(篩選)已部分接上介面(見下方說明)。6.1(行動裝置版面)原在下方 Backlog,已於後續補上實作,見 Implementation Notes。**
 
 > **篩選介面補述(晚於本檔其餘內容,題庫成長後接續)。** 題庫規模成長、光靠捲動已不易找到題目後,在 `web/index.html` 加了一個下拉選單(`#filter-bar`),接上 `web/catalog.js` 既有、原本只被測試呼叫的 `filterPositions()` 做**難度篩選**,並額外加了一個原始需求沒有的「我的最愛」類別(比對 `web/starred.js` 的標星集合)。**標籤與出處篩選、多條件同時生效(AND)、篩選結果為空時的提示與一鍵清除都還沒做**——目前是單一下拉、一次只能選一個類別,見 requirements.md Requirement 2 的最新註記。
 >
@@ -142,10 +142,6 @@
 - **列表上的出處(自 1.2 移出)** —— 出處已改由對局介面顯示,列表只留題號、局名、難度、標籤。
   - **觸發條件:題庫收錄第二本書。** 屆時同名或相似的排局在列表上分不出是哪一本的,而題號雖然唯一卻看不出書名。目前只有《適情雅趣》一本,不成問題。
   - 屆時不必回頭改資料層:`/api/catalog` 與 `catalog.js` 一直都帶著 `source` 欄位,只是列表沒畫。
-
-- **行動裝置適配(原 5.1 的一半,6.1 / 6.3)** —— 行動裝置直向畫面完整呈現列表且**不需橫向捲動**。
-  - **原 5.1 已拆開**:桌面基本版面與「已完成/未完成可辨」併入 3.2(那是可用性底線,不是裝飾),Backlog 只留行動裝置適配。`web/list.css` 因此在 3.2 就會建立。
-  - 既有 `web/style.css` 的行動裝置處理(web-play-runtime 5.1)可直接借鑑,**尤其那一輪的教訓:被當成 load-bearing 而寫進註解的 `min-width: 0` 經突變證實完全無作用,真正生效的是 `width: 100%`。** 抄樣式時連同註解一起抄會把錯誤的因果一併帶過來。
 
 - **對局介面(`play.html`)加入標星入口**(來自一輪風格盤點,使用者決定先不做)—— 目前只有列表頁能標星,解題解到一半想收藏得先返回列表頁,兩頁的收藏動線不連貫。
   - `web/starred.js` 已是純資料模組(localStorage,不碰 DOM、不 import 其他 web 模組),`web/list.js` 的 `STAR_PATH` 與 `.position-star` 系列樣式可直接複用,不必重新設計星號的視覺與資料層 —— 缺的只是 `web/app.js` 掛一顆按鈕、`style.css` 補一組對應樣式。
@@ -289,3 +285,43 @@
   - `test_the_row_number_is_just_the_number` → `test_the_row_number_reads_as_a_numbered_entry`:期望值自 `"1"` 改為 `"1."`。**這是規格變更** —— requirements 1.3 已改寫,點是分隔符而非贅字;「不加第…題」那一半原封不動保留。
   - 列的結構契約註解:欄序與 DOM 順序一併更新。
   - 其餘一條未改。`test_the_completion_toggle_stays_outside_the_link` 與 `test_the_completion_toggle_sits_at_the_far_right_of_the_row` 皆維持綠 —— 欄序調換沒有動到核取方塊與 `<a>` 的結構關係。
+
+### 行動裝置適配補做(6.1,原 Backlog 項目)
+
+使用者回報手機瀏覽列表頁時標籤逐字斷行、每題行高參差。根因:`.position` 六欄
+固定寬度 grid 在手機寬度下需要約 442px 才夠(五個固定欄 + gap + 內距),市面
+手機直向視窗多在 360–430px,唯一彈性的標籤欄被壓到接近 0,`.position-tag`
+沒有 `white-space: nowrap` 保護,中文字逐字斷行。
+
+- **斷點 600px**:在 442px 危險下界之外留明顯餘裕,且斷點兩側(600px / 601px)
+  都驗算過標籤欄仍有足夠寬度,不是卡在邊緣的數字。不借用 `--list-max-width`
+  (880px)——那個變數管「太寬」,這裡管「太窄」,兩者無數學關係。
+- **解法是 `.position` 從 `display: grid` 換成 `flex; flex-wrap: wrap`,不用
+  `grid-template-areas` 或 `order`**:後兩者都需要對子元素逐一指定視覺位置,
+  等於另立一份與 DOM 序(`list.js` 的 `append()` 順序)平行、需要手動同步的
+  對照表,即使不是 `order` 屬性,也是檔頭「欄序即 DOM 序」要提防的同一種風險。
+  flex 完全不需要這份對照,純依可用寬度自然折行。
+- **突變驗證發現一個容易誤判的地方,值得記下來給下一個維護者**:逐字斷行的
+  修復其實來自 `display: flex` 本身(flex 預設依內容 min-content 排列,不像
+  grid 的 `minmax(0, 1fr)` 允許壓到 0),**不是** `.position-tags` 那條
+  `flex-basis: 100%`。原本以為兩者是同一件事,實測拿掉 `flex-basis: 100%`
+  之後,`test_tags_wrap_as_whole_pills_not_character_by_character` 依然全綠
+  ——標籤仍橫排,只是與局名擠在同一行。`flex-basis: 100%` 真正做的是**強迫
+  標籤獨佔一行**,讓局名字數不一時標籤欄不會忽而同行、忽而換行,列的節奏才
+  統一。這條規則因此另外配了一條測試守著
+  (`test_tags_occupy_their_own_full_width_row`),不能只靠前一條測試順便帶過。
+- **`justify-self: end` 在 flex 容器裡對 flex 項目完全不生效**(規範規定被
+  忽略,不是被覆寫)。`.position-difficulty`、`.position-star` 桌面版靠它
+  貼右緣,寬螢幕的 grid 版面仍需要,保留不刪;斷點內另外對難度加
+  `margin-left: auto` 補回「難度 + 完成標記 + 星號」貼右的效果。
+- **已知的結構性代價**:`.position-title` 的 `align-self: stretch` 在桌面版
+  讓局名連結的點擊區是整列全高,三行版面下一個 flex 項目只能 stretch 到它
+  所在那條 flex line,點擊區因此縮到約三分之一。這是折成三行無法避免的代價,
+  不是遺漏。
+- 新增 `tests/test_web_list_layout.py`,沿用 `test_web_list.py` 的
+  `list_page` / `open_list` 與 `test_web_layout.py` 的 `MOBILE_PORTRAIT` /
+  `DESKTOP`。「視覺順序即 DOM 序」那條測試**比的是垂直中心而非 `top`**——
+  同一行內 `align-items: center` 讓不同高度的元素(28px 的星號按鈕、13px 的
+  難度文字)天生有數 px 的 `top` 落差,直接比 `top` 會把正常的同行落差誤判成
+  順序顛倒;比中心並留一點容差(`_ROW_JITTER_TOLERANCE_PX`),同行落差(個位數
+  px)與跨行落差(整行高度,數十 px)差距懸殊,不會放過真正的順序顛倒。

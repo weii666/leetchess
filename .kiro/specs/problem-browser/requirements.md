@@ -174,6 +174,6 @@ problem-browser 是產品的入口 —— 使用者開啟服務先看到題庫�
 
 #### Acceptance Criteria
 
-1. The 題庫瀏覽介面 shall 在行動裝置的直向畫面上完整呈現列表,不需橫向捲動。 —— **Backlog(本輪不實作)**
+1. The 題庫瀏覽介面 shall 在行動裝置的直向畫面上完整呈現列表,不需橫向捲動。 —— **已實作**(`web/list.css` 的「行動裝置適配」區塊,`.position` 於 ≤600px 由六欄 grid 換成 flex column-wrap;`tests/test_web_list_layout.py` 驗證)
 2. The 題庫瀏覽介面 shall 以繁體中文呈現所有使用者可見文字。
 3. The 題庫瀏覽介面 shall 使已完成與未完成的題目在視覺上可區分。 —— **本輪仍實作**,併入任務 3.2。這是可用性底線而非行動裝置議題:看不出哪些做過,完成標記整個功能就沒有意義。
