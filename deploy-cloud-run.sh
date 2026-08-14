@@ -2,9 +2,9 @@
 # 部署/更新 leetchess 的 Cloud Run 服務。
 #
 # 預設路徑(不加任何 flag):`gcloud run services update` —— 只更新資源設定
-# (memory / cpu / 環境變數 / 公開存取),沿用**目前正在跑的 image**,完全不進
-# Cloud Build、不推新 image,對 Artifact Registry 的儲存用量是 0。日常調參數
-# (例如改 LEETCHESS_POOL_SIZE、MEMORY)都走這條路。
+# (memory / cpu / max-instances / 環境變數 / 公開存取),沿用**目前正在跑的
+# image**,完全不進 Cloud Build、不推新 image,對 Artifact Registry 的儲存用量
+# 是 0。日常調參數(例如改 LEETCHESS_POOL_SIZE、MEMORY、MAX_INSTANCES)都走這條路。
 #
 # --build:改用 `gcloud run deploy --source .`,交給 Cloud Build 重新建置整個
 # image 並推新版本到 Artifact Registry —— 只有 Dockerfile 或會進 image 的內容
@@ -42,6 +42,7 @@ MEMORY="${MEMORY:-1Gi}"
 CPU="${CPU:-1}"
 ALLOW_UNAUTHENTICATED="${ALLOW_UNAUTHENTICATED:-true}"
 LEETCHESS_POOL_SIZE="${LEETCHESS_POOL_SIZE:-1}"
+MAX_INSTANCES="${MAX_INSTANCES:-3}"
 
 BUILD=0
 for arg in "$@"; do
@@ -59,6 +60,7 @@ COMMON_FLAGS=(
   --region="$REGION"
   --memory="$MEMORY"
   --cpu="$CPU"
+  --max-instances="$MAX_INSTANCES"
   --set-env-vars="LEETCHESS_POOL_SIZE=${LEETCHESS_POOL_SIZE}"
   --quiet
 )
