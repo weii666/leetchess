@@ -1,0 +1,24 @@
+# 本機開發產物,建置時不需要,帶進 build context 只會拖慢傳輸。
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+mutants/
+
+# 版本控制與工具設定,與映像內容無關。
+.git/
+.kiro/
+.claude/
+
+# 測試與探索性程式碼,不進正式映像。
+tests/
+poc/
+
+# 引擎 binary / NNUE / 壓縮包:本機開發用的是 macOS arm64 版(engine/.gitignore
+# 排除進 git 的同一批檔案),與 Dockerfile 的 engine 階段在容器內重新 fetch 的
+# Linux 版不相容。留在 build context 裡沒有用處,誤 COPY 進映像更是直接壞掉,
+# 見 Dockerfile 開頭的說明。
+engine/pikafish
+engine/pikafish.nnue
+engine/*.7z
+engine/.extract/

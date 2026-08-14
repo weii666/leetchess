@@ -11,3 +11,7 @@ __pycache__/
 
 # mutmut 變異測試的專案副本(每次 `mutmut run` 重建)
 mutants/
+
+# deploy-cloud-run.sh 的本機部署設定,內含 GCP_PROJECT_ID —— 帳單/資源歸屬的識別碼,
+# 不進版本庫。範本見 env.example。
+.env
