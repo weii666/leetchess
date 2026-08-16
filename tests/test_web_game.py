@@ -334,6 +334,62 @@ def test_every_request_resends_the_whole_sequence(game_page, api_calls) -> None:
     ]
 
 
+# --- 黑方剛落子的起訖格(供 board.js 畫上一手標示用)------------------------
+
+
+def test_last_black_move_is_null_before_any_move(game_page) -> None:
+    """尚未開局時沒有黑方剛走的一手。"""
+    snapshot = start(game_page)
+
+    assert snapshot["lastBlackMove"] is None
+
+
+def test_last_black_move_appears_after_black_replies(game_page) -> None:
+    """黑方應手完成後,`lastBlackMove` 就是黑方那一手的 UCI。"""
+    start(game_page)
+    route_black_move(game_page, replies(black_reply(move="e9d9")))
+
+    call(game_page, "play", "d8d9")
+    snapshot = state(game_page)
+
+    assert snapshot["moves"] == ["d8d9", "e9d9"]
+    assert snapshot["lastBlackMove"] == "e9d9"
+
+
+def test_last_black_move_is_null_while_waiting_for_the_reply(game_page) -> None:
+    """使用者剛下、黑方尚未回應時,那格是使用者自己走的,不該標成黑方。"""
+    start(game_page)
+    hang(game_page)
+    game_page.evaluate("() => { window.pending = window.game.play('d8d9'); }")
+    game_page.wait_for_timeout(150)
+
+    assert state(game_page)["lastBlackMove"] is None
+
+
+def test_last_black_move_is_null_when_the_users_move_ends_the_game(game_page) -> None:
+    """紅方這手直接將死黑方、沒有應手時,沒有黑方剛走的一手可標。"""
+    start(game_page)
+    route_black_move(game_page, replies(FINAL_REPLY))
+
+    call(game_page, "play", "d8d9")
+    snapshot = state(game_page)
+
+    assert snapshot["moves"] == ["d8d9"]
+    assert snapshot["lastBlackMove"] is None
+
+
+def test_last_black_move_clears_on_reset(game_page) -> None:
+    """重來之後標示要跟著消失 —— 它完全是 `moves` 的衍生值。"""
+    start(game_page)
+    route_black_move(game_page, replies(black_reply(move="e9d9")))
+    call(game_page, "play", "d8d9")
+    assert state(game_page)["lastBlackMove"] == "e9d9"
+
+    call(game_page, "reset")
+
+    assert state(game_page)["lastBlackMove"] is None
+
+
 # --- 終局:只看回應中的結束旗標 -------------------------------------------
 
 

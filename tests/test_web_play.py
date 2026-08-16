@@ -241,6 +241,26 @@ def marked_squares(page) -> set[str]:
     }
 
 
+def thickened_piece_squares(page) -> set[str]:
+    """邊框被加粗成上一手終點標示(`stroke-width` 為 4)的每顆子所在的格。"""
+    discs = page.evaluate(
+        """() => [...document.querySelectorAll('#board .piece')].map(piece => {
+          const disc = piece.querySelector('circle.piece-disc');
+          return {
+            x: Number(disc.getAttribute('cx')),
+            y: Number(disc.getAttribute('cy')),
+            strokeWidth: Number(disc.getAttribute('stroke-width')),
+          };
+        })"""
+    )
+    return {
+        f"{chr(97 + round((disc['x'] - MARGIN) / CELL))}"
+        f"{9 - round((disc['y'] - MARGIN) / CELL)}"
+        for disc in discs
+        if disc["strokeWidth"] == 4
+    }
+
+
 # --- 側欄 ---------------------------------------------------------------
 
 
@@ -386,6 +406,50 @@ def test_the_history_grows_one_row_per_pair_of_moves(play_page) -> None:
     wait_for_moves(play_page, 4)
 
     assert move_rows(play_page) == [("俥六進一", "將5平4"), ("俥四進一", "將4平5")]
+
+
+def test_black_reply_thickens_the_moved_pieces_border(play_page) -> None:
+    """黑方應手完成後,那顆子的邊框要加粗(app.js 把 lastBlackMove 接到
+    board.js 的 lastMove)。只標終點,起點不畫任何東西。"""
+    open_game(play_page, [black_reply(move="e9d9")])
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_moves(play_page, 2)
+
+    assert thickened_piece_squares(play_page) == {"d9"}
+
+
+def test_no_last_move_marker_before_black_has_replied(play_page) -> None:
+    """開局尚未有黑方應手時沒有子的邊框被加粗。"""
+    open_game(play_page)
+
+    assert thickened_piece_squares(play_page) == set()
+
+
+def test_last_move_marker_is_absent_while_waiting_for_the_reply(play_page) -> None:
+    """使用者剛下、黑方尚未回應時,不該把使用者自己的那手誤標成黑方的。"""
+    open_game(play_page)
+    hang_black_move(play_page)
+
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    play_page.wait_for_timeout(150)
+
+    assert thickened_piece_squares(play_page) == set()
+
+
+def test_last_move_marker_clears_after_reset(play_page) -> None:
+    """重來之後標示要跟著消失。"""
+    open_game(play_page, [black_reply(move="e9d9")])
+    click_square(play_page, "d8")
+    click_square(play_page, "d9")
+    wait_for_moves(play_page, 2)
+    assert thickened_piece_squares(play_page) == {"d9"}
+
+    play_page.locator("#reset").click()
+
+    assert thickened_piece_squares(play_page) == set()
 
 
 def test_clicking_an_unmarked_square_changes_nothing(play_page) -> None:

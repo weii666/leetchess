@@ -65,6 +65,9 @@ const HIGHLIGHT = '#2e86de';
 const DOT_FILL = 'rgba(46, 134, 222, 0.55)';
 const DOT_RING = 'rgba(46, 134, 222, 0.85)';
 
+/** 上一手終點標示的邊框色 —— 中性灰,比子本身的黑色輕,加粗了也不會太搶戲。 */
+const LAST_MOVE_STROKE = '#8a8a8a';
+
 /** 子的圓半徑。選中框比它大一圈,落點的吃子圈則與 POC 的 `.dot.capture` 同寬。 */
 const DISC_R = CELL * 0.43;
 
@@ -134,8 +137,13 @@ function riverLabels() {
  *
  * 選中的子多畫一圈套在外緣 —— POC 用的是 `box-shadow`,而 `.piece` 現在是 SVG
  * 的 `<g>`,`box-shadow` 對它無效(tasks 3.1 的交付事實),只能自繪。
+ *
+ * `lastMoveDestination` 是黑方剛落子的那顆子:邊框加粗成 4(與 `.piece.selectable:
+ * hover .piece-disc` 的懸停回饋同一個寬度),顏色換成中性灰(`LAST_MOVE_STROKE`)
+ * ——子本身的黑色描邊加粗後太重、太搶戲,灰色份量輕但仍看得出「這顆子被標記了」。
+ * 不疊加任何新元素,只改這顆子自己邊框的線寬與顏色。起點不畫任何東西。
  */
-function pieceElement(code, file, rank, { selectable, selected }) {
+function pieceElement(code, file, rank, { selectable, selected, lastMoveDestination }) {
   const isRed = code === code.toUpperCase();
   const color = isRed ? RED : BLACK;
   const group = svgElement('g', {
@@ -151,8 +159,8 @@ function pieceElement(code, file, rank, { selectable, selected }) {
       cy: py(rank),
       r: DISC_R,
       fill: PIECE_BG,
-      stroke: color,
-      'stroke-width': 2,
+      stroke: lastMoveDestination ? LAST_MOVE_STROKE : color,
+      'stroke-width': lastMoveDestination ? 4 : 2,
     }),
   );
   if (selected) {
@@ -224,6 +232,9 @@ function destinationElement(file, rank, capture) {
  *   **由外部(後端)提供,本模組不驗證也不推導**。
  * @param {string|null} [options.selected] 選中的格名,例如 `'d8'`。落點只為這一
  *   格標示。
+ * @param {string|null} [options.lastMove] 黑方剛才那一手的 UCI 著法,例如
+ *   `'h9g7'`。只標終點:那顆子的邊框會加粗、變成灰色,起點不畫任何東西。沒有
+ *   `lastMove` 時為 `null`,沒有子的邊框會改變。
  * @param {(square: string|null) => void} [options.onSelect] 點到可選取的子時
  *   呼叫;點到已選中的那一格時給 `null`(取消選取)。
  * @param {(uci: string) => void} [options.onMove] 點到已標示的落點時呼叫,帶完整
@@ -235,6 +246,7 @@ export function renderBoard(
     board,
     legalMoves = [],
     selected = null,
+    lastMove = null,
     onSelect = () => {},
     onMove = () => {},
   },
@@ -266,6 +278,7 @@ export function renderBoard(
     }),
     ...riverLabels(),
   );
+  const lastMoveDestination = lastMove ? lastMove.slice(2, 4) : null;
   for (let rank = 0; rank < RANKS; rank++) {
     for (let file = 0; file < FILES; file++) {
       const code = board[rank][file];
@@ -276,6 +289,7 @@ export function renderBoard(
       const piece = pieceElement(code, file, rank, {
         selectable,
         selected: isSelected,
+        lastMoveDestination: square === lastMoveDestination,
       });
       if (selectable) {
         piece.addEventListener('click', () =>

@@ -782,6 +782,7 @@ function renderBoardArea(state) {
     board: state.board,
     legalMoves: state.legalMoves,
     selected,
+    lastMove: state.lastBlackMove,
     onSelect: (square) => {
       selected = square;
       render();

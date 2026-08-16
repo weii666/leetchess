@@ -88,6 +88,7 @@ def draw(
     *,
     legal_moves: list[str] | None = None,
     selected: str | None = None,
+    last_move: str | None = None,
 ) -> None:
     """把 `fen` 的局面畫進 `#board`,走的是 `board.js` 對外的唯一入口。
 
@@ -95,7 +96,7 @@ def draw(
     `window.calls` 供 `reported()` 取回。每次繪製都重設記錄。
     """
     page.evaluate(
-        """async ({ fen, legalMoves, selected }) => {
+        """async ({ fen, legalMoves, selected, lastMove }) => {
           const { parseFen } = await import('/fen.js');
           const { renderBoard } = await import('/board.js');
           window.calls = [];
@@ -103,11 +104,12 @@ def draw(
             board: parseFen(fen),
             legalMoves,
             selected,
+            lastMove,
             onSelect: (square) => window.calls.push(['select', square]),
             onMove: (uci) => window.calls.push(['move', uci]),
           });
         }""",
-        {"fen": fen, "legalMoves": legal_moves or [], "selected": selected},
+        {"fen": fen, "legalMoves": legal_moves or [], "selected": selected, "lastMove": last_move},
     )
 
 
@@ -416,6 +418,43 @@ def test_clicking_the_margin_outside_the_grid_reports_nothing(board_page) -> Non
 
     assert reported(board_page) == []
     assert drawn_pieces(board_page) == before
+
+
+# --- 上一手終點標示 -------------------------------------------------------
+
+
+def piece_stroke_widths(page) -> dict[str, float]:
+    """每顆子的邊框寬度:格名 -> `stroke-width`。"""
+    discs = page.evaluate(
+        """() => [...document.querySelectorAll('#board .piece')].map(piece => {
+          const disc = piece.querySelector('circle.piece-disc');
+          return {
+            x: Number(disc.getAttribute('cx')),
+            y: Number(disc.getAttribute('cy')),
+            strokeWidth: Number(disc.getAttribute('stroke-width')),
+          };
+        })"""
+    )
+    return {square_at(disc["x"], disc["y"]): disc["strokeWidth"] for disc in discs}
+
+
+def test_last_move_thickens_only_the_destination_pieces_border(board_page) -> None:
+    """黑方剛落子的那顆子邊框加粗成 4(與選取/懸停紅子同一種回饋);起點不畫任何
+    東西,附近其餘子都維持預設的 2。
+    """
+    draw(board_page, last_move="e9d9")
+
+    widths = piece_stroke_widths(board_page)
+    assert widths["d9"] == 4
+    assert widths["e9"] == 2, "起點的子不加粗"
+    assert set(widths.values()) == {2, 4}, "只有終點那一顆子的邊框變了"
+
+
+def test_no_last_move_leaves_every_piece_at_the_default_border(board_page) -> None:
+    """沒有上一手(預設 `lastMove=None`)時,沒有任何子的邊框被加粗。"""
+    draw(board_page)
+
+    assert set(piece_stroke_widths(board_page).values()) == {2}
 
 
 # --- 依賴方向 -----------------------------------------------------------

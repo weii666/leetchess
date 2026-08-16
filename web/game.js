@@ -174,6 +174,18 @@ export function createGame({
     return moves.length % 2 === 0 ? userSide : OPPONENT[userSide];
   }
 
+  /**
+   * 黑方剛才那一手 —— 同樣自走法序列推導。`moves` 裡偶數 index 恆為紅方手、奇數
+   * index 恆為黑方手(userSide 恆為 'red',見 deriveTurn);黑方應手後陣列長度會
+   * 變回偶數,此時最後一手才是黑方走的。長度是奇數代表紅方剛下但黑方尚未回應
+   * (或紅方這手直接將死黑方、沒有應手),那格是使用者自己剛走的,不該標成黑方。
+   */
+  function deriveLastBlackMove() {
+    return moves.length > 0 && moves.length % 2 === 0
+      ? moves[moves.length - 1]
+      : null;
+  }
+
   function buildSnapshot() {
     const userSide = position ? position.side_to_move ?? 'red' : null;
     const turn = position ? deriveTurn(userSide) : null;
@@ -190,6 +202,11 @@ export function createGame({
       moves: Object.freeze([...moves]),
       /** 由走法序列推導的盤面;尚未載入題目時為 `null`。 */
       board: position ? deriveBoard() : null,
+      /**
+       * 黑方剛落子的起訖格,供 `board.js` 畫標示用;沒有黑方剛走的一手時為
+       * `null`(尚未開局、或紅方這手已將死黑方)。
+       */
+      lastBlackMove: deriveLastBlackMove(),
       userSide,
       turn,
       /**
