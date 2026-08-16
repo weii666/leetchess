@@ -96,12 +96,16 @@ CONTENT_TYPES = {
 #: 表單欄位的順序,即 `check.js` 的 `checkForm()` 回傳清單的順序。
 FORM_FIELDS = ["id", "title", "fen", "difficulty", "tags"]
 
-#: 寫入成功後要清空的欄位(7.2)—— 自 R5 的修訂起就是全部五欄。
-#:
-#: 目標題目檔不在裡面,因為它**不是一個欄位**:它是 `fs.js` 的模組層狀態,由檔案
-#: 選擇框選定。而它留著正是「一次抄完一段書」的關鍵 —— 同一卷的下一題,選定的檔案
-#: 一模一樣。
-PUZZLE_FIELDS = FORM_FIELDS
+#: 寫入成功後要清空的欄位(7.2)—— 題號、局名、FEN 逐題不同,沒有「沿用上一題」
+#: 這回事。
+PUZZLE_FIELDS = ["id", "title", "fen"]
+
+#: 寫入成功後**保留**的欄位(7.2 之外的另一半取捨)——難度與標籤是「一次抄完
+#: 一段書」的一部分:同一卷書連續好幾題往往同難度、同殺法(標籤預設值就是
+#: 「連將殺」,見 `test_web_editor_fields.py`),清空的話維護者每題都要重選一次。
+#: 與目標題目檔同一個理由,只是目標題目檔**不是一個表單欄位**(它是 `fs.js`
+#: 的模組層狀態,由檔案選擇框選定),不放進這份清單。
+STICKY_FIELDS = ["difficulty", "tags"]
 
 WRITE_BUTTON = "#write"
 PICK_BUTTON = "#pick-file"
@@ -1525,11 +1529,13 @@ def test_a_successful_write_names_the_id_and_the_target_file(
 def test_a_successful_write_clears_the_puzzle_fields_and_keeps_the_target(
     editor_page, catalog: Catalog, validator: Validator
 ) -> None:
-    """7.2:清空**題目欄位**,保留**目標檔案路徑**。
+    """7.2:清空**題號、局名、FEN**,保留**難度、標籤、目標檔案路徑**。
 
-    這條分界就是「一次抄完一段書」那件事本身:同一卷的下一題,路徑一個字都不會變。
-    連路徑一起清掉的話,維護者每收一題都要重打一次 `適情雅趣~卷一/27.json`,而那正是
-    最容易打錯、又最沒有必要重打的一欄。
+    路徑不清空的理由是「一次抄完一段書」那件事本身:同一卷的下一題,路徑一個字都
+    不會變,連路徑一起清掉的話維護者每收一題都要重打一次 `適情雅趣~卷一/27.json`。
+    難度與標籤是同一個取捨的另一半——同一卷書連續好幾題往往同難度、同殺法,清空
+    的話一樣要每題重填一次;`renderDifficultyOptions()` 也明講收題頁的難度**恆有值**
+    (三選一沒有空選項),清成空字串會讓選單變成什麼都沒選中,直接違反那個不變式。
     """
     catalog.ids = []
     fill_valid_form(editor_page)
@@ -1538,6 +1544,10 @@ def test_a_successful_write_clears_the_puzzle_fields_and_keeps_the_target(
 
     for name in PUZZLE_FIELDS:
         assert value_of(editor_page, name) == "", f"成功之後 {name} 沒有清空"
+    for name in STICKY_FIELDS:
+        assert value_of(editor_page, name) == VALID_FORM[name], (
+            f"成功之後 {name} 被清掉了,應該保留原本填的值 {VALID_FORM[name]!r}"
+        )
     assert selected_name(editor_page) == TARGET_NAME, "選定的檔案被一起清掉了"
 
 

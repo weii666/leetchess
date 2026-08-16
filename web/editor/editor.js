@@ -1260,18 +1260,31 @@ async function writeCandidate(candidate) {
 }
 
 /**
- * 清空題目欄位,**保留已選定的目標題目檔**(requirement 7.2)。
+ * 清空題目欄位,**保留已選定的目標題目檔、難度與標籤**(requirement 7.2)。
  *
  * 選定的檔案留著是因為連續收題抄的是同一本書的同一卷(requirement 7 的 Objective:
  * 「一次抄完一段書」)。而這件事在本函式裡**看不到**:那個控制代碼是 `fs.js` 的模組
- * 層狀態,本檔碰不到它 —— 五個題目欄位全部清空,選定的檔案自然就留著了。
+ * 層狀態,本檔碰不到它。
+ *
+ * **難度與標籤同一個理由留著,而且不能清成空字串。** `renderDifficultyOptions()` 講
+ * 得很明白:這個 `<select>` 沒有「尚未選擇」那個空選項,收題頁的難度**恆有值**——
+ * 清成 `''` 對不上任何一個 `<option>`,選單會變成視覺上沒有選項被選中,直接違反那份
+ * 不變式。標籤的預設值(`index.html` 的 `#field-tags`,值是「連將殺」)是同一個取捨
+ * (見 `renderDifficultyOptions()` 的說明):同一卷書裡連續好幾題往往同難度、同殺法,
+ * 清空的話維護者每一題都要重填一次,那個「保護」擋到的只有維護者自己。
+ *
+ * 題號、局名、FEN 這三欄仍然清空 —— 它們逐題不同,沒有「沿用上一題」這回事。
  *
  * **以程式指派 `value` 不會發出 `input` 事件**,所以這一次清空不會觸發重畫、也撤
  * 不掉緊接著要設下的成功訊息。呼叫端負責在設好訊息之後重畫一次。
  */
+const STICKY_FIELD_NAMES = new Set(['difficulty', 'tags']);
+
 function clearPuzzleFields() {
-  for (const control of elements.controls.values()) {
-    control.value = '';
+  for (const [name, control] of elements.controls) {
+    if (!STICKY_FIELD_NAMES.has(name)) {
+      control.value = '';
+    }
   }
 }
 
