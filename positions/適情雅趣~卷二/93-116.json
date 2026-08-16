@@ -199,5 +199,12 @@
     "fen": "4k4/3PaR3/4ba3/2NN5/2p1r1b2/9/9/4C4/1nrpA4/c3KAR2 w - - 0 1",
     "difficulty": 2,
     "tags": ["勝負未知"]
+  },
+  {
+    "id": 116,
+    "title": "明皇遊宮",
+    "fen": "2b1ka3/4a4/b6c1/7N1/2P1p4/1CR1C4/2P6/2n1p1nr1/8R/1rB1K4 w - - 0 1",
+    "difficulty": 2,
+    "tags": ["騰挪","連將殺"]
   }
 ]

@@ -1,193 +1,191 @@
 [
   {
     "id": 286,
-    "title": "野馬誘虎",
-    "description": "適情雅趣 第二八六局 野馬誘虎",
-    "fen": "3k3r1/4a4/3a5/6N2/9/9/9/4C4/4p2c1/2BR1K3 w - - 0 1",
-    "difficulty": 3,
-    "tags": ["連將殺"],
-    "max_dtm": 14
-  },
-  {
-    "id": 287,
     "title": "奪馬驅敵",
-    "description": "適情雅趣 第二八七局 奪馬驅敵",
+    "description": "適情雅趣 第二八六局 奪馬驅敵",
     "fen": "2bk1a2r/4an3/cR2b3N/p3CR3/2p1p4/1C7/4Pp2P/2c1B4/3pr4/2B2K3 w - - 0 1",
     "difficulty": 2,
     "tags": ["隔步殺"]
   },
   {
-    "id": 288,
+    "id": 287,
     "title": "斂手削地",
-    "description": "適情雅趣 第二八八局 斂手削地",
+    "description": "適情雅趣 第二八七局 斂手削地",
     "fen": "1nb1kab1r/3Ra4/3cc1n2/C1N1p1pR1/9/3N1p3/4Pp3/4C3B/4r2p1/5K3 w - - 0 1",
     "difficulty": 2,
     "tags": ["隔步殺"]
   },
   {
-    "id": 289,
+    "id": 288,
     "title": "汗馬功勞",
-    "description": "適情雅趣 第二八九局 汗馬功勞",
+    "description": "適情雅趣 第二八八局 汗馬功勞",
     "fen": "2ba1kbRC/3Ra4/9/2pPp4/3Nc4/9/4P4/3pB1N2/r2pA4/c3KAB2 w - - 0 1",
     "difficulty": 2,
     "tags": ["隔步殺"]
   },
   {
-    "id": 290,
+    "id": 289,
     "title": "莘野邀湯",
-    "description": "適情雅趣 第二九〇局 莘野邀湯",
+    "description": "適情雅趣 第二八九局 莘野邀湯",
     "fen": "2bak4/r2PaRR2/1n2N3b/4p1n2/9/9/9/4C4/2p1App2/2B1KAB1c w - - 0 1",
     "difficulty": 2,
     "tags": ["隔步殺"]
   },
   {
-    "id": 291,
+    "id": 290,
     "title": "城門失火",
-    "description": "適情雅趣 第二九一局 城門失火",
+    "description": "適情雅趣 第二九〇局 城門失火",
     "fen": "3ak1Cnr/2P4Rn/3a5/9/9/C8/9/2p1B4/4rp3/3K5 w - - 0 1",
     "difficulty": 2,
     "tags": ["連將殺"],
     "max_dtm": 6
   },
   {
-    "id": 292,
+    "id": 291,
     "title": "鳳起丹山",
-    "description": "適情雅趣 第二九二局 鳳起丹山",
+    "description": "適情雅趣 第二九一局 鳳起丹山",
     "fen": "r1P1k4/5P3/9/1c7/9/2N6/9/9/2p3p2/1p1KCN1rc w - - 0 1",
     "difficulty": 2,
     "tags": ["連將殺"],
     "max_dtm": 7
   },
   {
-    "id": 293,
+    "id": 292,
     "title": "兩虎共鬥",
-    "description": "適情雅趣 第二九三局 兩虎共鬥",
+    "description": "適情雅趣 第二九二局 兩虎共鬥",
     "fen": "1n1ak1br1/1r2aR3/4R3c/9/9/9/9/1C2B2Cp/4A4/3AK3c w - - 0 1",
     "difficulty": 2,
     "tags": ["隔步殺"]
   },
   {
-    "id": 294,
+    "id": 293,
     "title": "勤勞一紀",
-    "description": "適情雅趣 第二九四局 勤勞一紀",
+    "description": "適情雅趣 第二九三局 勤勞一紀",
     "fen": "4ka2R/3na4/2rcb3n/1R3N1NC/2b4P1/9/9/6pr1/7p1/5K3 w - - 0 1",
     "difficulty": 2,
     "tags": ["連將殺"],
     "max_dtm": 8
   },
   {
-    "id": 295,
+    "id": 294,
     "title": "濟弱扶傾",
-    "description": "適情雅趣 第二九五局 濟弱扶傾",
+    "description": "適情雅趣 第二九四局 濟弱扶傾",
     "fen": "5a3/3k1P3/2P1ban2/1N7/2b6/9/P5p2/4B4/3pr4/c1BA1K1R1 w - - 0 1",
     "difficulty": 2,
     "tags": ["隔步殺"]
   },
   {
-    "id": 296,
+    "id": 295,
     "title": "繞江撒網",
-    "description": "適情雅趣 第二九六局 繞江撒網",
+    "description": "適情雅趣 第二九五局 繞江撒網",
     "fen": "6b2/4ak1C1/2N2aR2/4P4/2b6/9/8P/4B1p1r/r3Ap3/3AK3c w - - 0 1",
     "difficulty": 2,
     "tags": ["隔步殺"]
   },
   {
-    "id": 297,
+    "id": 296,
     "title": "鴞立中天",
-    "description": "適情雅趣 第二九七局 鴞立中天",
+    "description": "適情雅趣 第二九六局 鴞立中天",
     "fen": "C1b6/1RCka4/5a3/p1p1p4/2b6/9/P1P1P4/9/c3p2p1/5K1c1 w - - 0 1",
     "difficulty": 2,
     "tags": ["隔步殺"]
   },
   {
-    "id": 298,
+    "id": 297,
     "title": "虎帳談兵",
-    "description": "適情雅趣 第二九八局 虎帳談兵",
+    "description": "適情雅趣 第二九七局 虎帳談兵",
     "fen": "3ak4/2PPa4/b3b4/2p1C1N2/3c5/1rB6/9/3p5/4p2p1/1CB2K3 w - - 0 1",
     "difficulty": 2,
     "tags": ["隔步殺"]
   },
   {
-    "id": 299,
+    "id": 298,
     "title": "參前倚衡",
-    "description": "適情雅趣 第二九九局 參前倚衡",
+    "description": "適情雅趣 第二九八局 參前倚衡",
     "fen": "r2k1a3/3na1R2/3cb1c2/3N1R3/6P2/3C5/9/B4p2B/2p3r2/4K4 w - - 0 1",
     "difficulty": 2,
     "tags": ["隔步殺"]
   },
   {
-    "id": 300,
+    "id": 299,
     "title": "陳橋兵變",
-    "description": "適情雅趣 第三〇〇局 陳橋兵變",
+    "description": "適情雅趣 第二九九局 陳橋兵變",
     "fen": "2ba1k3/2rPa4/R3b4/4cP1C1/2p6/9/3rP4/4B4/3pp4/2B2K1R1 w - - 0 1",
     "difficulty": 2,
     "tags": ["連將殺"],
     "max_dtm": 9
   },
   {
-    "id": 301,
+    "id": 300,
     "title": "手探月窟",
-    "description": "適情雅趣 第三〇一局 手探月窟",
+    "description": "適情雅趣 第三〇〇局 手探月窟",
     "fen": "4kabn1/R3a4/4b1P1r/9/p8/2P5P/9/1R1pBC3/2r3p2/3AKABc1 w - - 0 1",
     "difficulty": 2,
     "tags": ["隔步殺"]
   },
   {
-    "id": 302,
+    "id": 301,
     "title": "蹇駑臥道",
-    "description": "適情雅趣 第三〇二局 蹇駑臥道",
+    "description": "適情雅趣 第三〇一局 蹇駑臥道",
     "fen": "3ak1b2/4a4/4b3n/2R1C1pCp/5R3/2Bn5/9/4BA3/6rcc/3AK4 w - - 0 1",
     "difficulty": 2,
     "tags": ["隔步殺"]
   },
   {
-    "id": 303,
+    "id": 302,
     "title": "板築隱賢",
-    "description": "適情雅趣 第三〇三局 板築隱賢",
+    "description": "適情雅趣 第三〇二局 板築隱賢",
     "fen": "2brk3C/4a4/3ab3n/2p3N2/4C4/2P6/9/B1p1B4/c2pA1p2/c3KA3 w - - 0 1",
     "difficulty": 2,
     "tags": ["連將殺"],
     "max_dtm": 9
   },
   {
-    "id": 304,
+    "id": 303,
     "title": "雌雞化雄",
-    "description": "適情雅趣 第三〇四局 雌雞化雄",
+    "description": "適情雅趣 第三〇三局 雌雞化雄",
     "fen": "2bak1r2/3Pa4/4bc3/N6R1/p8/3R2B2/4P1n2/2C6/2r3p2/c1BAK4 w - - 0 1",
     "difficulty": 3,
     "tags": ["連將殺"],
     "max_dtm": 13
   },
   {
-    "id": 305,
+    "id": 304,
     "title": "眾星拱月",
-    "description": "適情雅趣 第三〇五局 眾星拱月",
+    "description": "適情雅趣 第三〇四局 眾星拱月",
     "fen": "2baR1cNC/R8/5k3/8p/3r1n3/2p6/P1P5P/4C3B/2p1A1r1c/4KA3 w - - 0 1",
     "difficulty": 2,
     "tags": ["隔步殺"]
   },
   {
-    "id": 306,
+    "id": 305,
     "title": "輕兵銳卒",
-    "description": "適情雅趣 第三〇六局 輕兵銳卒",
+    "description": "適情雅趣 第三〇五局 輕兵銳卒",
     "fen": "3ak4/2P1aP3/8N/9/4P4/3p5/8P/4Bp2n/2p1N4/3K1A3 w - - 0 1",
     "difficulty": 2,
     "tags": ["隔步殺"]
   },
   {
-    "id": 307,
+    "id": 306,
     "title": "拔去病根",
-    "description": "適情雅趣 第三〇七局 拔去病根",
+    "description": "適情雅趣 第三〇六局 拔去病根",
     "fen": "2bak3C/4a2P1/6N1b/2C5p/9/9/P7n/2p1B4/4pp3/3K5 w - - 0 1",
     "difficulty": 2,
     "tags": ["隔步殺"]
   },
   {
-    "id": 308,
+    "id": 307,
     "title": "寬一步勝",
-    "description": "適情雅趣 第三〇八局 寬一步勝",
+    "description": "適情雅趣 第三〇七局 寬一步勝",
     "fen": "C2k2b1c/4a4/b2a2N2/2R3p2/2p3n2/9/9/5A2r/4AKn2/9 w - - 0 1",
     "difficulty": 2,
     "tags": ["隔步殺", "馬後炮"]
+  },
+  {
+    "id": 308,
+    "title": "三軍聯位",
+    "fen": "1P1ak1b2/4a4/4b4/6p2/2N4N1/1C2C4/6P2/r2ppp3/9/c3K4 w - - 0 1",
+    "difficulty": 1,
+    "tags": ["隔步殺", "悶宮"]
   }
 ]

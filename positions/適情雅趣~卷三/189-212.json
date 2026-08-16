@@ -202,5 +202,12 @@
     "difficulty": 3,
     "tags": ["連將殺"],
     "max_dtm": 13
+  },
+  {
+    "id": 212,
+    "title": "雁驚雲網",
+    "fen": "1R3a3/3k3C1/3a4b/6pN1/9/9/4n3c/5p2C/4r4/5K3 w - - 0 1",
+    "difficulty": 2,
+    "tags": ["連將殺"]
   }
 ]
