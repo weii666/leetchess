@@ -27,13 +27,21 @@ from test_web_layout import DESKTOP, MOBILE_PORTRAIT
 from test_web_list import list_page, open_list  # noqa: F401 — list_page 以夾具身分被取用
 
 #: 六個子元素的 CSS 選擇器,依 `list.js` 的 `append()` 順序(即 DOM 序)排列。
-#: `list.css` 檔頭「欄序即 DOM 序」的規則要求視覺順序與這份順序一致,
-#: 見 `test_visual_order_matches_dom_order_on_mobile`。
+#: `list.css` 檔頭「欄序即 DOM 序」的規則要求視覺順序與這份順序一致,唯一的
+#: 例外是 `.position-tags`(見 `test_visual_order_matches_dom_order_except_tags`)。
 ROW_CHILD_SELECTORS = [
     ".position-id",
     ".position-title",
     ".position-tags",
     ".position-difficulty",
+    ".position-toggle",
+    ".position-star",
+]
+
+#: 三個真正需要視覺序與 DOM 序一致的可聚焦元素(局名連結、完成勾選、星號
+#: 按鈕)——`.position-tags` 是純文字 `<span>`,不在 Tab 序列裡,不必比對。
+FOCUSABLE_CHILD_SELECTORS = [
+    ".position-title",
     ".position-toggle",
     ".position-star",
 ]
@@ -151,20 +159,22 @@ def test_tags_occupy_their_own_full_width_row(list_page, size) -> None:
     )
 
 
-# --- 視覺順序即 DOM 序 ----------------------------------------------------
+# --- 視覺順序即 DOM 序(標籤除外)------------------------------------------
 
 
 @pytest.mark.parametrize("size", [MOBILE_PORTRAIT[0]], ids=["size0"])
-def test_visual_order_matches_dom_order_on_mobile(list_page, size) -> None:
-    """`list.css` 檔頭「欄序即 DOM 序」的規則在行動裝置斷點下仍然成立。
+def test_visual_order_matches_dom_order_except_tags(list_page, size) -> None:
+    """`list.css` 檔頭「欄序即 DOM 序」的規則在行動裝置斷點下,對三個可聚焦
+    元素(局名連結、完成勾選、星號按鈕)仍然成立。
 
     六欄 grid 換成 flex column-wrap 之後,沒有任何規則指定元素該落在哪一行 ——
     這條斷言把檔頭的文字承諾變成一條會轉紅的斷言:由上而下的視覺順序必須與
-    DOM 序(題號→局名→標籤→難度→完成勾選→星號)一致。
+    DOM 序(局名→完成勾選→星號)一致。`.position-tags` 是唯一的例外(見
+    `test_tags_are_the_last_row_despite_their_dom_position`),不放進這裡比對。
 
     比的是每個元素的**垂直中心**(`top + height/2`),不是 `top` 本身:同一個
     `.position` 仍是 `align-items: center`(基底規則沒被斷點覆寫),同一行內
-    高度不同的元素(例如 28px 的星號按鈕與 13px 的難度文字)會依中心對齊,
+    高度不同的元素(例如 28px 的星號按鈕與 16px 的局名文字)會依中心對齊,
     `top` 因此天生有數 px 落差,即使它們排在同一行也一樣 —— 比 `top` 會把這種
     正常的同行落差誤判成順序顛倒。`_ROW_JITTER_TOLERANCE_PX` 再放寬一點空間
     給同行內的次像素捨入,只有真正跨行的顛倒(落差以十位數 px 計)才會轉紅。
@@ -175,18 +185,39 @@ def test_visual_order_matches_dom_order_on_mobile(list_page, size) -> None:
         box["top"] + box["height"] / 2
         for box in (
             box_of(page, f'#positions > li[data-id="1"] {selector}')
-            for selector in ROW_CHILD_SELECTORS
+            for selector in FOCUSABLE_CHILD_SELECTORS
         )
     ]
 
     for previous, current, label in zip(
-        centers, centers[1:], ROW_CHILD_SELECTORS[1:]
+        centers, centers[1:], FOCUSABLE_CHILD_SELECTORS[1:]
     ):
         assert current >= previous - _ROW_JITTER_TOLERANCE_PX, (
             f"視覺順序(由上到下)偏離了 DOM 序,{label} 的垂直中心"
             f"({current:.1f}px)明顯早於它前一個元素({previous:.1f}px):"
-            f"{list(zip(ROW_CHILD_SELECTORS, centers))}"
+            f"{list(zip(FOCUSABLE_CHILD_SELECTORS, centers))}"
         )
+
+
+@pytest.mark.parametrize("size", [MOBILE_PORTRAIT[0]], ids=["size0"])
+def test_tags_are_the_last_row_despite_their_dom_position(list_page, size) -> None:
+    """標籤在 DOM 序裡排第 3(題號、局名、**標籤**、難度、完成、星號),但視覺上
+    要排在最後一行 —— 這是 `.position-tags { order: 1 }` 唯一要做的事(見
+    `list.css`「合併第一、三行」一節)。
+
+    比的是標籤欄的 `top` 是否晚於其餘五個元素裡最晚出現的那個(星號,DOM 序
+    最後一個、也是第一行裡最右側的元素)的 `bottom` —— 兩者不同行,`top` 不必
+    像同行比較那樣改比中心。
+    """
+    page = open_at(list_page, size)
+
+    tags = box_of(page, '#positions > li[data-id="1"] .position-tags')
+    star = box_of(page, '#positions > li[data-id="1"] .position-star')
+
+    assert tags["top"] >= star["bottom"] - 1, (
+        f"標籤欄(top={tags['top']:.1f})沒有排在星號(bottom={star['bottom']:.1f})"
+        "之後 —— order: 1 沒有生效,標籤欄仍卡在原本的 DOM 位置"
+    )
 
 
 # --- 桌面回歸 --------------------------------------------------------------
