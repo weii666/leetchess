@@ -138,7 +138,7 @@
     "title": "播弄造化",
     "fen": "3a1kbn1/4P4/1c2n1r2/4p4/9/CC5pp/9/9/r1p1p4/3K3RR w - - 0 1",
     "difficulty": 3,
-    "tags": ["連將殺"],
+    "tags": ["借車使炮", "重炮"],
     "max_dtm": 15
   },
   {
@@ -146,7 +146,7 @@
     "title": "遁世不見",
     "fen": "3k1a3/4a4/2n6/NP1C1P3/9/C8/9/3ABcr1B/3pAp1n1/4K3c w - - 0 1",
     "difficulty": 2,
-    "tags": ["連將殺"],
+    "tags": ["引離", "山頂殺"],
     "max_dtm": 7
   },
   {
@@ -163,16 +163,16 @@
     "description": "適情雅趣 第二一局 盡善克終",
     "fen": "3ak4/3RaR3/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 w - - 0 1",
     "difficulty": 3,
-    "tags": ["解殺還殺", "雙馬飲泉"],
+    "tags": ["十步殺", "解殺還殺", "雙馬飲泉"],
     "max_dtm": 16
   },
   {
     "id": 22,
-    "title": "思鄉及第",
-    "description": "適情雅趣 第二二局 思鄉及第",
+    "title": "及第思鄉",
+    "description": "馬破象, 回家勝",
     "fen": "r1N3b2/1c1kaP3/3ab4/8N/9/9/9/4BA3/5p3/C1R1K1Rrc w - - 0 1",
     "difficulty": 3,
-    "tags": ["借炮使馬", "小鬼坐龍廷"]
+    "tags": ["借炮使馬", "小鬼坐龍庭"]
   },
   {
     "id": 23,
@@ -180,6 +180,6 @@
     "description": "適情雅趣 第二三局 滄海遺珠",
     "fen": "2bnk4/9/b8/2PRp1RN1/9/9/9/1C2B1r2/4p1r2/c1pC1K2c w - - 0 1",
     "difficulty": 2,
-    "tags": ["馬後炮"]
+    "tags": ["六步殺", "騰挪", "引離", "馬後炮"]
   }
 ]

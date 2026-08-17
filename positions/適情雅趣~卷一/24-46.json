@@ -21,7 +21,7 @@
     "description": "適情雅趣 第二六局 結草銜環",
     "fen": "2Pak3C/3Pa4/b5C1N/4p1p2/6b2/5N3/4c4/6n2/5p1r1/1r1cK4 w - - 0 1",
     "difficulty": 3,
-    "tags": ["連將殺"],
+    "tags": ["騰挪", "馬後炮"],
     "max_dtm": 11
   },
   {
@@ -30,7 +30,7 @@
     "description": "紅棄俥, 雙炮入士角勝",
     "fen": "2bP1k2r/1nn1P4/3cbc3/9/2p3P1p/7RC/9/4p4/3p1R3/2pCK4 w - - 0 1",
     "difficulty": 2,
-    "tags": ["借車使炮", "悶殺"],
+    "tags": ["借車使炮", "臣壓君"],
     "max_dtm": 9
   },
   {
@@ -38,8 +38,8 @@
     "title": "計羅並照",
     "description": "適情雅趣 第二八局 計羅並照",
     "fen": "3ak1b2/4aP1R1/4b3n/3N3N1/3r5/2R5r/9/4BC1C1/1n2p1p2/c4K3 w - - 0 1",
-    "difficulty": 3,
-    "tags": ["連將殺"],
+    "difficulty": 2,
+    "tags": ["騰挪", "引離", "雙將"],
     "max_dtm": 11
   },
   {
@@ -48,7 +48,7 @@
     "description": "適情雅趣 第二九局 四面楚歌",
     "fen": "2b1R1Nr1/1Nr2k3/9/C2R1P1n1/2bCp1P2/5pc2/9/5n3/2p1p4/3K5 w - - 0 1",
     "difficulty": 3,
-    "tags": ["連將殺"],
+    "tags": ["引離", "堵塞", "騰挪", "山頂殺"],
     "max_dtm": 11
   },
   {
@@ -57,7 +57,7 @@
     "description": "適情雅趣 第三〇局 國庶兵強",
     "fen": "4kaPP1/c2Pa2nR/4b1P1r/6n2/6bN1/9/4C1R2/9/1r1p1p3/4K4 w - - 0 1",
     "difficulty": 2,
-    "tags": ["連將殺"],
+    "tags": ["引離", "堵塞", "小鬼坐龍庭"],
     "max_dtm": 9
   },
   {
@@ -66,7 +66,7 @@
     "description": "適情雅趣 第三一局 兵貴拙速",
     "fen": "4k1br1/r3aPRN1/2Rab1P1n/8p/6P2/8C/9/9/3p1p3/4K2c1 w - - 0 1",
     "difficulty": 2,
-    "tags": ["連將殺"],
+    "tags": ["引離", "山頂殺"],
     "max_dtm": 7
   },
   {
@@ -75,7 +75,7 @@
     "description": "適情雅趣 第三二局 士馬如雲",
     "fen": "2bakab2/n6P1/9/1R7/4N4/1C7/9/3ABA3/1N1p1p3/2p1KCrc1 w - - 0 1",
     "difficulty": 3,
-    "tags": ["連將殺"],
+    "tags": ["借炮使馬", "八角馬"],
     "max_dtm": 17
   },
   {
