@@ -68,6 +68,9 @@ const DOT_RING = 'rgba(46, 134, 222, 0.85)';
 /** 上一手終點標示的邊框色 —— 中性灰,比子本身的黑色輕,加粗了也不會太搶戲。 */
 const LAST_MOVE_STROKE = '#8a8a8a';
 
+/** 上一手起點標示的填色 —— 與 LAST_MOVE_STROKE 同色相,加透明度做成淡點。 */
+const LAST_MOVE_ORIGIN_FILL = 'rgba(138, 138, 138, 0.55)';
+
 /** 子的圓半徑。選中框比它大一圈,落點的吃子圈則與 POC 的 `.dot.capture` 同寬。 */
 const DISC_R = CELL * 0.43;
 
@@ -141,7 +144,8 @@ function riverLabels() {
  * `lastMoveDestination` 是黑方剛落子的那顆子:邊框加粗成 4(與 `.piece.selectable:
  * hover .piece-disc` 的懸停回饋同一個寬度),顏色換成中性灰(`LAST_MOVE_STROKE`)
  * ——子本身的黑色描邊加粗後太重、太搶戲,灰色份量輕但仍看得出「這顆子被標記了」。
- * 不疊加任何新元素,只改這顆子自己邊框的線寬與顏色。起點不畫任何東西。
+ * 不疊加任何新元素,只改這顆子自己邊框的線寬與顏色。起點的標示是另一個獨立元素
+ * (見 `originElement`),不在這個函式裡處理。
  */
 function pieceElement(code, file, rank, { selectable, selected, lastMoveDestination }) {
   const isRed = code === code.toUpperCase();
@@ -216,6 +220,23 @@ function destinationElement(file, rank, capture) {
 }
 
 /**
+ * 上一手起點的標示:灰色圓點,半徑與合法落點提示(非吃子)相同——同一組「格位
+ * 標示」語彙,只靠顏色(灰,不是藍)與能不能點擊來跟落點提示區分,不靠尺寸。
+ * 不掛任何 click 事件,`pointer-events: none` 明講這一點:這格是歷史資訊,不是
+ * 可互動的落點。
+ */
+function originElement(file, rank) {
+  return svgElement('circle', {
+    class: 'last-move-origin',
+    cx: px(file),
+    cy: py(rank),
+    r: 11,
+    fill: LAST_MOVE_ORIGIN_FILL,
+    'pointer-events': 'none',
+  });
+}
+
+/**
  * 把一份盤面畫進 `container`。
  *
  * 每次呼叫都自 `board` 重建整個盤面並整份換掉容器的內容 —— 沒有增量更新,也就
@@ -233,8 +254,8 @@ function destinationElement(file, rank, capture) {
  * @param {string|null} [options.selected] 選中的格名,例如 `'d8'`。落點只為這一
  *   格標示。
  * @param {string|null} [options.lastMove] 黑方剛才那一手的 UCI 著法,例如
- *   `'h9g7'`。只標終點:那顆子的邊框會加粗、變成灰色,起點不畫任何東西。沒有
- *   `lastMove` 時為 `null`,沒有子的邊框會改變。
+ *   `'h9g7'`。終點那顆子的邊框會加粗、變成灰色;起點畫一個灰色圓點(大小與合法
+ *   落點提示相同,但不可點擊)。沒有 `lastMove` 時為 `null`,兩種標示都不會畫。
  * @param {(square: string|null) => void} [options.onSelect] 點到可選取的子時
  *   呼叫;點到已選中的那一格時給 `null`(取消選取)。
  * @param {(uci: string) => void} [options.onMove] 點到已標示的落點時呼叫,帶完整
@@ -279,6 +300,11 @@ export function renderBoard(
     ...riverLabels(),
   );
   const lastMoveDestination = lastMove ? lastMove.slice(2, 4) : null;
+  const lastMoveOrigin = lastMove ? lastMove.slice(0, 2) : null;
+  if (lastMoveOrigin) {
+    const [originFile, originRank] = sq2fr(lastMoveOrigin);
+    svg.append(originElement(originFile, originRank));
+  }
   for (let rank = 0; rank < RANKS; rank++) {
     for (let file = 0; file < FILES; file++) {
       const code = board[rank][file];

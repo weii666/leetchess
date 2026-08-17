@@ -439,8 +439,9 @@ def piece_stroke_widths(page) -> dict[str, float]:
 
 
 def test_last_move_thickens_only_the_destination_pieces_border(board_page) -> None:
-    """黑方剛落子的那顆子邊框加粗成 4(與選取/懸停紅子同一種回饋);起點不畫任何
-    東西,附近其餘子都維持預設的 2。
+    """黑方剛落子的那顆子邊框加粗成 4(與選取/懸停紅子同一種回饋);起點的子不
+    加粗邊框,附近其餘子都維持預設的 2。起點另外會有一個獨立的灰色圓點,見
+    `test_last_move_marks_the_origin_with_a_dot_the_same_size_as_a_destination`。
     """
     draw(board_page, last_move="e9d9")
 
@@ -450,11 +451,40 @@ def test_last_move_thickens_only_the_destination_pieces_border(board_page) -> No
     assert set(widths.values()) == {2, 4}, "只有終點那一顆子的邊框變了"
 
 
+def test_last_move_marks_the_origin_with_a_dot_the_same_size_as_a_destination(
+    board_page,
+) -> None:
+    """起點畫一個灰色圓點,大小與合法落點提示相同(同一組「格位標示」語彙),
+    但顏色是灰的、不是落點提示的藍色,而且點下去不會觸發任何回呼。
+    """
+    draw(board_page, last_move="e9d9")
+
+    origins = board_page.locator("#board .last-move-origin")
+    assert origins.count() == 1
+
+    origin = origins.first
+    assert square_at(
+        float(origin.get_attribute("cx")), float(origin.get_attribute("cy"))
+    ) == "e9"
+    assert float(origin.get_attribute("r")) == 11, "跟合法落點提示同尺寸"
+
+    fill = board_page.evaluate(
+        "(element) => getComputedStyle(element).fill", origin.element_handle()
+    )
+    assert fill != "rgba(46, 134, 222, 0.55)", "灰色,不是落點提示的藍色"
+
+    click_square(board_page, "e9")
+    assert reported(board_page) == [], "起點的點不可互動"
+
+
 def test_no_last_move_leaves_every_piece_at_the_default_border(board_page) -> None:
-    """沒有上一手(預設 `lastMove=None`)時,沒有任何子的邊框被加粗。"""
+    """沒有上一手(預設 `lastMove=None`)時,沒有任何子的邊框被加粗,也不會畫出
+    起點的圓點。
+    """
     draw(board_page)
 
     assert set(piece_stroke_widths(board_page).values()) == {2}
+    assert board_page.locator("#board .last-move-origin").count() == 0
 
 
 # --- 依賴方向 -----------------------------------------------------------
