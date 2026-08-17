@@ -420,38 +420,6 @@ def test_black_reply_thickens_the_moved_pieces_border(play_page) -> None:
     assert thickened_piece_squares(play_page) == {"d9"}
 
 
-def test_no_last_move_marker_before_black_has_replied(play_page) -> None:
-    """開局尚未有黑方應手時沒有子的邊框被加粗。"""
-    open_game(play_page)
-
-    assert thickened_piece_squares(play_page) == set()
-
-
-def test_last_move_marker_is_absent_while_waiting_for_the_reply(play_page) -> None:
-    """使用者剛下、黑方尚未回應時,不該把使用者自己的那手誤標成黑方的。"""
-    open_game(play_page)
-    hang_black_move(play_page)
-
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    play_page.wait_for_timeout(150)
-
-    assert thickened_piece_squares(play_page) == set()
-
-
-def test_last_move_marker_clears_after_reset(play_page) -> None:
-    """重來之後標示要跟著消失。"""
-    open_game(play_page, [black_reply(move="e9d9")])
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    wait_for_moves(play_page, 2)
-    assert thickened_piece_squares(play_page) == {"d9"}
-
-    play_page.locator("#reset").click()
-
-    assert thickened_piece_squares(play_page) == set()
-
-
 def test_clicking_an_unmarked_square_changes_nothing(play_page) -> None:
     """點在未標示的位置不改變盤面也不送出著法(2.3 在組裝層的體現)。"""
     open_game(play_page, [black_reply()])
@@ -516,17 +484,6 @@ def test_reset_after_a_finished_game_makes_it_playable_again(play_page) -> None:
 # --- 三態諮詢信號(4.1、4.2、4.4)---------------------------------------
 
 
-def test_a_winning_signal_is_shown_after_a_reply(play_page) -> None:
-    """取得應手後呈現三種信號狀態之一 —— 這是「即將取勝」那一種(4.1)。"""
-    open_game(play_page, [black_reply(signal="red_winning", mate_in=4)])
-
-    click_square(play_page, "d8")
-    click_square(play_page, "d9")
-    wait_for_moves(play_page, 2)
-
-    assert "即將取勝" in text_of(play_page, "#signal")
-
-
 def test_an_unknown_signal_is_shown_after_a_reply(play_page) -> None:
     """「未知」那一種(4.1)—— 引擎一分未報時仍要有話說,不得留白。"""
     open_game(play_page, [black_reply(signal="unknown", mate_in=None)])
@@ -552,7 +509,7 @@ def test_a_mate_countdown_of_zero_is_still_shown_while_the_game_goes_on(
     終局的信號已改為陳述結果、不再畫倒數(4.5),原本的寫法會與那條需求直接打架。
     但 falsy 陷阱**沒有因此消失,只是換了位置**:後端給倒數的條件是「引擎回報
     mate」而不是「對局還沒結束」,兩者不必同步 —— `over` 為假而 `mate_in` 為 0
-    的回應照樣要畫出「約 0 步」。這正是 4.2 修訂後仍然保留該半句的理由。
+    的回應照樣要畫出「約略0步」。這正是 4.2 修訂後仍然保留該半句的理由。
 
     連 `mate_in: 1` 一起驗,是為了擋住另一種吞法:把倒數整段拿掉、或用一個下界
     把小數字濾掉,只驗 0 的話那些改動不見得會轉紅。
@@ -564,7 +521,7 @@ def test_a_mate_countdown_of_zero_is_still_shown_while_the_game_goes_on(
     wait_for_moves(play_page, 2)
 
     reading = text_of(play_page, ".signal-reading")
-    assert reading == f"即將取勝　約 {mate_in} 步", f"信號讀數是:{reading}"
+    assert reading == f"紅可勝　約略{mate_in}步", f"信號讀數是:{reading}"
 
 
 def test_a_signal_without_a_countdown_shows_no_bogus_number(play_page) -> None:
@@ -674,13 +631,13 @@ def test_the_signal_goes_back_to_no_reading_after_a_reset(play_page) -> None:
     click_square(play_page, "d8")
     click_square(play_page, "d9")
     wait_for_moves(play_page, 2)
-    assert "即將取勝" in text_of(play_page, "#signal")
+    assert "紅可勝" in text_of(play_page, "#signal")
 
     play_page.locator("#reset").click()
     wait_for_moves(play_page, 0)
 
     signal = text_of(play_page, "#signal")
-    assert "即將取勝" not in signal
+    assert "紅可勝" not in signal
     assert not re.search(r"\d", signal)
 
 

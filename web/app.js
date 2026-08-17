@@ -149,8 +149,8 @@ const NEXT_POSITION_TEXT = '下一題';
  * 會把即將取勝說成即將落敗。
  */
 const SIGNAL_LABELS = Object.freeze({
-  winning: '即將取勝',
-  losing: '即將落敗',
+  winning: '紅可勝',
+  losing:  '黑可勝',
   unknown: '勝負未知',
 });
 
@@ -223,13 +223,13 @@ const NO_SIGNAL_YET = SIGNAL_LABELS.unknown;
  * 其約束併入 4.2,因為**讀數本身就已經滿足它**:「即將」是未然語氣、「約」明說了
  * 不精確、「N 步」講明還要走多久。註記等於在一句自明的話後面再補一句註腳。
  *
- * 但語氣是載重的,不是修辭:把「即將取勝　約 15 步」寫成「紅勝 15」就真的變成判決。
+ * 但語氣是載重的,不是修辭:把「紅可勝　約略15步」寫成「紅勝 15」就真的變成判決。
  * 那條約束現在記在 requirement 4.2,並由 `test_the_mate_countdown_is_shown_as_an_approximation`
  * 釘住整句讀數(而非只驗子字串)。
  *
  * **未然語氣的適用範圍是「對局進行中」**(requirement 4.2 修訂後)。對局一旦結束就
- * 沒有東西好預測了,「即將取勝　約 0 步」在那裡是自相矛盾:說「即將」卻已經結束,
- * 說「約 0 步」卻是在倒數一件已經發生的事。終局的說法見 `outcomeReading()`。
+ * 沒有東西好預測了,「紅可勝　約略0步」在那裡是自相矛盾:說「即將」卻已經結束,
+ * 說「約略0步」卻是在倒數一件已經發生的事。終局的說法見 `outcomeReading()`。
  *
  * `#signal` 的 `role="note"`(而非 `role="status"`)**仍然保留且不得更動**:它與已刪的
  * 4.4 是分開的價值 —— `status` 會讓螢幕閱讀器把信號當系統狀態**主動播報**,那在聽覺上
@@ -643,7 +643,7 @@ function turnText(state) {
  * 結束」,兩者不必同步 —— `over` 為假而 `mate_in` 為 0 的回應照樣要正常畫出倒數,
  * 由 `test_a_mate_countdown_of_zero_is_still_shown_while_the_game_goes_on` 釘住。
  *
- * 倒數寫成「約 N 步」而非確數:後端在 250k 節點下可能高估 1 步,寫成確數等於把一個
+ * 倒數寫成「約略N步」而非確數:後端在 250k 節點下可能高估 1 步,寫成確數等於把一個
  * 刻意接受的誤差說成精確值。
  *
  * 倒數與讀數之間以**全形空格**分隔而非括號(形態取自 `poc/index.html` 的
@@ -659,13 +659,13 @@ function signalReading(entry, userSide) {
       : winner === userSide
         ? SIGNAL_LABELS.winning
         : SIGNAL_LABELS.losing;
-  return entry.mateIn != null ? `${label}　約 ${entry.mateIn} 步` : label;
+  return entry.mateIn != null ? `${label}　約略${entry.mateIn}步` : label;
 }
 
 /**
  * **對局結束後**的讀數(requirements 4.2)—— 陳述結果,不再預測。
  *
- * 「即將取勝　約 0 步」在終局是兩個錯誤:對局已經結束了還說「即將」,而「約 0 步」
+ * 「紅可勝　約略0步」在終局是兩個錯誤:對局已經結束了還說「即將」,而「約略0步」
  * 是在倒數一件已經發生的事。
  *
  * ## 兩份輸入各管一件事,誰都不越界
@@ -681,7 +681,7 @@ function signalReading(entry, userSide) {
  * **倒數在這條路徑上一律不畫**,而且判斷的依據是 `state.over` 而不是 `mateIn` 是否
  * 為 0 —— 用倒數的值決定要不要畫倒數,正是 4.2 那個 falsy 陷阱換個地方重來。
  * 因此 `over` 為真而 `mate_in` 不是 0(例如引擎報 mate 3 的那一手正好終局)時,
- * 這裡照樣只說「已將死黑方」,不會冒出一個「約 3 步」。
+ * 這裡照樣只說「已將死黑方」,不會冒出一個「約略3步」。
  */
 function outcomeReading(state, entry) {
   const mateReported = entry != null && SIGNAL_WINNERS[entry.signal] != null;
