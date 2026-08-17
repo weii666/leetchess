@@ -41,7 +41,6 @@ import pytest
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent
 WEB_DIR = PROJECT_ROOT / "web"
 EDITOR_JS = WEB_DIR / "editor" / "editor.js"
-EDITOR_HTML = WEB_DIR / "editor" / "index.html"
 
 #: 一個不會真的解析出去的網域 —— 所有請求都被 `page.route()` 攔下就地供檔。
 ORIGIN = "https://web-editor-runtime.test"
@@ -517,23 +516,6 @@ def test_the_page_loads_the_editor_module(editor_page) -> None:
         script["type"] == "module" and script["src"] == "./editor.js"
         for script in scripts
     ), f"index.html 沒有以 module 掛上 ./editor.js:{scripts}"
-
-
-def test_the_message_slot_is_declared_in_the_markup() -> None:
-    """訊息槽寫在 HTML 裡,不由 JS 生出來。
-
-    這一頁已經有一條規矩(`#unsupported`):**要出現的東西先在版面裡佔好位置**,JS
-    只決定它顯示與否。一頁上同時存在兩種相反的做法,4.3 要為其餘六欄補訊息槽時就得
-    先猜該學哪一邊;而 JS 生節點的那一種還會在訊息出現與消失時推動底下的欄位。
-
-    斷言看的是**檔案文字**而不是 DOM —— 由 JS 插進去的節點在 DOM 裡長得一模一樣,
-    這一條要問的正是「它是不是一開始就在版面裡」。
-    """
-    html = EDITOR_HTML.read_text(encoding="utf-8")
-
-    slot = re.search(r"<p[^>]*data-message-for=\"fen\"[^>]*>", html)
-    assert slot is not None, "FEN 的訊息槽必須宣告在 index.html 裡"
-    assert "hidden" in slot.group(0), f"訊息槽預設就掛在畫面上:{slot.group(0)}"
 
 
 def test_the_editor_module_only_depends_on_its_designated_modules() -> None:

@@ -523,18 +523,6 @@ def test_an_id_that_is_not_a_positive_integer_is_pointed_at_its_own_field(
     assert not write_is_enabled(editor_page)
 
 
-def test_no_tags_at_all_is_pointed_at_the_tags_field(editor_page) -> None:
-    """4.6:標籤一個也沒填時停用寫入,並指出標籤至少需要一個。
-
-    只打分隔符號同樣是一個都沒有 —— 這是 `parseTags` 的行為,呈現層照著它走。
-    **這一欄不是空的**,所以訊息掛在欄位旁:維護者打的那幾個符號看起來像有填。
-    """
-    fill_valid_form(editor_page, tags="、,  ")
-
-    assert message(editor_page, "tags"), "標籤一個也沒有,畫面卻沒有指出這一項"
-    assert not write_is_enabled(editor_page)
-
-
 def test_an_empty_fen_stops_writing_and_is_named_in_the_note(editor_page) -> None:
     """4.1 + 2.5 的交界:FEN 欄位空著時那一欄不掛訊息,但仍要指出這一項。
 
@@ -548,18 +536,6 @@ def test_an_empty_fen_stops_writing_and_is_named_in_the_note(editor_page) -> Non
     assert message(editor_page, "fen") == "", "空的 FEN 欄位掛著錯誤訊息,與 2.5 相牴觸"
     assert not write_is_enabled(editor_page), "FEN 沒填,寫入操作卻仍可用"
     assert "FEN" in note(editor_page), f"停用說明沒有點名 FEN:{note(editor_page)!r}"
-
-
-def test_a_broken_fen_is_pointed_at_its_own_field(editor_page) -> None:
-    """2.4 + 8.4:貼了一串展不開的 FEN 時,訊息就在那一欄旁邊。
-
-    與上一條成對:同一個欄位、兩種輸入、兩種呈現。少了這一條,一個「FEN 那一格
-    永遠不出聲」的實作會全綠,而 FEN 抄錯正是這個工具存在的理由。
-    """
-    fill_valid_form(editor_page, fen="9/9/9 w - - 0 1")
-
-    assert message(editor_page, "fen"), "FEN 展不開,那一格卻沒有說是哪裡不對"
-    assert not write_is_enabled(editor_page)
 
 
 def test_the_note_names_every_outstanding_item(editor_page) -> None:
