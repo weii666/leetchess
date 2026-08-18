@@ -87,7 +87,7 @@
     "title": "鴞立中天",
     "description": "適情雅趣 第二九六局 鴞立中天",
     "fen": "C1b6/1RCka4/5a3/p1p1p4/2b6/9/P1P1P4/9/c3p2p1/5K1c1 w - - 0 1",
-    "difficulty": 2,
+    "difficulty": 3,
     "tags": ["隔步殺"]
   },
   {
@@ -145,7 +145,7 @@
     "title": "雌雞化雄",
     "description": "適情雅趣 第三〇三局 雌雞化雄",
     "fen": "2bak1r2/3Pa4/4bc3/N6R1/p8/3R2B2/4P1n2/2C6/2r3p2/c1BAK4 w - - 0 1",
-    "difficulty": 3,
+    "difficulty": 2,
     "tags": ["連將殺"],
     "max_dtm": 13
   },
@@ -185,7 +185,7 @@
     "id": 308,
     "title": "三軍聯位",
     "fen": "1P1ak1b2/4a4/4b4/6p2/2N4N1/1C2C4/6P2/r2ppp3/9/c3K4 w - - 0 1",
-    "difficulty": 1,
+    "difficulty": 2,
     "tags": ["隔步殺", "悶宮"]
   }
 ]
