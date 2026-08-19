@@ -4,7 +4,7 @@
     "title": "奪馬驅敵",
     "description": "適情雅趣 第二八六局 奪馬驅敵",
     "fen": "2bk1a2r/4an3/cR2b3N/p3CR3/2p1p4/1C7/4Pp2P/2c1B4/3pr4/2B2K3 w - - 0 1",
-    "difficulty": 2,
+    "difficulty": 3,
     "tags": ["隔步殺"]
   },
   {
@@ -28,8 +28,9 @@
     "title": "莘野邀湯",
     "description": "適情雅趣 第二八九局 莘野邀湯",
     "fen": "2bak4/r2PaRR2/1n2N3b/4p1n2/9/9/9/4C4/2p1App2/2B1KAB1c w - - 0 1",
-    "difficulty": 2,
-    "tags": ["隔步殺"]
+    "difficulty": 3,
+    "tags": ["隔步殺"],
+    "max_dtm": 11
   },
   {
     "id": 290,
@@ -45,7 +46,7 @@
     "title": "鳳起丹山",
     "description": "適情雅趣 第二九一局 鳳起丹山",
     "fen": "r1P1k4/5P3/9/1c7/9/2N6/9/9/2p3p2/1p1KCN1rc w - - 0 1",
-    "difficulty": 2,
+    "difficulty": 3,
     "tags": ["連將殺"],
     "max_dtm": 7
   },
@@ -96,15 +97,17 @@
     "description": "適情雅趣 第二九七局 虎帳談兵",
     "fen": "3ak4/2PPa4/b3b4/2p1C1N2/3c5/1rB6/9/3p5/4p2p1/1CB2K3 w - - 0 1",
     "difficulty": 2,
-    "tags": ["隔步殺"]
+    "tags": ["隔步殺"],
+    "max_dtm": 10
   },
   {
     "id": 298,
     "title": "參前倚衡",
     "description": "適情雅趣 第二九八局 參前倚衡",
     "fen": "r2k1a3/3na1R2/3cb1c2/3N1R3/6P2/3C5/9/B4p2B/2p3r2/4K4 w - - 0 1",
-    "difficulty": 2,
-    "tags": ["隔步殺"]
+    "difficulty": 3,
+    "tags": ["隔步殺"],
+    "max_dtm": 12
   },
   {
     "id": 299,
@@ -136,7 +139,7 @@
     "title": "板築隱賢",
     "description": "適情雅趣 第三〇二局 板築隱賢",
     "fen": "2brk3C/4a4/3ab3n/2p3N2/4C4/2P6/9/B1p1B4/c2pA1p2/c3KA3 w - - 0 1",
-    "difficulty": 2,
+    "difficulty": 3,
     "tags": ["連將殺"],
     "max_dtm": 9
   },
@@ -170,8 +173,9 @@
     "title": "拔去病根",
     "description": "適情雅趣 第三〇六局 拔去病根",
     "fen": "2bak3C/4a2P1/6N1b/2C5p/9/9/P7n/2p1B4/4pp3/3K5 w - - 0 1",
-    "difficulty": 2,
-    "tags": ["隔步殺"]
+    "difficulty": 3,
+    "tags": ["隔步殺"],
+    "max_dtm": 20
   },
   {
     "id": 307,

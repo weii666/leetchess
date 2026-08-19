@@ -187,7 +187,7 @@
   - _Requirements: 3.10_
   - _Boundary: structure.md, service/positions.py, service/types.py, service/main.py_
 
-- [ ] 7.2 (P) fs.js:檔案控制代碼取代目錄控制代碼
+- [x] 7.2 (P) fs.js:檔案控制代碼取代目錄控制代碼
   - 以 `pickCorpusFile()`、`selectedFile()`、`readText(handle)`、`writeText(handle, text)` 取代 `acquireCorpusDirectory()`、`readTextAt()`、`writeTextAt()`
   - `pickCorpusFile()` **每次呼叫都重新詢問** —— 它同時是 5.11 的「更換目標題目檔」;`selectedFile()` **不開任何對話框**,任何時候都呼叫得起
   - 選檔與要權限仍須落在使用者手勢的呼叫堆疊內,`pickCorpusFile()` 因此**刻意不是 `async`**(沿用既有理由)
@@ -197,7 +197,7 @@
   - _Requirements: 5.1, 5.11, 6.1, 6.2, 6.3_
   - _Boundary: web/editor/fs.js, tests/test_web_editor_fs.py_
 
-- [ ] 7.3 (P) check.js:刪除路徑檢查與描述建議值
+- [x] 7.3 (P) check.js:刪除路徑檢查與描述建議值
   - 刪除 `checkTargetPath()` 與 `suggestDescription()`,連同 `tests/test_web_editor_pure.py` 的對應測試
   - `checkForm()` 的輸入與輸出各少兩欄:`FormValues` 與 `CheckIssue.field` 皆收斂為題號、局名、難度、標籤、FEN 五者
   - **不留無呼叫端的函式**:它們的對象(手打的路徑字串、描述)已不存在,而且不會回來 —— 這與 `corpus-file.js` 的 `null` 分支處置刻意相反,差別在**有沒有可能回來**
@@ -205,7 +205,7 @@
   - _Requirements: 4.1, 4.2, 4.6, 8.4_
   - _Boundary: web/editor/check.js, tests/test_web_editor_pure.py_
 
-- [ ] 7.4 (P) corpus-file.js:序列化略過不存在的欄位
+- [x] 7.4 (P) corpus-file.js:序列化略過不存在的欄位
   - `serializePosition()` 只寫出 entry 上**實際存在**的欄位;`SCHEMA_FIELDS` **保留六個名字不動** —— 它表達的是欄位次序
   - **不可直接把 `description` 自 `SCHEMA_FIELDS` 刪掉**:它仍是題目 schema 的合法選填欄位(3.10),刪掉會讓有描述的既有題目重新序列化時漏寫這一欄
   - `appendPosition()` 的 `null` 分支與其測試**保留** —— 5.4 是移出本輪範圍而非被否決
@@ -213,7 +213,7 @@
   - _Requirements: 3.9, 5.9_
   - _Boundary: web/editor/corpus-file.js, tests/test_web_editor_pure.py_
 
-- [ ] 7.5 收題頁版面:選檔按鈕、FEN 上移、描述與路徑欄移除
+- [x] 7.5 收題頁版面:選檔按鈕、FEN 上移、描述與路徑欄移除
   - 移除描述欄位與目標檔案路徑欄位及其訊息槽;新增「選擇題目檔」操作與**目前選定檔名的顯示位置**
   - FEN 的輸入排在題號與局名之後、其餘欄位之前(8.5);全部欄位在桌面視窗尺寸下不需捲動即可見(8.6)
   - 訊息槽一律**宣告在 `index.html`**、由 JS 顯隱,沿用既有慣例
@@ -222,7 +222,7 @@
   - _Boundary: web/editor/index.html, web/editor/editor.css, tests/test_web_editor_layout.py_
   - _Depends: 7.3_
 
-- [ ] 7.6 editor.js:接上選檔,寫入序列改用檔案控制代碼
+- [x] 7.6 editor.js:接上選檔,寫入序列改用檔案控制代碼
   - 選檔按鈕呼叫 `pickCorpusFile()` 並更新檔名顯示;**選檔不進寫入序列** —— 它由自己的按鈕觸發,因此天然落在使用者手勢的呼叫堆疊內
   - 寫入序列改為「取索引 → 撞號 → 送驗證 → 重讀 → 追加 → 寫回 → 記下題號並清空欄位」,以 `selectedFile()` 取得控制代碼
   - 尚未選定目標題目檔時不執行寫入並說明(5.10);寫入成功後清空題目欄位而**選定的檔案保留**(7.2)
