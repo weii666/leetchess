@@ -4,7 +4,7 @@
     "title": "氣吞關右",
     "fen": "2baka3/3P3N1/bN7/7nc/9/4C1P2/P5n1P/B3R3B/4Apr2/2RAK3c w - - 0 1",
     "difficulty": 2,
-    "tags": ["引離", "騰挪"],
+    "tags": ["引離", "馬後炮"],
     "max_dtm": 7
   },
   {
@@ -107,7 +107,7 @@
     "title": "獨鹿鳴澤",
     "fen": "C3k4/4a1r2/5a3/1N7/1Cp6/1R7/9/3p5/4p3r/3K5 w - - 0 1",
     "difficulty": 2,
-    "tags": ["騰挪", "夾車炮"],
+    "tags": ["騰挪", "二路夾車炮"],
     "max_dtm": 8
   },
   {
@@ -163,7 +163,7 @@
     "description": "適情雅趣 第二一局 盡善克終",
     "fen": "3ak4/3RaR3/4b3N/6N2/2b6/9/3pP4/B3C1n1B/2rp2r2/4K4 w - - 0 1",
     "difficulty": 3,
-    "tags": ["十步殺", "解殺還殺", "雙馬飲泉"],
+    "tags": ["引離", "解殺還殺", "雙馬飲泉"],
     "max_dtm": 16
   },
   {
@@ -180,6 +180,6 @@
     "description": "適情雅趣 第二三局 滄海遺珠",
     "fen": "2bnk4/9/b8/2PRp1RN1/9/9/9/1C2B1r2/4p1r2/c1pC1K2c w - - 0 1",
     "difficulty": 2,
-    "tags": ["六步殺", "騰挪", "引離", "馬後炮"]
+    "tags": ["騰挪", "引離", "馬後炮"]
   }
 ]

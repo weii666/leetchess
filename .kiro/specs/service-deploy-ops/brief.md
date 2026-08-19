@@ -14,6 +14,16 @@
 - **尚未有**:任何託管設定、部署流程、監控、rate limit、線上的授權標示。
 - `engine/README.md` 的「尚待處理」清單是以 WASM 散布為前提寫的,架構改為後端後該清單需要重寫。
 
+## Known Gaps at Launch(2026-08-19 決定延後)
+
+以下三項屬於 Desired Outcome,經確認**重要但本輪刻意不實作**,風險已知並接受,先讓服務上線,待流量或濫用信號出現時優先補上:
+
+- **rate limit / 濫用防護** —— `engine-service` Requirement 7 已列為 Backlog。目前只有 Cloud Run 的 `--max-instances`(防整體失控擴張、控成本上限),**不防**單一使用者或 IP 把僅有的幾個引擎進程佔滿。
+- **`ENGINE_VERSION` 上線校驗** —— `engine-service` Requirement 8 已列為 Backlog。`engine/fetch.sh` 只在**建置期**驗 sha256,服務啟動時不重新校驗版本一致性。
+- **頁面引擎/NNUE 授權標示** —— 公開對局頁面(`web/`,不含維護者專用的 `web/editor/`)目前沒有任何 Pikafish、NNUE、GPL 字樣,免費非商業定位的聲明尚未呈現在頁面上。
+
+不要因為「服務已上線」而誤以為這三項已處理 —— 它們仍是 Desired Outcome 裡明講的必要件,只是本輪順序上排到之後。
+
 ## Desired Outcome
 
 - 服務跑在可控的託管環境上,引擎與 nnue 版本與 `ENGINE_VERSION` 一致且上線時校驗
